@@ -1,0 +1,8 @@
+{
+  "name": "Remix WORKCRAFT Local - Mobile SaaS Portal",
+  "description": "Enterprise-grade managed WhatsApp automation and revenue control portal for salons and parlors in South Asia and MENA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

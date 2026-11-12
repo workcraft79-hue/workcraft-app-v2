@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="emeraldBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1913" />
+      <stop offset="55%" stop-color="#102019" />
+      <stop offset="100%" stop-color="#173025" />
+    </linearGradient>
+    <linearGradient id="goldBullionLight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFF0A8" />
+      <stop offset="35%" stop-color="#E6B951" />
+      <stop offset="75%" stop-color="#C88D22" />
+      <stop offset="100%" stop-color="#8A5A0A" />
+    </linearGradient>
+    <linearGradient id="goldBullionSide" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F7D574" />
+      <stop offset="50%" stop-color="#D9A441" />
+      <stop offset="100%" stop-color="#9A6812" />
+    </linearGradient>
+    <linearGradient id="borderGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE38E" />
+      <stop offset="50%" stop-color="#D9A441" />
+      <stop offset="100%" stop-color="#8F5E10" />
+    </linearGradient>
+  </defs>
+
+  <!-- Deep emerald rounded home-screen badge -->
+  <rect width="512" height="512" rx="108" fill="url(#emeraldBg)" />
+
+  <!-- Subtle outer gold bullion trim -->
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="url(#borderGold)" stroke-width="10" />
+
+  <!-- Bold 3D Gold Bullion 'W' Emblem (Sized large for crisp 60px phone visibility) -->
+  <g transform="translate(256, 204)">
+    <!-- Bullion Gold W Bar Structure -->
+    <polygon
+      points="-168,-112 -114,-112 -74,48 -30,-78 30,-78 74,48 114,-112 168,-112 104,116 48,116 0,-18 -48,116 -104,116"
+      fill="url(#goldBullionLight)"
+      stroke="#FFF3BC"
+      stroke-width="4"
+      stroke-linejoin="round"
+    />
+    <!-- Lower facet bevel for rich metallic bullion depth -->
+    <polygon
+      points="-104,116 -48,116 0,-18 48,116 104,116 86,86 42,86 0,-42 -42,86 -86,86"
+      fill="url(#goldBullionSide)"
+      opacity="0.72"
+    />
+  </g>
+
+  <!-- Crisp High-Contrast Cyan-Blue WORKCRAFT Wordmark -->
+  <text
+    x="256"
+    y="428"
+    font-family="Arial Black, 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif"
+    font-weight="900"
+    font-size="60"
+    letter-spacing="4"
+    fill="#00FFFF"
+    text-anchor="middle"
+  >WORKCRAFT</text>
+</svg>
