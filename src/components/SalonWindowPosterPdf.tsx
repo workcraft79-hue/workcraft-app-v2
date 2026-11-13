@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Download, FileText, QrCode, Printer, CheckCircle2, Sparkles } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
-import { LOGO_URL, WATERMARK_URL } from '../data/portalData';
+import { LOGO_URL } from '../data/portalData';
 
 export type PosterLang = 'en' | 'ur' | 'ar';
 export type PosterFormat = 'WINDOW_A4' | 'CABIN_PAMPHLET';
@@ -237,38 +237,31 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
           color: { dark: '#0E1E17', light: '#FFFFFF' },
         }));
 
-      const [logoImg, watermarkImg, qrImg] = await Promise.all([
+      const [logoImg, qrImg] = await Promise.all([
         loadExternalSafe(LOGO_URL),
-        loadExternalSafe(WATERMARK_URL),
         loadDataUrlImage(resolvedQrUrl),
       ]);
 
-      // Top-Left Bold WorkCraft Logo + WorkCraft Wordmark Underneath (No Box, No Official Booking Text)
+      // Top-Left Enlarged Bold WorkCraft Logo Only (Separate watermark removed)
+      ctx.direction = 'ltr';
+      ctx.textAlign = 'left';
       if (logoImg) {
-        ctx.drawImage(logoImg, 88, 84, 114, 114);
+        ctx.drawImage(logoImg, 84, 72, 168, 168);
       } else {
         ctx.fillStyle = '#D9A441';
         ctx.beginPath();
-        ctx.arc(145, 141, 46, 0, Math.PI * 2);
+        ctx.arc(168, 156, 68, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#12241C';
-        ctx.font = '900 38px sans-serif';
+        ctx.font = '900 54px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('WC', 145, 154);
-      }
-
-      if (watermarkImg) {
-        ctx.drawImage(watermarkImg, 78, 202, 142, 27);
-      } else {
+        ctx.fillText('WC', 168, 174);
         ctx.textAlign = 'left';
-        ctx.fillStyle = '#00FFFF';
-        ctx.font = '900 22px sans-serif';
-        ctx.fillText('WorkCraft', 88, 224);
       }
 
-      // Top-Right QR Code Card + Salon Owner WhatsApp Number Directly Under QR Code
+      // Top-Right QR Code Card + Salon Owner WhatsApp Number (Always Top-Right & LTR)
       const qrBoxX = canvas.width - 390;
-      const qrBoxY = 84;
+      const qrBoxY = 80;
       const qrBoxW = 306;
       const qrBoxH = 365;
       drawRoundedRect(ctx, qrBoxX, qrBoxY, qrBoxW, qrBoxH, 24);
@@ -287,116 +280,110 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
         ctx.drawImage(qrImg, qrBoxX + 43, qrBoxY + 34, 220, 220);
       }
 
-      // Scan prompt & WhatsApp number directly under QR code
+      // Scan prompt & WhatsApp number directly under QR code (LTR phone number)
       ctx.textAlign = 'center';
+      ctx.direction = copy.isRtl ? 'rtl' : 'ltr';
       ctx.fillStyle = '#00FFFF';
       ctx.font = 'bold 15px sans-serif';
       ctx.fillText(copy.scanLabel, qrBoxX + qrBoxW / 2, qrBoxY + 296);
 
+      ctx.direction = 'ltr';
       ctx.fillStyle = '#D9A441';
       ctx.font = 'bold 26px monospace';
       ctx.fillText(whatsappNumber, qrBoxX + qrBoxW / 2, qrBoxY + 334);
 
-      // 3. MIDDLE: PROMINENT SALON / LADIES BEAUTY PARLOR NAME
-      const salonLeftX = 88;
+      // 3. LEFT COLUMN BELOW LOGO: CATEGORY BADGE, SALON NAME & ADDRESS (ALWAYS LEFT-ALIGNED)
+      const salonLeftX = 84;
       const salonMaxW = qrBoxX - salonLeftX - 40;
 
-      // Category pill badge on left below logo
-      drawRoundedRect(ctx, salonLeftX, 246, Math.min(salonMaxW, 560), 42, 12);
-      ctx.fillStyle = isLadies ? 'rgba(244, 114, 182, 0.16)' : 'rgba(16, 185, 129, 0.16)';
-      ctx.fill();
-      ctx.strokeStyle = isLadies ? 'rgba(244, 114, 182, 0.5)' : 'rgba(16, 185, 129, 0.5)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
+      ctx.direction = 'ltr';
       ctx.textAlign = 'left';
       ctx.fillStyle = isLadies ? '#F9A8D4' : '#6EE7B7';
-      ctx.font = 'bold 19px sans-serif';
-      ctx.fillText(isLadies ? copy.badgeLadies : copy.badgeMens, salonLeftX + 18, 274);
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText(isLadies ? copy.badgeLadies : copy.badgeMens, salonLeftX, 274);
 
       // Big Salon Name
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = '900 58px sans-serif';
+      ctx.font = '900 56px sans-serif';
       const nameLines = wrapCanvasText(ctx, salonName, salonMaxW);
-      let nameY = 358;
+      let nameY = 342;
       for (const line of nameLines.slice(0, 3)) {
         ctx.fillText(line, salonLeftX, nameY);
-        nameY += 68;
+        nameY += 66;
       }
 
       if (location) {
-        ctx.fillStyle = 'rgba(245, 242, 233, 0.7)';
+        ctx.fillStyle = 'rgba(245, 242, 233, 0.78)';
         ctx.font = '500 24px sans-serif';
-        ctx.fillText(location, salonLeftX, nameY + 6);
+        const locLines = wrapCanvasText(ctx, location, salonMaxW);
+        let locY = nameY + 4;
+        for (const locLine of locLines.slice(0, 2)) {
+          ctx.fillText(locLine, salonLeftX, locY);
+          locY += 32;
+        }
       }
 
-      // 4. CENTER VISUAL HIGHLIGHT (WHATSAPP SERVICE STEPS STRIP)
-      const stepsY = isA4 ? 540 : 495;
-      drawRoundedRect(ctx, 84, stepsY, canvas.width - 168, isA4 ? 260 : 190, 24);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+      // 4. CENTER VISUAL HIGHLIGHT (CLEAN STEPS WITHOUT INNER BOXES)
+      const stepsY = isA4 ? 545 : 495;
+      ctx.strokeStyle = 'rgba(217, 164, 65, 0.35)';
       ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(84, stepsY);
+      ctx.lineTo(canvas.width - 84, stepsY);
       ctx.stroke();
 
       ctx.textAlign = 'center';
+      ctx.direction = copy.isRtl ? 'rtl' : 'ltr';
       ctx.fillStyle = '#D9A441';
       ctx.font = 'bold 30px sans-serif';
       ctx.fillText(copy.headline, canvas.width / 2, stepsY + 56);
 
-      const stepColW = (canvas.width - 240) / 3;
+      const stepColW = (canvas.width - 200) / 3;
       copy.steps.forEach((stepText, idx) => {
-        const sx = 120 + idx * stepColW + stepColW / 2;
-        const sy = stepsY + (isA4 ? 110 : 88);
-        drawRoundedRect(ctx, 110 + idx * (stepColW + 10), sy, stepColW - 10, isA4 ? 110 : 80, 16);
-        ctx.fillStyle = 'rgba(0, 255, 255, 0.06)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(0, 255, 255, 0.25)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
+        const sx = 100 + idx * stepColW + stepColW / 2;
+        const sy = stepsY + (isA4 ? 124 : 106);
         ctx.fillStyle = '#F5F2E9';
         ctx.font = 'bold 21px sans-serif';
-        const sLines = wrapCanvasText(ctx, stepText, stepColW - 36);
+        const sLines = wrapCanvasText(ctx, stepText, stepColW - 28);
         sLines.slice(0, 2).forEach((sl, li) => {
-          ctx.fillText(sl, sx + idx * 10 - 10, sy + (isA4 ? 46 : 36) + li * 28);
+          ctx.fillText(sl, sx, sy + li * 30);
         });
       });
 
-      // 5. BOTTOM CUSTOMER ANNOUNCEMENT PHRASE BLOCK (ALWAYS AT BOTTOM OF PDF)
-      const bottomBoxH = isA4 ? 760 : 340;
-      const bottomBoxY = canvas.height - bottomBoxH - 76;
-
-      drawRoundedRect(ctx, 84, bottomBoxY, canvas.width - 168, bottomBoxH, 28);
-      ctx.fillStyle = 'rgba(217, 164, 65, 0.09)';
-      ctx.fill();
-      ctx.strokeStyle = '#D9A441';
-      ctx.lineWidth = 3;
+      // 5. BOTTOM CUSTOMER ANNOUNCEMENT PHRASE (CLEAN TYPOGRAPHY, NO BORDERED BOX)
+      const bottomSectionY = isA4 ? 850 : 720;
+      ctx.strokeStyle = 'rgba(217, 164, 65, 0.35)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(84, bottomSectionY);
+      ctx.lineTo(canvas.width - 84, bottomSectionY);
       ctx.stroke();
 
       ctx.textAlign = 'center';
       ctx.direction = copy.isRtl ? 'rtl' : 'ltr';
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = isA4 ? '600 34px sans-serif' : '600 26px sans-serif';
-      const phraseLines = wrapCanvasText(ctx, copy.phrase, canvas.width - 260);
-      const lineSpacing = isA4 ? 54 : 38;
+      ctx.font = isA4 ? '600 35px sans-serif' : '600 26px sans-serif';
+      const phraseLines = wrapCanvasText(ctx, copy.phrase, canvas.width - 220);
+      const lineSpacing = isA4 ? 56 : 40;
+      const availableBottomH = canvas.height - 150 - bottomSectionY;
       let phraseStartY =
-        bottomBoxY +
-        Math.max(85, (bottomBoxH - phraseLines.length * lineSpacing) / 2);
+        bottomSectionY +
+        Math.max(84, (availableBottomH - phraseLines.length * lineSpacing) / 2);
 
       for (const line of phraseLines) {
         ctx.fillText(line, canvas.width / 2, phraseStartY);
         phraseStartY += lineSpacing;
       }
 
-      // Bottom Footer Brand & Number Strip
+      // Bottom Footer Brand & Number Strip (Always LTR)
       ctx.direction = 'ltr';
+      ctx.textAlign = 'center';
       ctx.fillStyle = '#00FFFF';
       ctx.font = 'bold 22px monospace';
       ctx.fillText(
         `WhatsApp: ${whatsappNumber}  ·  Powered by WorkCraft Local`,
         canvas.width / 2,
-        canvas.height - 105
+        canvas.height - 96
       );
 
       // Export Canvas to Real Downloadable PDF
@@ -439,7 +426,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
   };
 
   return (
-    <div className="space-y-4 text-left">
+    <div dir="ltr" className="space-y-4 text-left">
       {/* Top Action & Format/Language Selector Bar */}
       <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
@@ -540,48 +527,45 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
         </div>
       )}
 
-      {/* LIVE VISUAL PDF THEME PREVIEW (EXACT LAYOUT ON ALL SALONS & LADIES PARLORS) */}
+      {/* LIVE VISUAL PDF THEME PREVIEW (FIXED LTR HEADER LOCK ACROSS ALL 3 LANGUAGES & BOTH FORMATS) */}
       {!compact && (
-        <div className="min-w-0 max-w-full overflow-hidden rounded-3xl border-2 border-[#D9A441]/70 bg-gradient-to-b from-[#102019] via-[#12241C] to-[#0B1712] p-5 sm:p-7 shadow-2xl space-y-6">
-          {/* TOP SECTION: TOP-LEFT WORKCRAFT LOCAL LOGO + TOP-RIGHT QR WITH WHATSAPP NUMBER UNDERNEATH */}
-          <div className="flex flex-col sm:flex-row items-start justify-between gap-5">
-            {/* LEFT COLUMN: Top-Left Bold WorkCraft Logo & Wordmark Underneath + Salon/Parlor Name */}
-            <div className="space-y-4 flex-1 min-w-0">
-              {/* Clean Top-Left Bold WorkCraft Logo + WorkCraft Wordmark Underneath (No Box, No Extra Text) */}
-              <div className="inline-flex flex-col items-start gap-1">
+        <div
+          dir="ltr"
+          className={`min-w-0 max-w-full overflow-hidden rounded-3xl border-2 border-[#D9A441]/70 bg-gradient-to-b from-[#102019] via-[#12241C] to-[#0B1712] shadow-2xl text-left ${
+            posterFormat === 'CABIN_PAMPHLET' ? 'p-4 sm:p-5 space-y-4' : 'p-5 sm:p-7 space-y-6'
+          }`}
+        >
+          {/* TOP SECTION: ALWAYS TOP-LEFT ENLARGED WORKCRAFT LOGO + SALON INFO · ALWAYS TOP-RIGHT QR + LTR NUMBER */}
+          <div dir="ltr" className="flex flex-col sm:flex-row items-start justify-between gap-5">
+            {/* LEFT COLUMN: Enlarged Bold WorkCraft Logo (Watermark Removed) + Salon/Parlor Category, Name & Address */}
+            <div dir="ltr" className="space-y-3 flex-1 min-w-0 text-left">
+              <div className="inline-flex items-center">
                 <img
                   src={LOGO_URL}
                   alt="WorkCraft"
-                  className="size-16 object-contain drop-shadow-[0_2px_10px_rgba(217,164,65,0.45)]"
-                />
-                <img
-                  src={WATERMARK_URL}
-                  alt="WorkCraft"
-                  className="h-5 w-auto object-contain"
+                  className="size-24 sm:size-28 object-contain drop-shadow-[0_4px_14px_rgba(217,164,65,0.45)]"
                 />
               </div>
 
-              {/* Category Badge & Salon / Ladies Parlor Name */}
-              <div className="space-y-1.5 pt-1">
+              {/* Category Label, Salon Name & Address strictly aligned left under WorkCraft logo */}
+              <div dir="ltr" className="space-y-1.5 pt-1 text-left">
                 <span
-                  className={`inline-block rounded-lg border px-2.5 py-1 text-[10px] font-mono font-bold ${
-                    isLadies
-                      ? 'border-pink-400/40 bg-pink-500/15 text-pink-200'
-                      : 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200'
+                  className={`inline-block text-xs font-mono font-bold ${
+                    isLadies ? 'text-pink-300' : 'text-emerald-300'
                   }`}
                 >
                   {isLadies ? copy.badgeLadies : copy.badgeMens}
                 </span>
-                <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight text-left">
                   {salonName}
                 </h2>
                 {location && (
-                  <p className="text-xs text-white/65 font-sans">{location}</p>
+                  <p className="text-xs text-white/75 font-sans text-left">{location}</p>
                 )}
               </div>
             </div>
 
-            {/* RIGHT COLUMN: Strict Top-Right QR Code + Owner WhatsApp Number Directly Under QR */}
+            {/* RIGHT COLUMN: Strict Top-Right QR Code + Owner WhatsApp Number Directly Under QR (Always LTR) */}
             <div className="rounded-2xl border-2 border-[#00FFFF] bg-[#0B1712] p-3.5 text-center space-y-2 shrink-0 self-center sm:self-start shadow-[0_0_24px_rgba(0,255,255,0.18)]">
               <div className="bg-white rounded-xl p-2 size-36 mx-auto grid place-items-center">
                 {qrDataUrl ? (
@@ -594,37 +578,40 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
                   <QrCode className="size-24 text-[#12241C]" />
                 )}
               </div>
-              <p className="text-[10px] font-mono font-bold text-[#00FFFF] max-w-[155px] mx-auto leading-tight">
+              <p
+                dir={copy.isRtl ? 'rtl' : 'ltr'}
+                className="text-[10px] font-mono font-bold text-[#00FFFF] max-w-[155px] mx-auto leading-tight"
+              >
                 {copy.scanLabel}
               </p>
-              <p className="text-sm font-mono font-black text-[#D9A441] tracking-tight">
+              <p dir="ltr" className="text-sm font-mono font-black text-[#D9A441] tracking-tight">
                 {whatsappNumber}
               </p>
             </div>
           </div>
 
-          {/* MIDDLE 3-STEP CLIENT GUIDE */}
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
-            <p className="text-center text-sm font-bold text-[#D9A441]">
+          {/* MIDDLE 3-STEP CLIENT GUIDE (CLEAN UNBOXED FLOW) */}
+          <div className="border-t border-[#D9A441]/30 pt-4 space-y-3">
+            <p dir={copy.isRtl ? 'rtl' : 'ltr'} className="text-center text-sm font-bold text-[#D9A441]">
               {copy.headline}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-center">
               {copy.steps.map((stepText) => (
-                <div
+                <p
                   key={stepText}
                   dir={copy.isRtl ? 'rtl' : 'ltr'}
-                  className="rounded-xl border border-[#00FFFF]/25 bg-[#00FFFF]/5 p-2.5 text-xs font-semibold text-[#F5F2E9]"
+                  className="px-2 py-1.5 text-xs font-semibold text-[#F5F2E9]"
                 >
                   {stepText}
-                </div>
+                </p>
               ))}
             </div>
           </div>
 
-          {/* BOTTOM SECTION: ALWAYS SHOWS CUSTOMER ANNOUNCEMENT PHRASE AT THE BOTTOM */}
+          {/* BOTTOM SECTION: CLEAN ANNOUNCEMENT PHRASE WITHOUT OUTER BORDER BOX */}
           <div
             dir={copy.isRtl ? 'rtl' : 'ltr'}
-            className="rounded-2xl border-2 border-[#D9A441] bg-[#D9A441]/10 p-5 text-center space-y-2.5"
+            className="border-t border-[#D9A441]/30 pt-4 text-center space-y-2.5"
           >
             <p className="text-sm sm:text-base font-semibold text-white leading-relaxed font-sans">
               {copy.phrase}

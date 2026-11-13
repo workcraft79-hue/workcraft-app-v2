@@ -291,6 +291,11 @@ export default function App() {
     showToast(`💵 PKR ${amount.toLocaleString()} Cash Held Logged with Biometric Seal · Receipts sent to agent & ${salonName}`);
   };
 
+  const handleCashRemitted = (amount: number) => {
+    setKamranCashHeld((prev) => Math.max(0, prev - amount));
+    showToast(`✅ PKR ${amount.toLocaleString()} verified into WORKCRAFT Main Account · Pakistani Agent Hub restored automatically!`);
+  };
+
   const handlePairingComplete = (salonName: string, payload?: OnboardedSalonPayload) => {
     setActiveSalonCount((prev) => prev + 1);
     setIsSalonPwaModalOpen(false);
@@ -785,6 +790,7 @@ export default function App() {
                 <FieldAgentHub
                   onSalonCreated={handleSalonCreated}
                   onCashCollected={handleCashCollected}
+                  onCashRemitted={handleCashRemitted}
                   onOpenSalonPwa={(token, salon) => {
                     setActiveOnboarding({ token, salonName: salon });
                     setIsSalonPwaModalOpen(true);

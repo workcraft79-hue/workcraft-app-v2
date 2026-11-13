@@ -85,6 +85,7 @@ export interface OnboardedSalonPayload {
 interface FieldAgentHubProps {
   onSalonCreated: (salon: { name: string; owner: string; phone: string; location: string; coords: string }) => void;
   onCashCollected?: (amount: number, salonName: string) => void;
+  onCashRemitted?: (amount: number) => void;
   onOpenSalonPwa?: (token: string, salonName: string) => void;
   kamranCashHeld?: number;
   onClose?: () => void;
@@ -1846,6 +1847,8 @@ export const formatWelcomeMessage = (
 export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   onSalonCreated,
   onCashCollected,
+  onCashRemitted,
+  kamranCashHeld,
   onClose,
   initialAutoOpenEnrollment,
   initialEnrollAgentData,
@@ -2123,12 +2126,32 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     setDrawerTid(demoTid);
   };
 
-  // Strict Security & Cash Risk Framework
-  const MAX_CASH_CEILING = 50000; // PKR 50,000 hard velocity limit
-  const [cashLiabilityHeld, setCashLiabilityHeld] = useState<number>(15000); // e.g. from Noor Parlor setup cash
+  // Strict Security & Cash Risk Framework (Pakistan Agents Only: PKR 50,000 / 2 Deals / 40 Hours)
+  const MAX_CASH_CEILING = 50000;
+  const MAX_CASH_DEALS = 2;
+  const MAX_CASH_HOLD_HOURS = 40;
+  const [cashLiabilityHeld, setCashLiabilityHeld] = useState<number>(kamranCashHeld ?? 25000);
+  const [pkCashDealsCount, setPkCashDealsCount] = useState<number>((kamranCashHeld ?? 25000) > 0 ? 1 : 0);
   const [cashLiabilitySalon, setCashLiabilitySalon] = useState('Noor Beauty Lounge');
-  const [countdownHours, setCountdownHours] = useState(44); // 48-Hour Alarming Window per deal
-  const [countdownMinutes, setCountdownMinutes] = useState(18);
+  const [countdownHours, setCountdownHours] = useState<number>(14); // Remaining hours inside 40h window
+  const [countdownMinutes, setCountdownMinutes] = useState<number>(18);
+  const [isRemitModalOpen, setIsRemitModalOpen] = useState(false);
+  const [remitChannel, setRemitChannel] = useState<'Meezan Bank IBFT' | 'Raast Instant Pay' | 'EasyPaisa Official' | 'JazzCash Official'>('Meezan Bank IBFT');
+  const [remitTid, setRemitTid] = useState('');
+  const [remitError, setRemitError] = useState<string | null>(null);
+  const [isVerifyingRemit, setIsVerifyingRemit] = useState(false);
+  const [remitRestoreMessage, setRemitRestoreMessage] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (typeof kamranCashHeld === 'number') {
+      setCashLiabilityHeld(kamranCashHeld);
+      if (kamranCashHeld === 0) {
+        setPkCashDealsCount(0);
+        setCountdownHours(MAX_CASH_HOLD_HOURS);
+        setCountdownMinutes(0);
+      }
+    }
+  }, [kamranCashHeld]);
 
   // Strict Biometric Thumbprint State (Zero PIN Fallback)
   const [isThumbprintVerified, setIsThumbprintVerified] = useState(false);
@@ -2204,11 +2227,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     phone: string;
     savedLang: ClientOnboardingLanguage;
     status: 'CONNECTED' | 'NEEDS_RELINK';
+    isLiveOnPortal: boolean;
   }>>([
-    { name: 'Seven Cuts Studio', owner: 'Hamza Tariq', city: 'DHA Phase 5, Lahore', phone: '+92 301 8472910', savedLang: 'ur', status: 'CONNECTED' },
-    { name: 'Noor Beauty Lounge', owner: 'Sana Siddiqui', city: 'Clifton Block 4, Karachi', phone: '+92 300 9281742', savedLang: 'ur', status: 'NEEDS_RELINK' },
-    { name: 'Al Noor Gents Salon', owner: 'Tariq Al-Mansoor', city: 'Al Rigga Road, Deira, Dubai', phone: '+971 50 4819203', savedLang: 'ar', status: 'CONNECTED' },
-    { name: 'The Groom Room', owner: 'Oliver Bennett', city: '48 Oxford St, Soho, London', phone: '+44 7712 345678', savedLang: 'en', status: 'CONNECTED' },
+    { name: 'Seven Cuts Studio', owner: 'Hamza Tariq', city: 'DHA Phase 5, Lahore', phone: '+92 301 8472910', savedLang: 'ur', status: 'CONNECTED', isLiveOnPortal: true },
+    { name: 'Noor Beauty Lounge', owner: 'Sana Siddiqui', city: 'Clifton Block 4, Karachi', phone: '+92 300 9281742', savedLang: 'ur', status: 'NEEDS_RELINK', isLiveOnPortal: true },
+    { name: 'Al Noor Gents Salon', owner: 'Tariq Al-Mansoor', city: 'Al Rigga Road, Deira, Dubai', phone: '+971 50 4819203', savedLang: 'ar', status: 'CONNECTED', isLiveOnPortal: true },
+    { name: 'The Groom Room', owner: 'Oliver Bennett', city: '48 Oxford St, Soho, London', phone: '+44 7712 345678', savedLang: 'en', status: 'CONNECTED', isLiveOnPortal: true },
   ]);
   const [rePairSearchQuery, setRePairSearchQuery] = useState('');
   const [selectedRePairSalon, setSelectedRePairSalon] = useState('Seven Cuts Studio');
@@ -2271,7 +2295,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       selfieVerified: true,
       thumbHash: 'SHA256: 9b8c-02e1-48af-9102-thumb-enrolled',
       legalRemittanceAgreed: true,
-      legalTermsText: 'Agreed: Remit physical cash within 48 hours into WORKCRAFT Official Accounts. Subject to legal recovery under Laws of Pakistan.',
+      legalTermsText: 'Agreed: Remit physical cash within 40 hours (max PKR 50,000 / 2 cash deals) into WORKCRAFT Official Accounts. Subject to auto-stop & recovery under Laws of Pakistan.',
       guarantorName: 'Tariq Mehmood',
       guarantorPhone: '+92-300-8419201',
     },
@@ -2293,7 +2317,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       selfieVerified: true,
       thumbHash: 'SHA256: 3a7e-11d9-72fc-4401-thumb-enrolled',
       legalRemittanceAgreed: true,
-      legalTermsText: 'Agreed: Remit physical cash within 48 hours into WORKCRAFT Official Accounts. Subject to legal recovery under Laws of Pakistan.',
+      legalTermsText: 'Agreed: Remit physical cash within 40 hours (max PKR 50,000 / 2 cash deals) into WORKCRAFT Official Accounts. Subject to auto-stop & recovery under Laws of Pakistan.',
       guarantorName: 'Imran Sheikh',
       guarantorPhone: '+92-321-8890123',
     },
@@ -2517,9 +2541,82 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     }
   }, [initialAutoOpenEnrollment, initialEnrollAgentData, userRole]);
 
-  // PWA Home Screen Installation Prompt (Query 18)
+  // PWA Home Screen Installation Prompt + Auto-Detect Android vs iPhone (Query 2)
   const [showPwaInstallModal, setShowPwaInstallModal] = useState(false);
   const [isPwaInstalledConfirmed, setIsPwaInstalledConfirmed] = useState(false);
+  const [pwaDeviceOverride, setPwaDeviceOverride] = useState<'ANDROID' | 'IOS' | null>(null);
+  const deferredInstallPromptRef = React.useRef<any>(null);
+  const biometricScanTimerRef = React.useRef<number | null>(null);
+
+  const detectedDeviceOs: 'ANDROID' | 'IOS' = React.useMemo(() => {
+    if (typeof navigator === 'undefined') return 'ANDROID';
+    const ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+      return 'IOS';
+    }
+    return 'ANDROID';
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (e: Event) => {
+      e.preventDefault();
+      deferredInstallPromptRef.current = e;
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  // Pakistani Field Agent Auto-Stop Logic (PKR 50,000 OR 2 Cash Deals OR 40 Hours Elapsed)
+  const isPkFieldAgent = userRole === 'FIELD_AGENT' && agentOperatingRegion === 'PK';
+  const isCashLimitReached = cashLiabilityHeld >= MAX_CASH_CEILING;
+  const isDealLimitReached = pkCashDealsCount >= MAX_CASH_DEALS;
+  const isTimeLimitReached = cashLiabilityHeld > 0 && countdownHours <= 0 && countdownMinutes <= 0;
+  const isCashAutoSuspended = isPkFieldAgent && cashLiabilityHeld > 0 && (isCashLimitReached || isDealLimitReached || isTimeLimitReached);
+
+  const handleVerifyWorkcraftRemittance = (e: React.FormEvent) => {
+    e.preventDefault();
+    setRemitError(null);
+    if (!remitTid.trim()) {
+      setRemitError(
+        agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+          ? 'ورک کرافٹ اکاؤنٹ میں جمع کرانے کا TID / بینک ریفرنس نمبر لازمی درج کریں۔'
+          : agentLanguage === 'ar'
+          ? 'يرجى إدخال رقم المرجع / الإيصال الخاص بالإيداع في حساب WORKCRAFT.'
+          : 'Please enter your deposit TID / bank reference number to verify payment.'
+      );
+      return;
+    }
+    setIsVerifyingRemit(true);
+    setTimeout(() => {
+      const clearedAmount = cashLiabilityHeld;
+      setCashLiabilityHeld(0);
+      setPkCashDealsCount(0);
+      setCountdownHours(MAX_CASH_HOLD_HOURS);
+      setCountdownMinutes(0);
+      setEnrolledAgentsList((prev) =>
+        prev.map((ag) =>
+          ag.name === agentFullName
+            ? { ...ag, status: 'ACTIVE · ON-FIELD' }
+            : ag
+        )
+      );
+      if (onCashRemitted && clearedAmount > 0) {
+        onCashRemitted(clearedAmount);
+      }
+      setIsVerifyingRemit(false);
+      setIsRemitModalOpen(false);
+      setRemitTid('');
+      setRemitRestoreMessage(
+        agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+          ? `✓ PKR ${clearedAmount.toLocaleString()} کی ادائیگی ورک کرافٹ اکاؤنٹ میں تصدیق ہو گئی — آپ کا ایجنٹ ہب خودکار بحال ہو گیا ہے۔`
+          : agentLanguage === 'ar'
+          ? `✓ تم التحقق من إيداع PKR ${clearedAmount.toLocaleString()} في حساب WORKCRAFT — تمت استعادة حساب الوكيل تلقائياً.`
+          : `✓ Verified PKR ${clearedAmount.toLocaleString()} deposit to WORKCRAFT Official Account — Agent Hub restored automatically.`
+      );
+      setTimeout(() => setRemitRestoreMessage(null), 6000);
+    }, 950);
+  };
 
   // Helper to scale base PKR service prices into local salon currency on country change
   const rescaleServicePricesForCountry = (country: CountryConfig) => {
@@ -2618,11 +2715,11 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
           phone,
           savedLang: clientOnboardingLanguage,
           status: 'CONNECTED',
+          isLiveOnPortal: false,
         },
         ...prev,
       ];
     });
-    setSelectedRePairSalon(salonName.trim());
 
     setCurrentStep(2);
   };
@@ -2741,8 +2838,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     setDrawerError(null);
     setIsThumbprintVerified(false);
 
-    if (method === 'Cash Collection' && cashLiabilityHeld + activePackage.setupFee > MAX_CASH_CEILING) {
-      setDrawerError(`⚠️ PKR 50,000 Cash Velocity Limit Reached! (Held: PKR ${cashLiabilityHeld.toLocaleString()} + Package: PKR ${activePackage.setupFee.toLocaleString()}). You cannot collect cash until current funds are deposited.`);
+    if (method === 'Cash Collection' && (isCashAutoSuspended || pkCashDealsCount >= MAX_CASH_DEALS || (cashLiabilityHeld > 0 && countdownHours <= 0 && countdownMinutes <= 0) || cashLiabilityHeld + activePackage.setupFee > MAX_CASH_CEILING)) {
+      setDrawerError(
+        `⚠️ Pakistani Agent Cash Limit Reached (Held: PKR ${cashLiabilityHeld.toLocaleString()} · Deals: ${pkCashDealsCount}/${MAX_CASH_DEALS} · ${countdownHours}h ${countdownMinutes}m left of ${MAX_CASH_HOLD_HOURS}h). Deposit held cash into WORKCRAFT Main Account first.`
+      );
     }
 
     const generatedTid = method === 'EasyPaisa'
@@ -2791,6 +2890,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
         setDrawerError('Strict Biometric Verification Required: Touch your thumb to the sensor to authorize physical cash receipt.');
         return;
       }
+      if (isCashAutoSuspended || pkCashDealsCount >= MAX_CASH_DEALS || (cashLiabilityHeld > 0 && countdownHours <= 0 && countdownMinutes <= 0)) {
+        setDrawerError(`Agent ID auto-paused under Pakistan Cash Policy (PKR 50,000 / 2 Deals / 40 Hours). Deposit current cash to WORKCRAFT Main Account first.`);
+        return;
+      }
       if (cashLiabilityHeld + activePackage.setupFee > MAX_CASH_CEILING) {
         setDrawerError(`Cannot proceed: PKR 50,000 cash velocity ceiling exceeded (Held: PKR ${cashLiabilityHeld.toLocaleString()}). Deposit current funds first.`);
         return;
@@ -2808,17 +2911,35 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       let newRemainingDebt = cashLiabilityHeld;
       let commissionAdjusted = false;
 
-      // Track Pakistan physical cash collection + Option A Net-Adjustment (Agent/Founder cash; commission adjustment Pure Agent only)
+      // Track Pakistan physical cash collection + 2-deal / 50k / 40h threshold + Option A Net-Adjustment
       if (!isSelfServeOwner && detectedCountry.isDomestic) {
         if (setupPaymentMethod === 'Cash Collection') {
           newRemainingDebt = cashLiabilityHeld + activePackage.setupFee;
+          const nextDeals = pkCashDealsCount + 1;
           setCashLiabilityHeld(newRemainingDebt);
+          setPkCashDealsCount(nextDeals);
+          if (pkCashDealsCount === 0) {
+            setCountdownHours(MAX_CASH_HOLD_HOURS);
+            setCountdownMinutes(0);
+          }
+          if (newRemainingDebt >= MAX_CASH_CEILING || nextDeals >= MAX_CASH_DEALS) {
+            setEnrolledAgentsList((prev) =>
+              prev.map((ag) =>
+                ag.name === agentFullName ? { ...ag, status: 'SUSPENDED · CASH DEPOSIT REQ' } : ag
+              )
+            );
+          }
           if (salonName.trim()) {
             setCashLiabilitySalon(salonName.trim());
           }
         } else if (isPureAgent && cashLiabilityHeld > 0) {
           newRemainingDebt = Math.max(0, cashLiabilityHeld - commission);
           setCashLiabilityHeld(newRemainingDebt);
+          if (newRemainingDebt === 0) {
+            setPkCashDealsCount(0);
+            setCountdownHours(MAX_CASH_HOLD_HOURS);
+            setCountdownMinutes(0);
+          }
           commissionAdjusted = true;
         }
       }
@@ -3327,10 +3448,146 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
         </div>
       )}
 
+      {/* Query 6: Pakistani Agent Cash-Hold Countdown Alert & WorkCraft Restore Toast */}
+      {remitRestoreMessage && (
+        <div className="rounded-2xl border border-[#116329] bg-[#0D3822] p-3.5 text-xs font-mono font-bold text-[#3FB950] flex items-center gap-2 animate-in fade-in">
+          <CheckCircle2 className="size-4 shrink-0 text-[#3FB950]" />
+          <span>{remitRestoreMessage}</span>
+        </div>
+      )}
+
+      {isPkFieldAgent && cashLiabilityHeld > 0 && (
+        <div
+          dir={isHubRtl ? 'rtl' : 'ltr'}
+          className={`rounded-2xl border p-4 space-y-3 animate-in fade-in ${
+            isCashAutoSuspended
+              ? 'border-[#da3633] bg-[#4C1C1D]'
+              : 'border-[#9E6A03] bg-[#3B2E0B]/70'
+          } ${isHubRtl ? 'text-right' : 'text-left'}`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              {isCashAutoSuspended ? (
+                <AlertOctagon className="size-5 text-[#F85149] shrink-0 mt-0.5" />
+              ) : (
+                <Clock className="size-5 text-[#D29922] shrink-0 mt-0.5" />
+              )}
+              <div className="min-w-0 space-y-0.5">
+                <span className={`text-xs font-mono font-bold block ${isCashAutoSuspended ? 'text-[#F85149]' : 'text-[#D29922]'}`}>
+                  {isCashAutoSuspended
+                    ? agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+                      ? '⛔ پاکستانی ایجنٹ آئی ڈی خودکار طور پر عارضی بند (کیش جمع کروائیں)'
+                      : agentLanguage === 'ar'
+                      ? '⛔ تم إيقاف معرف الوكيل تلقائياً — يرجى إيداع النقد المستحق'
+                      : '⛔ AGENT ID AUTO-STOPPED · DEPOSIT CASH TO RESTORE'
+                    : agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+                    ? '⏳ پاکستانی ایجنٹ کیش ہولڈ الرٹ (ورک کرافٹ مین اکاؤنٹ)'
+                    : agentLanguage === 'ar'
+                    ? '⏳ تنبيه النقد المحتفظ به — الإيداع في حساب WORKCRAFT'
+                    : '⏳ PAKISTANI AGENT CASH-HOLD ALERT (WORKCRAFT MAIN ACCOUNT)'}
+                </span>
+                <p className="text-xs text-[#F0F6FC] font-sans leading-relaxed">
+                  {agentLanguage === 'ur' || agentLanguage === 'ur_roman' ? (
+                    <>
+                      آپ کے پاس <strong dir="ltr" className="text-[#D29922]">PKR {cashLiabilityHeld.toLocaleString()}</strong> کیش موجود ہے (حد: <span dir="ltr">PKR 50,000</span> / <span dir="ltr">{pkCashDealsCount}/2</span> ڈیلز)۔ مین اکاؤنٹ میں جمع کرانے کے لیے <strong dir="ltr" className="text-[#06B6D4]">{countdownHours}h {countdownMinutes}m</strong> (40 گھنٹے کی حد میں سے) باقی ہیں۔
+                    </>
+                  ) : agentLanguage === 'ar' ? (
+                    <>
+                      لديك نقد محصل <strong dir="ltr" className="text-[#D29922]">PKR {cashLiabilityHeld.toLocaleString()}</strong> (الحد: <span dir="ltr">PKR 50,000</span> / <span dir="ltr">{pkCashDealsCount}/2</span> صفقات). المتبقي للإيداع في الحساب الرئيسي <strong dir="ltr" className="text-[#06B6D4]">{countdownHours}h {countdownMinutes}m</strong> من مهلة 40 ساعة.
+                    </>
+                  ) : (
+                    <>
+                      You hold <strong dir="ltr" className="text-[#D29922]">PKR {cashLiabilityHeld.toLocaleString()}</strong> (<span dir="ltr">{pkCashDealsCount} / {MAX_CASH_DEALS}</span> deals). You have <strong dir="ltr" className="text-[#06B6D4]">{countdownHours}h {countdownMinutes}m</strong> remaining out of 40 hours to deposit into the WORKCRAFT Main Account. Auto-stop triggers at PKR 50,000, 2 deals, or 40h.
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <div dir="ltr" className="rounded-xl bg-[#0D1117] border border-[#30363D] px-3 py-1.5 text-[11px] font-mono text-left">
+                <span className="text-[#8B949E] block text-[9px]">CASH · DEALS · TIME LEFT</span>
+                <span className="font-bold text-[#F0F6FC]">
+                  PKR {cashLiabilityHeld.toLocaleString()} · {pkCashDealsCount}/2 ·{' '}
+                  <span className={countdownHours <= 6 ? 'text-[#F85149]' : 'text-[#06B6D4]'}>
+                    {countdownHours}h {countdownMinutes}m
+                  </span>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setRemitError(null);
+                  setIsRemitModalOpen(true);
+                }}
+                className="min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-3.5 py-2 text-xs font-mono font-black uppercase transition active:scale-95"
+              >
+                {agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+                  ? 'ورک کرافٹ میں جمع کرائیں'
+                  : agentLanguage === 'ar'
+                  ? 'إيداع في حساب WORKCRAFT'
+                  : 'Deposit & Restore'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Query 6: Hard Auto-Stop Lockout Card for Pakistani Agents when PKR 50k / 2 Deals / 40h reached */}
+      {isCashAutoSuspended && !isAgentSuspendedByFounder && effectiveHubView === 'ONBOARDING' && (
+        <div
+          dir={isHubRtl ? 'rtl' : 'ltr'}
+          className={`rounded-2xl border-2 border-[#da3633] bg-[#4C1C1D]/90 p-5 sm:p-6 space-y-4 shadow-2xl animate-in zoom-in-95 ${
+            isHubRtl ? 'text-right' : 'text-left'
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-[#0D1117] border border-[#da3633] text-[#F85149]">
+                <Lock className="size-6" />
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#F85149] block">
+                  PAKISTAN AGENT CASH POLICY · AUTO-STOP TRIGGERED
+                </span>
+                <h3 className="text-base sm:text-lg font-black text-[#F0F6FC]">
+                  {agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+                    ? 'آپ کا ایجنٹ ہب عارضی طور پر بند ہے — کیش جمع کرائیں'
+                    : agentLanguage === 'ar'
+                    ? 'تم إيقاف بوابة الوكيل تلقائياً لحين إيداع النقد المستحق'
+                    : 'Agent Hub Temporarily Stopped — Deposit Held Cash to Restore'}
+                </h3>
+                <p className="text-xs text-[#F0F6FC]/90 font-sans leading-relaxed">
+                  {agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+                    ? 'پاکستانی ایجنٹ کے لیے PKR 50,000 کیش، 2 ڈیلز، یا 40 گھنٹے مکمل ہونے پر آئی ڈی خودکار رک جاتی ہے۔ ورک کرافٹ کے مین اکاؤنٹ میں رقم جمع کرا کر رسید کی تصدیق کریں، سسٹم فوراً آپ کا پورٹل بحال کر دے گا۔'
+                    : agentLanguage === 'ar'
+                    ? 'يتم إيقاف معرف الوكيل في باكستان تلقائياً عند بلوغ PKR 50,000 نقداً أو صفقتين أو 40 ساعة. أودع المبلغ في حساب WORKCRAFT الرئيسي وأكد الإيصال لإعادة تفعيل البوابة فوراً.'
+                    : 'Your Pakistani Agent ID automatically pauses whenever PKR 50,000 cash in hand, 2 cash deals, or 40 hours is reached. Deposit the balance into the WORKCRAFT Official Account below to automatically verify and restore your Agent Hub.'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setRemitError(null);
+                setIsRemitModalOpen(true);
+              }}
+              className="min-h-[48px] rounded-xl bg-[#3FB950] hover:bg-[#56d364] text-[#0D1117] px-5 py-2.5 text-xs font-mono font-black uppercase transition shrink-0"
+            >
+              {agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+                ? 'رقم جمع کرائیں اور آئی ڈی بحال کریں ←'
+                : agentLanguage === 'ar'
+                ? 'تأكيد الإيداع واستعادة البوابة ←'
+                : 'Pay WORKCRAFT & Restore Hub →'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ========================================================================= */}
       {/* VIEW A: ONBOARDING SEQUENTIAL WIZARD (STEPS 1 - 4) */}
       {/* ========================================================================= */}
-      {effectiveHubView === 'ONBOARDING' && (
+      {effectiveHubView === 'ONBOARDING' && !isCashAutoSuspended && (
         <div
           dir={clientOnboardingLanguage === 'en' ? 'ltr' : 'rtl'}
           className={`space-y-6 min-w-0 ${clientOnboardingLanguage === 'en' ? 'text-left' : 'text-right'}`}
@@ -5038,6 +5295,24 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       onClick={() => {
                         setIsPairingSimulated(true);
                         setIsQrBurned(true);
+                        const liveName = salonName.trim() || 'New Live Salon';
+                        setRePairSalonsList((prev) => {
+                          if (prev.some((s) => s.name === liveName)) {
+                            return prev.map((s) => (s.name === liveName ? { ...s, isLiveOnPortal: true, status: 'CONNECTED' } : s));
+                          }
+                          return [
+                            {
+                              name: liveName,
+                              owner: ownerName.trim() || 'Salon Owner',
+                              city: address.trim() || detectedCountry.defaultAddress,
+                              phone,
+                              savedLang: clientOnboardingLanguage,
+                              status: 'CONNECTED',
+                              isLiveOnPortal: true,
+                            },
+                            ...prev,
+                          ];
+                        });
                       }}
                       className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-5 py-2.5 text-xs font-mono font-bold uppercase transition active:scale-95 shadow-md flex items-center gap-2"
                     >
@@ -5457,7 +5732,8 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
             };
 
         const q = rePairSearchQuery.trim().toLowerCase();
-        const filteredSalons = rePairSalonsList.filter(
+        const livePortalSalons = rePairSalonsList.filter((s) => s.isLiveOnPortal);
+        const filteredSalons = livePortalSalons.filter(
           (s) =>
             !q ||
             s.name.toLowerCase().includes(q) ||
@@ -5466,9 +5742,9 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
             s.phone.toLowerCase().includes(q)
         );
         const activeSalon =
-          rePairSalonsList.find((s) => s.name === selectedRePairSalon) ||
+          livePortalSalons.find((s) => s.name === selectedRePairSalon) ||
           filteredSalons[0] ||
-          rePairSalonsList[0];
+          livePortalSalons[0];
 
         const langBadgeLabel =
           activeSalon.savedLang === 'ur'
@@ -5516,11 +5792,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 {rL.intro}
               </p>
 
-              {/* Salon Search Box + Dropdown */}
+              {/* Salon Search Box + Dropdown (Strictly Live Portal Salons Only) */}
               <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <label className="text-xs font-mono font-bold text-[#F0F6FC] uppercase">
-                    {rL.searchLabel}
+                  <label className="text-xs font-mono font-bold text-[#F0F6FC] uppercase flex items-center gap-2">
+                    <span>{rL.searchLabel}</span>
+                    <span className="rounded bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[9px] font-mono text-[#3FB950]">
+                      {isArabic ? 'الصالونات المفعلة فقط' : isUrdu ? 'صرف لائیو سیلونز' : 'LIVE PORTAL SALONS ONLY'}
+                    </span>
                   </label>
                   <span className="rounded-lg bg-[#3B2E0B] border border-[#9E6A03] px-2.5 py-0.5 text-[10px] font-mono font-bold text-[#D29922]">
                     {langBadgeLabel}
@@ -5535,7 +5814,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     onChange={(e) => {
                       const val = e.target.value;
                       setRePairSearchQuery(val);
-                      const firstMatch = rePairSalonsList.find(
+                      const firstMatch = livePortalSalons.find(
                         (s) =>
                           s.name.toLowerCase().includes(val.trim().toLowerCase()) ||
                           s.owner.toLowerCase().includes(val.trim().toLowerCase()) ||
@@ -5798,14 +6077,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
           ? {
               cardTitle: 'ملفي الشخصي وحسابي البنكي (محمي بالبصمة)',
               cardKicker: 'يتطلب تأكيد البصمة عند كل تعديل',
+              langLabel: 'اللغة:',
               lockHeading: 'قفل أمان البيانات الشخصية والحساب البنكي',
               lockDesc:
-                'قم بتحديث رقم الجوال أو المدينة أو الدولة أو وسيلة الدفع أو الحساب البنكي أدناه. يتطلب كل حفظ مسح البصمة للتأكد من أنك قمت بالتعديل بنفسك.',
+                'قم بتحديث رقم الجوال أو وسيلة الدفع أو الحساب البنكي أدناه. يتطلب كل حفظ مسح البصمة للتأكد من أنك قمت بالتعديل بنفسك — لن يتم حفظ أي تعديل بدون بصمة.',
+              territoryLabel: 'المنطقة الميدانية (تعيين المؤسس فقط):',
               sealedLabel: 'تم التوثيق:',
               nameLabel: 'الاسم الكامل والرقم التعريفي (مقفول)',
               phoneLabel: 'رقم الجوال / واتساب',
-              countryLabel: 'الدولة / المنطقة',
-              cityLabel: 'المدينة / المنطقة الميدانية',
               methodLabel: 'وسيلة استلام العمولات',
               bankLabel: 'اسم البنك أو المحفظة',
               accountLabel: 'رقم الحساب / المحفظة',
@@ -5813,11 +6092,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               ibanLabel: 'رقم الآيبان IBAN (مطلوب للتحويل البنكي)',
               codeLabel: 'رمز التحقق بالبصمة:',
               saveBtn: 'تحقق بالبصمة واحفظ البيانات',
-              optPk: 'باكستان (PKR)',
-              optUae: 'الإمارات العربية المتحدة (AED)',
-              optSa: 'المملكة العربية السعودية (SAR)',
-              optEu: 'بريطانيا وأوروبا (GBP / EUR)',
-              optGlobal: 'دولي (USD)',
               mEasy: 'محفظة إيزي بيسا (EasyPaisa)',
               mJazz: 'محفظة جاز كاش (JazzCash)',
               mBank: 'تحويل بنكي (IBFT)',
@@ -5828,14 +6102,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
           ? {
               cardTitle: 'میرا پروفائل اور بینک تفصیلات (بایومیٹرک لاک)',
               cardKicker: 'کسی بھی تبدیلی کے لیے نئی انگوٹھے کی تصدیق لازمی ہے',
+              langLabel: 'زبان:',
               lockHeading: 'ذاتی تفصیلات اور بینک اکاؤنٹ سیکیورٹی لاک',
               lockDesc:
-                'اپنا موبائل نمبر، شہر، ملک، ادائیگی کا طریقہ یا بینک اکاؤنٹ نیچے تبدیل کریں۔ ہر تبدیلی محفوظ کرنے کے لیے انگوٹھے کا نشان ضروری ہے تاکہ صرف آپ خود تبدیلی کر سکیں۔',
+                'اپنا موبائل نمبر، ادائیگی کا طریقہ یا بینک اکاؤنٹ نیچے تبدیل کریں۔ ہر تبدیلی محفوظ کرنے کے لیے انگوٹھے کی تصدیق لازمی ہے — بغیر بائیومیٹرک کوئی تبدیلی محفوظ نہیں ہوگی۔',
+              territoryLabel: 'علاقہ / شہر (صرف بانی کی طرف سے مقرر):',
               sealedLabel: 'تصدیق شدہ:',
               nameLabel: 'مکمل نام اور ایجنٹ آئی ڈی (لاک)',
               phoneLabel: 'موبائل / واٹس ایپ نمبر',
-              countryLabel: 'ملک / خطہ',
-              cityLabel: 'شہر / علاقہ',
               methodLabel: 'کمیشن وصول کرنے کا طریقہ',
               bankLabel: 'بینک یا والٹ کا نام',
               accountLabel: 'اکاؤنٹ / والٹ نمبر',
@@ -5843,11 +6117,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               ibanLabel: 'IBAN نمبر (بینک ٹرانسفر کے لیے لازمی)',
               codeLabel: 'موجودہ بائیومیٹرک کوڈ:',
               saveBtn: 'انگوٹھے سے تصدیق کریں اور محفوظ کریں',
-              optPk: 'پاکستان (PKR)',
-              optUae: 'متحدہ عرب امارات (AED)',
-              optSa: 'سعودی عرب (SAR)',
-              optEu: 'برطانیہ اور یورپ (GBP / EUR)',
-              optGlobal: 'انٹرنیشنل (USD)',
               mEasy: 'ایزی پیسہ والٹ (EasyPaisa)',
               mJazz: 'جاز کیش والٹ (JazzCash)',
               mBank: 'بینک اکاؤنٹ (IBFT)',
@@ -5857,14 +6126,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
           : {
               cardTitle: 'My Profile & Bank Account (Biometric Lock)',
               cardKicker: 'FRESH THUMBPRINT REQUIRED FOR EVERY SAVE',
+              langLabel: 'Language:',
               lockHeading: 'Personal Details & Payout Security Lock',
               lockDesc:
-                'Update your mobile number, city, country, payment method, or bank account below. Every save requires a fresh thumbprint scan to prove you personally made the change.',
+                'Update your mobile number, payment method, or bank account below. Zero edits are saved without completing a fresh thumbprint verification scan.',
+              territoryLabel: 'Assigned Territory (Founder-Allotted Only):',
               sealedLabel: 'Verified:',
               nameLabel: 'Full Name & Agent ID (Locked)',
               phoneLabel: 'Mobile / WhatsApp Number',
-              countryLabel: 'Country / Region',
-              cityLabel: 'City / Area',
               methodLabel: 'Payout Method',
               bankLabel: 'Bank or Wallet Name',
               accountLabel: 'Account / Wallet Number',
@@ -5872,11 +6141,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               ibanLabel: 'IBAN (Optional for Wallet / Required for Bank Wire)',
               codeLabel: 'Verification Code:',
               saveBtn: 'Verify Thumbprint & Save Details',
-              optPk: 'Pakistan (PKR)',
-              optUae: 'United Arab Emirates (AED)',
-              optSa: 'Saudi Arabia (SAR)',
-              optEu: 'UK & Europe (GBP / EUR)',
-              optGlobal: 'Global (USD)',
               mEasy: 'EasyPaisa Mobile Wallet',
               mJazz: 'JazzCash Mobile Wallet',
               mBank: 'Bank Transfer (IBFT)',
@@ -5887,6 +6151,51 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
         return (
           <PortalCard title={pL.cardTitle} kicker={pL.cardKicker}>
             <div dir={profileDir} className={`space-y-4 min-w-0 ${profileDir === 'rtl' ? 'text-right' : 'text-left'}`}>
+              {/* Dedicated In-Card Language Switcher + Founder-Allotted Read-Only Territory */}
+              <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs font-mono">
+                  <Globe className="size-4 text-[#06B6D4] shrink-0" />
+                  <span className="text-[#8B949E] font-bold">{pL.langLabel}</span>
+                  <div dir="ltr" className="inline-flex items-center rounded-xl bg-[#161B22] border border-[#30363D] p-1 text-xs font-mono">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAgentLanguage('en');
+                        setEnrollmentLang('en');
+                      }}
+                      className={`min-h-[34px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'en' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                    >
+                      English
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAgentLanguage('ur');
+                        setEnrollmentLang('ur_roman');
+                      }}
+                      className={`min-h-[34px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'ur' || agentLanguage === 'ur_roman' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                    >
+                      اردو
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAgentLanguage('ar');
+                        setEnrollmentLang('ar');
+                      }}
+                      className={`min-h-[34px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'ar' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                    >
+                      العربية
+                    </button>
+                  </div>
+                </div>
+
+                <div dir="ltr" className="rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-1.5 text-[11px] font-mono text-left">
+                  <span className="text-[#8B949E] mr-1.5">{pL.territoryLabel}</span>
+                  <strong className="text-[#06B6D4]">{agentTerritory}</strong>
+                </div>
+              </div>
+
               <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                 <div className="flex items-start gap-2.5">
                   <Fingerprint className="size-5 text-[#D29922] shrink-0 mt-0.5" />
@@ -5895,9 +6204,9 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">{pL.lockDesc}</p>
                   </div>
                 </div>
-                <span className="rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1 text-[10px] font-mono text-[#3FB950] shrink-0">
-                  {pL.sealedLabel} <span dir="ltr">{profileBiometricSealTime}</span>
-                </span>
+                <div dir="ltr" className="rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1 text-[10px] font-mono text-[#3FB950] shrink-0 text-left">
+                  <span>{pL.sealedLabel} {profileBiometricSealTime}</span>
+                </div>
               </div>
 
               {payoutSaveStatus && (
@@ -5910,6 +6219,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 </div>
               )}
 
+              {/* Small Input & Data Boxes Strictly Left-to-Right (dir="ltr") for EN / UR / AR */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
                 <label className="space-y-1.5">
                   <span className="text-[10px] text-[#8B949E] uppercase block">{pL.nameLabel}</span>
@@ -5929,33 +6239,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     dir="ltr"
                     value={draftAgentPhone}
                     onChange={(e) => setDraftAgentPhone(e.target.value)}
-                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2.5 text-left text-[#F0F6FC] placeholder:text-[#484F58] focus:border-[#06B6D4] focus:outline-none"
-                  />
-                </label>
-
-                <label className="space-y-1.5">
-                  <span className="text-[10px] text-[#06B6D4] uppercase block font-bold">{pL.countryLabel}</span>
-                  <select
-                    dir="ltr"
-                    value={draftAgentRegion}
-                    onChange={(e) => setDraftAgentRegion(e.target.value as 'PK' | 'EUROPE' | 'MENA_UAE' | 'MENA_SA' | 'GLOBAL')}
-                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2.5 text-left text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
-                  >
-                    <option value="PK" className="bg-[#0D1117] text-[#F0F6FC]">{pL.optPk}</option>
-                    <option value="MENA_UAE" className="bg-[#0D1117] text-[#F0F6FC]">{pL.optUae}</option>
-                    <option value="MENA_SA" className="bg-[#0D1117] text-[#F0F6FC]">{pL.optSa}</option>
-                    <option value="EUROPE" className="bg-[#0D1117] text-[#F0F6FC]">{pL.optEu}</option>
-                    <option value="GLOBAL" className="bg-[#0D1117] text-[#F0F6FC]">{pL.optGlobal}</option>
-                  </select>
-                </label>
-
-                <label className="space-y-1.5">
-                  <span className="text-[10px] text-[#06B6D4] uppercase block font-bold">{pL.cityLabel}</span>
-                  <input
-                    type="text"
-                    dir="ltr"
-                    value={draftAgentTerritory}
-                    onChange={(e) => setDraftAgentTerritory(e.target.value)}
                     className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2.5 text-left text-[#F0F6FC] placeholder:text-[#484F58] focus:border-[#06B6D4] focus:outline-none"
                   />
                 </label>
@@ -6022,9 +6305,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-[#21262D]">
-                <span className="text-[11px] font-mono text-[#8B949E] min-w-0 break-all overflow-hidden [overflow-wrap:break-word]">
-                  {pL.codeLabel} <strong className="text-[#06B6D4] break-all [overflow-wrap:break-word]" dir="ltr">{profileThumbHash}</strong>
-                </span>
+                <div dir="ltr" className="text-[11px] font-mono text-[#8B949E] min-w-0 break-all overflow-hidden [overflow-wrap:break-word] text-left">
+                  <span>{pL.codeLabel} </span>
+                  <strong className="text-[#06B6D4] break-all [overflow-wrap:break-word]">{profileThumbHash}</strong>
+                </div>
                 <button
                   type="button"
                   onClick={() => setIsBiometricModalOpenForEdit(true)}
@@ -6407,21 +6691,37 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     <span className="text-[#3FB950] font-bold">{agentL.badge}</span>
                   </div>
 
-                  {/* Option A Net-Adjustment Card (Localized) */}
+                  {/* Option A Net-Adjustment Card (Localized · 40h / 2 Deals / 50k PKR) */}
                   <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B] p-4 space-y-3 font-mono">
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#9E6A03]/50 pb-3">
                       <span className="text-xs text-[#D29922] font-bold">{agentL.optionATitle}</span>
-                      <div className="rounded-xl bg-[#0D1117] border border-[#9E6A03] px-3 py-1 text-[11px]">
-                        <span className="text-[#8B949E] mr-1.5">{agentL.windowLabel}:</span>
-                        <span className="font-bold text-[#D29922]" dir="ltr">{countdownHours}h {countdownMinutes}m</span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="rounded-xl bg-[#0D1117] border border-[#9E6A03] px-3 py-1 text-[11px]">
+                          <span className="text-[#8B949E] mr-1.5">{agentL.windowLabel}:</span>
+                          <span className="font-bold text-[#D29922]" dir="ltr">
+                            {countdownHours}h {countdownMinutes}m / 40h · {pkCashDealsCount}/2 deals
+                          </span>
+                        </div>
+                        {cashLiabilityHeld > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRemitError(null);
+                              setIsRemitModalOpen(true);
+                            }}
+                            className="rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-3 py-1 text-[11px] font-bold uppercase transition"
+                          >
+                            {isArabic ? 'إيداع الآن' : isUrdu ? 'ابھی جمع کروائیں' : 'Deposit Now'}
+                          </button>
+                        )}
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                       <div className="rounded-xl bg-[#0D1117] border border-[#30363D] p-3">
                         <span className="text-[#8B949E] block text-[10px]">{agentL.prevCash}</span>
-                        <span className="text-base font-bold text-[#F0F6FC] mt-0.5 block" dir="ltr">PKR 15,000</span>
-                        <span className="text-[10px] text-[#8B949E]">{cashLiabilitySalon}</span>
+                        <span className="text-base font-bold text-[#F0F6FC] mt-0.5 block" dir="ltr">PKR {cashLiabilityHeld > 0 ? cashLiabilityHeld.toLocaleString() : '0'}</span>
+                        <span className="text-[10px] text-[#8B949E]">{cashLiabilityHeld > 0 ? cashLiabilitySalon : 'Cleared ✓'}</span>
                       </div>
                       <div className="rounded-xl bg-[#0D1117] border border-[#116329] p-3">
                         <span className="text-[#8B949E] block text-[10px]">{agentL.offset}</span>
@@ -7326,46 +7626,54 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 3. BIOMETRIC RE-SCAN MODAL FOR PROFILE EDITS (LOCALIZED EN/UR/AR) */}
+      {/* 3. BIOMETRIC RE-SCAN MODAL FOR PROFILE EDITS (LOCALIZED EN/UR/AR · STRICT) */}
       {/* ========================================================================= */}
       {isBiometricModalOpenForEdit && (() => {
         const isUrdu = agentLanguage === 'ur' || agentLanguage === 'ur_roman';
         const isArabic = agentLanguage === 'ar';
         const modalDir = isUrdu || isArabic ? 'rtl' : 'ltr';
+        const cancelBiometricModal = () => {
+          if (biometricScanTimerRef.current !== null) {
+            window.clearTimeout(biometricScanTimerRef.current);
+            biometricScanTimerRef.current = null;
+          }
+          setIsBiometricScanningForEdit(false);
+          setIsBiometricModalOpenForEdit(false);
+        };
         const mL = isArabic
           ? {
               kicker: 'تأكيد البصمة الأمنية',
               title: 'تأكيد تعديل الملف والحساب البنكي',
-              desc: 'لمنع أي تغيير غير مصرح به في حسابات العمولات، يرجى الضغط على مستشعر بصمة الإبهام أدناه.',
+              desc: 'لمنع أي تغيير غير مصرح به في حسابات العمولات، يرجى الضغط على مستشعر بصمة الإبهام أدناه. لن يتم حفظ أي تعديل بدون إتمام البصمة.',
               scanning: 'جاري قراءة مستشعر البصمة...',
               tapPrompt: 'المس مستشعر البصمة للتأكيد',
-              cancel: 'إلغاء التعديل',
+              cancel: 'إلغاء التعديل (بدون حفظ)',
               savedMsg: 'تم التأكيد بالبصمة وحفظ البيانات بنجاح:',
             }
           : isUrdu
           ? {
               kicker: 'انگوٹھے کی تصدیق لازمی ہے',
               title: 'پروفائل اور بینک تبدیلی کی تصدیق کریں',
-              desc: 'آپ کے کمیشن اکاؤنٹ کو محفوظ رکھنے کے لیے نیچے دیے گئے انگوٹھے کے سینسر کو ٹچ کریں۔',
+              desc: 'آپ کے کمیشن اکاؤنٹ کو محفوظ رکھنے کے لیے نیچے دیے گئے انگوٹھے کے سینسر کو ٹچ کریں۔ بغیر بائیومیٹرک تصدیق کے کوئی تبدیلی محفوظ نہیں ہوگی۔',
               scanning: 'انگوٹھا اسکین ہو رہا ہے...',
               tapPrompt: 'شناخت کی تصدیق کے لیے یہاں ٹچ کریں',
-              cancel: 'منسوخ کریں',
+              cancel: 'منسوخ کریں (محفوظ نہ کریں)',
               savedMsg: 'انگوٹھے کی تصدیق کے بعد محفوظ ہو گیا:',
             }
           : {
               kicker: 'BIOMETRIC SECURITY CHECK',
               title: 'Confirm Profile & Bank Update',
-              desc: 'To keep your payout account safe, touch the thumbprint sensor below to confirm you personally made these changes.',
+              desc: 'To keep your payout account safe, touch the thumbprint sensor below to confirm you personally made these changes. Zero edits save without biometric.',
               scanning: 'Reading thumbprint...',
               tapPrompt: 'Tap sensor to confirm identity',
-              cancel: 'Cancel Update',
+              cancel: 'Cancel Update (Discard Save)',
               savedMsg: 'Thumbprint Confirmed & Saved:',
             };
 
         return (
           <div
             className="fixed inset-0 z-[95] grid place-items-center bg-[#0D1117]/80 p-3 sm:p-5 backdrop-blur-md"
-            onClick={() => setIsBiometricModalOpenForEdit(false)}
+            onClick={cancelBiometricModal}
           >
             <div
               dir={modalDir}
@@ -7374,7 +7682,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
             >
               <button
                 type="button"
-                onClick={() => setIsBiometricModalOpenForEdit(false)}
+                onClick={cancelBiometricModal}
                 className="min-h-[44px] min-w-[44px] grid place-items-center absolute right-4 top-4 rounded-lg p-1.5 text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#21262D] transition"
                 aria-label="Close biometric gate"
               >
@@ -7398,14 +7706,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               <div className="py-2">
                 <button
                   type="button"
+                  disabled={isBiometricScanningForEdit}
                   onClick={() => {
                     setIsBiometricScanningForEdit(true);
-                    setTimeout(() => {
+                    biometricScanTimerRef.current = window.setTimeout(() => {
+                      biometricScanTimerRef.current = null;
                       const updatedHash = `BIO-${Math.random().toString(16).slice(2, 6).toUpperCase()}-${Math.random().toString(16).slice(2, 6).toUpperCase()}`;
                       const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ✓';
                       setAgentWhatsApp(draftAgentPhone);
-                      setAgentTerritory(draftAgentTerritory);
-                      setAgentOperatingRegion(draftAgentRegion);
                       setAgentPayoutMethod(draftAgentPayoutMethod);
                       setAgentBankName(draftAgentBankName);
                       setAgentPayoutAccount(draftAgentPayoutAccount);
@@ -7419,7 +7727,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                             ? {
                                 ...ag,
                                 phone: draftAgentPhone,
-                                city: draftAgentTerritory,
                                 payoutMethod: draftAgentPayoutMethod,
                                 payoutAccount: draftAgentPayoutAccount,
                                 payoutTitle: draftAgentPayoutTitle,
@@ -7457,11 +7764,144 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
 
               <button
                 type="button"
-                onClick={() => setIsBiometricModalOpenForEdit(false)}
+                onClick={cancelBiometricModal}
                 className="min-h-[44px] px-4 text-xs font-mono text-[#8B949E] hover:text-[#F0F6FC] underline"
               >
                 {mL.cancel}
               </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================================= */}
+      {/* 3B. WORKCRAFT MAIN ACCOUNT DEPOSIT & AUTO-RESTORE MODAL (PAKISTAN AGENTS) */}
+      {/* ========================================================================= */}
+      {isRemitModalOpen && (() => {
+        const isUrdu = agentLanguage === 'ur' || agentLanguage === 'ur_roman';
+        const isArabic = agentLanguage === 'ar';
+        const rDir = isUrdu || isArabic ? 'rtl' : 'ltr';
+        return (
+          <div
+            className="fixed inset-0 z-[98] grid place-items-center bg-[#0D1117]/85 p-3 sm:p-5 backdrop-blur-md"
+            onClick={() => setIsRemitModalOpen(false)}
+          >
+            <div
+              dir={rDir}
+              onClick={(e) => e.stopPropagation()}
+              className={`w-full max-w-[480px] rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 space-y-4 ${
+                rDir === 'rtl' ? 'text-right' : 'text-left'
+              }`}
+            >
+              <div className="flex items-start justify-between border-b border-[#21262D] pb-3 gap-2">
+                <div>
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#06B6D4] block">
+                    WORKCRAFT OFFICIAL MAIN ACCOUNT DEPOSIT
+                  </span>
+                  <h3 className="text-base sm:text-lg font-black text-[#F0F6FC]">
+                    {isArabic
+                      ? 'تأكيد إيداع النقد واستعادة حساب الوكيل'
+                      : isUrdu
+                      ? 'ورک کرافٹ مین اکاؤنٹ میں ادائیگی اور پورٹل بحالی'
+                      : 'Deposit Cash & Auto-Restore Agent Hub'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsRemitModalOpen(false)}
+                  className="min-h-[40px] min-w-[40px] rounded-lg grid place-items-center text-[#8B949E] hover:text-[#F0F6FC]"
+                >
+                  <X className="size-5" />
+                </button>
+              </div>
+
+              <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B]/50 p-3.5 space-y-1.5 text-xs font-mono">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#8B949E]">
+                    {isArabic ? 'المبلغ المستحق:' : isUrdu ? 'واجب الادا رقم:' : 'Total Cash Due:'}
+                  </span>
+                  <strong dir="ltr" className="text-base text-[#D29922]">
+                    PKR {cashLiabilityHeld.toLocaleString()}
+                  </strong>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="text-[#8B949E]">WORKCRAFT Official Account:</span>
+                  <span dir="ltr" className="text-[#06B6D4] font-bold">Meezan Bank · 0102-0104829104</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="text-[#8B949E]">Raast / Wallet ID:</span>
+                  <span dir="ltr" className="text-[#3FB950] font-bold">0300-WORKCRAFT (PKR)</span>
+                </div>
+              </div>
+
+              <form onSubmit={handleVerifyWorkcraftRemittance} className="space-y-3 text-xs font-mono">
+                <div>
+                  <label className="text-[10px] text-[#8B949E] uppercase block mb-1">
+                    {isArabic ? 'قناة الإيداع:' : isUrdu ? 'ادائیگی کا چینل:' : 'Deposit Channel:'}
+                  </label>
+                  <select
+                    dir="ltr"
+                    value={remitChannel}
+                    onChange={(e) => setRemitChannel(e.target.value as any)}
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-left text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+                  >
+                    <option value="Meezan Bank IBFT">Meezan Bank IBFT (WORKCRAFT Main)</option>
+                    <option value="Raast Instant Pay">Raast Instant Pay</option>
+                    <option value="EasyPaisa Official">EasyPaisa Official Merchant</option>
+                    <option value="JazzCash Official">JazzCash Official Merchant</option>
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] text-[#06B6D4] uppercase font-bold">
+                      {isArabic ? 'رقم المرجع / TID:' : isUrdu ? 'ٹرانزیکشن آئی ڈی (TID):' : 'Deposit TID / Bank Reference *'}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setRemitTid(`WC-DEP-${Math.floor(10000000 + Math.random() * 90000000)}`)}
+                      className="text-[10px] text-[#D29922] hover:underline font-bold"
+                    >
+                      Auto-Fill Verified Slip ID
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={remitTid}
+                    onChange={(e) => setRemitTid(e.target.value)}
+                    placeholder="e.g. WC-DEP-84920194"
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-left text-[#F0F6FC] placeholder:text-[#484F58] focus:border-[#06B6D4] focus:outline-none"
+                  />
+                </div>
+
+                {remitError && (
+                  <p className="text-[11px] text-[#F85149] bg-[#4C1C1D] border border-[#da3633] rounded-xl p-2.5">
+                    {remitError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isVerifyingRemit}
+                  className="w-full min-h-[48px] rounded-xl bg-[#3FB950] hover:bg-[#56d364] text-[#0D1117] py-3 text-xs font-mono font-black uppercase transition flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <CheckCircle2 className="size-4" />
+                  <span>
+                    {isVerifyingRemit
+                      ? isArabic
+                        ? 'جاري التحقق من الإيداع...'
+                        : isUrdu
+                        ? 'ادائیگی کی تصدیق ہو رہی ہے...'
+                        : 'Verifying Payment...'
+                      : isArabic
+                      ? 'تأكيد الإيداع واستعادة البوابة فوراً'
+                      : isUrdu
+                      ? 'ادائیگی کی تصدیق کریں اور پورٹل بحال کریں'
+                      : 'Verify Deposit & Auto-Restore Hub'}
+                  </span>
+                </button>
+              </form>
             </div>
           </div>
         );
@@ -8531,7 +8971,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       </span>
                     </span>
                     <span className="text-[10px] font-mono text-[#D29922] bg-[#3B2E0B] border border-[#9E6A03] px-2 py-0.5 rounded font-bold shrink-0">
-                      {detectCountryFromPhone(enrollAgentPhone, enrollAgentCity).code === 'PK' ? '48H CASH RULE' : '100% CASHLESS'}
+                      {detectCountryFromPhone(enrollAgentPhone, enrollAgentCity).code === 'PK' ? '40H · 50K · 2 DEALS' : '100% CASHLESS'}
                     </span>
                   </div>
 
@@ -8549,11 +8989,11 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       {detectCountryFromPhone(enrollAgentPhone, enrollAgentCity).code === 'PK' ? (
                         enrollmentLang === 'ur_roman' ? (
                           <p dir="rtl" className="text-sm text-[#F0F6FC] font-sans leading-relaxed text-right break-words [overflow-wrap:break-word]">
-                            &ldquo;میں اقرار کرتا ہوں کہ تمام وصول شدہ نقدی رقم ۴۸ گھنٹے کے اندر اندر ورک کرافٹ کے آفیشل اکاؤنٹس (ایزی پیسہ، جاز کیش یا بینک اکاؤنٹ) میں جمع کرواؤں گا۔ اگر ۴۸ گھنٹے کے اندر رقم جمع نہ کروائی گئی تو میرا ایجنٹ آئی ڈی فوری طور پر معطل کر دیا جائے گا اور ورک کرافٹ پاکستان کے قوانین کے تحت قانونی چارہ جوئی کا مکمل حق محفوظ رکھتا ہے۔&rdquo;
+                            &ldquo;میں اقرار کرتا ہوں کہ تمام وصول شدہ نقدی رقم ۴۰ گھنٹے، ۵۰,۰۰۰ روپے حد یا ۲ ڈیلز مکمل ہونے سے پہلے ورک کرافٹ کے آفیشل اکاؤنٹس میں جمع کرواؤں گا۔ اگر ان حدود میں سے کوئی بھی حد پار ہوئی تو میرا ایجنٹ آئی ڈی خودکار طور پر عارضی بند کر دیا جائے گا اور رقم جمع کرانے پر بحال ہوگا۔&rdquo;
                           </p>
                         ) : (
                           <p dir="ltr" className="text-xs text-[#F0F6FC] font-sans leading-relaxed text-left break-words [overflow-wrap:break-word]">
-                            &ldquo;I agree to remit all physical cash collected within 48 hours into WORKCRAFT Official Accounts (EasyPaisa, JazzCash, or Official Bank Accounts). I acknowledge that if dues are not remitted within 48 hours, my Agent ID will be immediately suspended and WORKCRAFT Local reserves the full legal right to initiate formal recovery and legal actions under the laws of Pakistan.&rdquo;
+                            &ldquo;I agree to remit all physical cash collected within 40 hours (or before reaching PKR 50,000 held / 2 cash deals) into WORKCRAFT Official Accounts (EasyPaisa, JazzCash, or Meezan Bank). I acknowledge that hitting PKR 50,000, 2 deals, or 40 hours automatically pauses my Agent ID until remitted and verified.&rdquo;
                           </p>
                         )
                       ) : enrollmentLang === 'ar' ? (
@@ -8568,19 +9008,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     </div>
                   </label>
 
-                  {/* Optical Biometric Legal Stamp Scanner (MANDATORY) */}
-                  <div className="p-3 rounded-xl bg-[#0D1117] border border-[#30363D] flex flex-wrap items-center justify-between gap-3 overflow-hidden">
-                    <div className="flex items-center gap-2.5 text-xs font-mono min-w-0 flex-1">
-                      <Fingerprint className={`size-5 shrink-0 ${enrollLegalBiometricStamped ? 'text-[#3FB950]' : 'text-[#06B6D4]'}`} />
-                      <div className="min-w-0 flex-1">
-                        <span className="text-[#F0F6FC] font-bold block">
-                          {enrollmentLang === 'ur_roman' ? 'قانونی بایومیٹرک مہر (لازمی)' : enrollmentLang === 'ar' ? 'البصمة القانونية (إلزامي)' : 'Legal Biometric Stamp (Mandatory)'}
-                        </span>
-                        <span dir="ltr" className={`text-[10px] block break-all overflow-hidden [overflow-wrap:break-word] ${enrollLegalBiometricStamped ? 'text-[#3FB950]' : 'text-[#D29922]'}`}>
-                          {enrollLegalStampHash || (enrollmentLang === 'ur_roman' ? 'مہر لگانے کے لیے بٹن دبائیں' : enrollmentLang === 'ar' ? 'اضغط لتسجيل البصمة القانونية' : 'Pending mandatory biometric signature')}
-                        </span>
-                      </div>
-                    </div>
+                  {/* Legal Biometric Stamp Scanner — Exact Same Hardware Sensor UI as Step 2 Under Selfie (Query 1) */}
+                  <div className="rounded-2xl bg-[#0D1117] border border-[#30363D] p-4 text-center space-y-2.5 overflow-hidden">
+                    <span className="text-xs font-mono font-bold text-[#F0F6FC] block">
+                      {enrollmentLang === 'ur_roman' ? 'قانونی بایومیٹرک مہر (لازمی)' : enrollmentLang === 'ar' ? 'البصمة القانونية (إلزامي)' : 'Legal Biometric Stamp (Mandatory)'}
+                    </span>
+
                     <button
                       type="button"
                       onClick={() => {
@@ -8592,14 +9025,35 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           setEnrollLegalStampHash('SHA256: 7f81-810a-agent-legal-stamped');
                         }, 900);
                       }}
-                      className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition shrink-0 border ${
-                        enrollLegalBiometricStamped
-                          ? 'bg-[#0D3822] text-[#3FB950] border-[#116329]'
-                          : 'bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 text-[#D29922] border-[#9E6A03]'
-                      }`}
+                      className={`mx-auto size-24 rounded-full border-2 ${
+                        isLegalStampScanning
+                          ? 'border-[#06B6D4] bg-[#06B6D4]/20 animate-pulse'
+                          : enrollLegalBiometricStamped
+                          ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
+                          : 'border-[#30363D] bg-[#161B22] hover:border-[#06B6D4]'
+                      } transition grid place-items-center relative`}
                     >
-                      {isLegalStampScanning ? 'Scanning...' : enrollLegalBiometricStamped ? '✓ Stamped' : 'Stamp Thumbprint'}
+                      <Fingerprint className={`size-12 ${enrollLegalBiometricStamped ? 'text-[#3FB950]' : 'text-[#06B6D4]'}`} />
+                      {isLegalStampScanning && (
+                        <div className="absolute inset-0 rounded-full border-t-2 border-[#06B6D4] animate-spin" />
+                      )}
                     </button>
+
+                    <span className="text-xs font-mono text-[#8B949E] block break-all overflow-hidden [overflow-wrap:break-word]">
+                      {isLegalStampScanning ? (
+                        enrollmentLang === 'ur_roman' ? 'انگوٹھا سکین ہو رہا ہے...' : enrollmentLang === 'ar' ? 'جاري قراءة البصمة...' : 'Reading hardware sensor...'
+                      ) : enrollLegalBiometricStamped ? (
+                        enrollmentLang === 'ur_roman' ? (
+                          <>✓ قانونی مہر محفوظ: <span dir="ltr" className="text-[#3FB950]">{enrollLegalStampHash}</span></>
+                        ) : enrollmentLang === 'ar' ? (
+                          <>✓ تم توثيق البصمة القانونية: <span dir="ltr" className="text-[#3FB950]">{enrollLegalStampHash}</span></>
+                        ) : (
+                          <>✓ Legal Stamp Stored: <span dir="ltr" className="text-[#3FB950]">{enrollLegalStampHash}</span></>
+                        )
+                      ) : (
+                        enrollmentLang === 'ur_roman' ? 'لازمی: قانونی انگوٹھے کی مہر لگانے کے لیے ٹچ کریں' : enrollmentLang === 'ar' ? 'إلزامي: المس لمسح البصمة القانونية' : 'Mandatory: Touch sensor to stamp legal thumbprint'
+                      )}
+                    </span>
                   </div>
                 </div>
 
@@ -8671,7 +9125,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           thumbHash: enrollThumbHash || 'SHA256: 3c9f-88a1-agent-thumb-enrolled',
                           legalRemittanceAgreed: true,
                           legalTermsText: detStep4.code === 'PK'
-                            ? 'Agreed: Remit physical cash within 48h to WORKCRAFT Official Accounts under Pakistani law.'
+                            ? 'Agreed: Remit physical cash within 40h (max PKR 50,000 / 2 cash deals) to WORKCRAFT Official Accounts under Pakistani law.'
                             : 'Agreed: 100% cashless digital policy, immediate contract termination on misconduct.',
                           guarantorName: enrollGuarantorName || undefined,
                           guarantorPhone: enrollGuarantorPhone || undefined,
@@ -8809,141 +9263,188 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 5. HOME SCREEN APP SHORTCUT MODAL (UNIFIED WORKCRAFT LABEL - LOCALIZED) */}
+      {/* 5. HOME SCREEN APP SHORTCUT MODAL (AUTO-DETECTS ANDROID VS IPHONE - QUERY 2) */}
       {/* ========================================================================= */}
-      {showPwaInstallModal && (
-        <div
-          className="fixed inset-0 z-[105] grid place-items-center bg-[#0D1117]/80 p-3 sm:p-5 backdrop-blur-md"
-          onClick={() => setShowPwaInstallModal(false)}
-        >
+      {showPwaInstallModal && (() => {
+        const activePwaOs = pwaDeviceOverride ?? detectedDeviceOs;
+        const isIosDevice = activePwaOs === 'IOS';
+        return (
           <div
-            onClick={(e) => e.stopPropagation()}
-            dir={enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'rtl' : 'ltr'}
-            className={`w-full max-w-[480px] rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 space-y-4 ${
-              enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'text-right' : 'text-left'
-            }`}
+            className="fixed inset-0 z-[105] grid place-items-center bg-[#0D1117]/80 p-3 sm:p-5 backdrop-blur-md"
+            onClick={() => setShowPwaInstallModal(false)}
           >
-            <div className="flex items-start justify-between border-b border-[#21262D] pb-3 gap-2">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/icon.svg"
-                  alt="WorkCraft Mobile Shortcut Icon"
-                  className="size-[60px] rounded-2xl border border-[#9E6A03] shrink-0"
-                />
-                <div>
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#3FB950] block">
-                    {enrollmentLang === 'ur_roman'
-                      ? 'موبائل ہوم اسکرین شارٹ کٹ'
-                      : enrollmentLang === 'ar'
-                      ? 'اختصار الشاشة الرئيسية للهاتف'
-                      : 'PHONE HOME SCREEN SHORTCUT'}
-                  </span>
-                  <h3 className="text-base sm:text-lg font-semibold text-[#F0F6FC]">
-                    {enrollmentLang === 'ur_roman' ? (
-                      <>فون کی ہوم اسکرین پر <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> آئیکن شامل کریں</>
-                    ) : enrollmentLang === 'ar' ? (
-                      <>أضف أيقونة <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> إلى الشاشة الرئيسية للهاتف</>
-                    ) : (
-                      <>Add <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> icon to phone home screen</>
-                    )}
-                  </h3>
-                  <span className="text-[10px] font-mono text-[#06B6D4] block">
-                    {enrollmentLang === 'ur_roman'
-                      ? 'گولڈ ڈبلیو + نیلا ورک کرافٹ · یونیفائیڈ لیبل: WorkCraft'
-                      : enrollmentLang === 'ar'
-                      ? 'شعار ذهبي W + أزرق سماوي · الاسم الموحد: WorkCraft'
-                      : 'Gold W + Cyan-Blue WORKCRAFT · Unified Label: WorkCraft'}
-                  </span>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              dir={enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'rtl' : 'ltr'}
+              className={`w-full max-w-[480px] rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 space-y-4 ${
+                enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'text-right' : 'text-left'
+              }`}
+            >
+              <div className="flex items-start justify-between border-b border-[#21262D] pb-3 gap-2">
+                <div className="flex items-center gap-3">
+                  <img
+                    src="/icon.svg"
+                    alt="WorkCraft Mobile Shortcut Icon"
+                    className="size-[60px] rounded-2xl border border-[#9E6A03] shrink-0"
+                  />
+                  <div>
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#3FB950] block">
+                      {enrollmentLang === 'ur_roman'
+                        ? 'موبائل ہوم اسکرین شارٹ کٹ'
+                        : enrollmentLang === 'ar'
+                        ? 'اختصار الشاشة الرئيسية للهاتف'
+                        : 'PHONE HOME SCREEN SHORTCUT'}
+                    </span>
+                    <h3 className="text-base sm:text-lg font-semibold text-[#F0F6FC]">
+                      {enrollmentLang === 'ur_roman' ? (
+                        <>فون کی ہوم اسکرین پر <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> آئیکن شامل کریں</>
+                      ) : enrollmentLang === 'ar' ? (
+                        <>أضف أيقونة <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> إلى الشاشة الرئيسية للهاتف</>
+                      ) : (
+                        <>Add <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> icon to phone home screen</>
+                      )}
+                    </h3>
+                    <span className="text-[10px] font-mono text-[#06B6D4] block">
+                      {isIosDevice
+                        ? enrollmentLang === 'ur_roman'
+                          ? 'خودکار شناخت شدہ ڈیوائس: 🍎 iPhone / iOS (Safari)'
+                          : enrollmentLang === 'ar'
+                          ? 'تم اكتشاف الجهاز تلقائياً: 🍎 آيفون / iOS'
+                          : 'Auto-Detected Device: 🍎 iPhone / iOS (Safari)'
+                        : enrollmentLang === 'ur_roman'
+                        ? 'خودکار شناخت شدہ ڈیوائس: 📱 Android (Chrome)'
+                        : enrollmentLang === 'ar'
+                        ? 'تم اكتشاف الجهاز تلقائياً: 📱 أندرويد (Chrome)'
+                        : 'Auto-Detected Device: 📱 Android (Chrome)'}
+                    </span>
+                  </div>
                 </div>
+                <button
+                  onClick={() => setShowPwaInstallModal(false)}
+                  className="min-h-[44px] min-w-[44px] rounded-lg grid place-items-center text-[#8B949E] hover:text-[#F0F6FC] transition shrink-0"
+                >
+                  <X className="size-5" />
+                </button>
               </div>
+
+              <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
+                {enrollmentLang === 'ur_roman'
+                  ? 'آپ کے فون کی قسم کے مطابق ورک کرافٹ آئیکن ہوم اسکرین پر شامل کرنے کا آسان طریقہ:'
+                  : enrollmentLang === 'ar'
+                  ? 'بناءً على نوع هاتفك المكتشف، إليك الطريقة السريعة لإضافة أيقونة WorkCraft إلى الشاشة الرئيسية:'
+                  : 'Tailored instructions detected for your phone to place the WorkCraft icon directly on your home screen:'}
+              </p>
+
+              {isIosDevice ? (
+                <div className="rounded-xl bg-[#0D1117] p-3.5 border border-[#D29922]/50 space-y-1.5 font-mono text-xs">
+                  <span className="text-[#D29922] font-bold block">
+                    {enrollmentLang === 'ur_roman'
+                      ? '🍎 آئی فون / آئی پیڈ (Safari):'
+                      : enrollmentLang === 'ar'
+                      ? '🍎 آيفون / آيباد (Safari):'
+                      : '🍎 iPhone / iPad (Safari):'}
+                  </span>
+                  <p className="text-[#8B949E] font-sans text-[11px] leading-relaxed">
+                    {enrollmentLang === 'ur_roman' ? (
+                      <>
+                        سفاری میں نیچے شیئر کا بٹن (<Share2 className="size-3 inline mx-1" />) دبائیں اور اسکرول کر کے <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong> منتخب کریں۔
+                      </>
+                    ) : enrollmentLang === 'ar' ? (
+                      <>
+                        في Safari اضغط على أيقونة المشاركة (<Share2 className="size-3 inline mx-1" />) بالأسفل ثم اختر <strong className="text-[#F0F6FC]">&quot;إضافة إلى الصفحة الرئيسية&quot;</strong>.
+                      </>
+                    ) : (
+                      <>
+                        Tap the Safari <strong className="text-[#F0F6FC]">Share icon (<Share2 className="size-3 inline" />)</strong> at the bottom bar ➔ scroll and tap <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong>.
+                      </>
+                    )}
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-xl bg-[#0D1117] p-3.5 border border-[#06B6D4]/50 space-y-1.5 font-mono text-xs">
+                  <span className="text-[#06B6D4] font-bold block">
+                    {enrollmentLang === 'ur_roman'
+                      ? '📱 اینڈرائیڈ (Chrome / Samsung Internet):'
+                      : enrollmentLang === 'ar'
+                      ? '📱 أندرويد (Chrome / Samsung Internet):'
+                      : '📱 Android (Chrome / Samsung Internet):'}
+                  </span>
+                  <p className="text-[#8B949E] font-sans text-[11px] leading-relaxed">
+                    {enrollmentLang === 'ur_roman' ? (
+                      <>
+                        نیچے دیا گیا بٹن دبائیں یا کروم مینو (⋮) کھول کر <strong className="text-[#F0F6FC]">&quot;Install app&quot;</strong> یا <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong> منتخب کریں۔
+                      </>
+                    ) : enrollmentLang === 'ar' ? (
+                      <>
+                        اضغط على الزر أدناه أو من قائمة Chrome (⋮) اختر <strong className="text-[#F0F6FC]">&quot;تثبيت التطبيق&quot;</strong> أو <strong className="text-[#F0F6FC]">&quot;إضافة إلى الشاشة الرئيسية&quot;</strong>.
+                      </>
+                    ) : (
+                      <>
+                        Tap the button below or tap Chrome menu (⋮) ➔ select <strong className="text-[#F0F6FC]">&quot;Install app&quot;</strong> or <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong>.
+                      </>
+                    )}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-[10px] font-mono text-[#6E7681]">
+                <span>
+                  {enrollmentLang === 'ur_roman'
+                    ? 'دوسرا فون استعمال کر رہے ہیں؟'
+                    : enrollmentLang === 'ar'
+                    ? 'تستخدم هاتفاً آخر؟'
+                    : 'Using a different phone?'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPwaDeviceOverride(isIosDevice ? 'ANDROID' : 'IOS')}
+                  className="text-[#06B6D4] hover:underline font-bold"
+                >
+                  {isIosDevice
+                    ? enrollmentLang === 'ur_roman'
+                      ? 'Android طریقہ دیکھیں'
+                      : enrollmentLang === 'ar'
+                      ? 'عرض تعليمات أندرويد'
+                      : 'Switch to Android Guide'
+                    : enrollmentLang === 'ur_roman'
+                    ? 'iPhone طریقہ دیکھیں'
+                    : enrollmentLang === 'ar'
+                    ? 'عرض تعليمات آيفون'
+                    : 'Switch to iPhone Guide'}
+                </button>
+              </div>
+
               <button
-                onClick={() => setShowPwaInstallModal(false)}
-                className="min-h-[44px] min-w-[44px] rounded-lg grid place-items-center text-[#8B949E] hover:text-[#F0F6FC] transition shrink-0"
+                type="button"
+                onClick={async () => {
+                  if (!isIosDevice && deferredInstallPromptRef.current) {
+                    try {
+                      await deferredInstallPromptRef.current.prompt();
+                      deferredInstallPromptRef.current = null;
+                    } catch {
+                      // ignore
+                    }
+                  }
+                  setIsPwaInstalledConfirmed(true);
+                  setShowPwaInstallModal(false);
+                }}
+                className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] py-3 text-xs font-mono font-black uppercase transition flex items-center justify-center gap-2"
               >
-                <X className="size-5" />
+                <Download className="size-4" />
+                <span>
+                  {enrollmentLang === 'ur_roman'
+                    ? 'ابھی "WorkCraft" آئیکن محفوظ کریں'
+                    : enrollmentLang === 'ar'
+                    ? 'حفظ أيقونة "WorkCraft" الآن'
+                    : isIosDevice
+                    ? 'Confirm iPhone Shortcut Ready'
+                    : 'Add WorkCraft Icon Now'}
+                </span>
               </button>
             </div>
-
-            <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
-              {enrollmentLang === 'ur_roman'
-                ? 'آپ کا فون ہوم اسکرین پر ورک کرافٹ کا آئیکن لگانے سے پہلے ایک فوری تصدیقی ٹیپ مانگتا ہے:'
-                : enrollmentLang === 'ar'
-                ? 'يتطلب هاتفك نقرة تأكيد سريعة لإضافة أيقونة وورك كرافت إلى الشاشة الرئيسية:'
-                : 'Your phone asks for one quick confirmation tap before placing the WorkCraft icon on your home screen:'}
-            </p>
-
-            <div className="space-y-2.5 font-mono text-xs">
-              <div className="rounded-xl bg-[#0D1117] p-3 border border-[#30363D] space-y-1">
-                <span className="text-[#06B6D4] font-bold block">
-                  {enrollmentLang === 'ur_roman'
-                    ? '📱 اینڈرائیڈ (Chrome / Samsung Internet):'
-                    : enrollmentLang === 'ar'
-                    ? '📱 أندرويد (Chrome / Samsung Internet):'
-                    : '📱 Android (Chrome / Samsung Internet):'}
-                </span>
-                <p className="text-[#8B949E] font-sans text-[11px]">
-                  {enrollmentLang === 'ur_roman' ? (
-                    <>
-                      نیچے دیا گیا بٹن دبائیں یا کروم مینو (⋮) کھول کر <strong className="text-[#F0F6FC]">&quot;Install app&quot;</strong> یا <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong> منتخب کریں۔
-                    </>
-                  ) : enrollmentLang === 'ar' ? (
-                    <>
-                      اضغط على الزر أدناه أو من قائمة Chrome (⋮) اختر <strong className="text-[#F0F6FC]">&quot;تثبيت التطبيق&quot;</strong> أو <strong className="text-[#F0F6FC]">&quot;إضافة إلى الشاشة الرئيسية&quot;</strong>.
-                    </>
-                  ) : (
-                    <>
-                      Tap the button below or tap Chrome menu (⋮) ➔ select <strong className="text-[#F0F6FC]">&quot;Install app&quot;</strong> or <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong>.
-                    </>
-                  )}
-                </p>
-              </div>
-
-              <div className="rounded-xl bg-[#0D1117] p-3 border border-[#30363D] space-y-1">
-                <span className="text-[#D29922] font-bold block">
-                  {enrollmentLang === 'ur_roman'
-                    ? '🍎 آئی فون / آئی پیڈ (Safari):'
-                    : enrollmentLang === 'ar'
-                    ? '🍎 آيفون / آيباد (Safari):'
-                    : '🍎 iPhone / iPad (Safari):'}
-                </span>
-                <p className="text-[#8B949E] font-sans text-[11px]">
-                  {enrollmentLang === 'ur_roman' ? (
-                    <>
-                      سفاری میں نیچے شیئر کا بٹن (<Share2 className="size-3 inline mx-1" />) دبائیں اور اسکرول کر کے <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong> منتخب کریں۔
-                    </>
-                  ) : enrollmentLang === 'ar' ? (
-                    <>
-                      في Safari اضغط على أيقونة المشاركة (<Share2 className="size-3 inline mx-1" />) بالأسفل ثم اختر <strong className="text-[#F0F6FC]">&quot;إضافة إلى الصفحة الرئيسية&quot;</strong>.
-                    </>
-                  ) : (
-                    <>
-                      Tap the Safari <strong className="text-[#F0F6FC]">Share icon (<Share2 className="size-3 inline" />)</strong> at the bottom bar ➔ scroll and tap <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong>.
-                    </>
-                  )}
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsPwaInstalledConfirmed(true);
-                setShowPwaInstallModal(false);
-              }}
-              className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] py-3 text-xs font-mono font-black uppercase transition flex items-center justify-center gap-2"
-            >
-              <Download className="size-4" />
-              <span>
-                {enrollmentLang === 'ur_roman'
-                  ? 'ابھی "WorkCraft" آئیکن محفوظ کریں'
-                  : enrollmentLang === 'ar'
-                  ? 'حفظ أيقونة "WorkCraft" الآن'
-                  : 'Add WorkCraft Icon Now'}
-              </span>
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
