@@ -40,6 +40,7 @@ import { BroadcastTab } from './Tabs/BroadcastTab';
 import { SalonWindowPosterPdf } from './SalonWindowPosterPdf';
 import { Contact, SalonProfile } from '../types';
 import { generate214Contacts } from '../data/mockData';
+import type { OnboardedSalonPayload } from './FieldAgentHub';
 
 interface BookingRecord {
   id: string;
@@ -405,20 +406,24 @@ const REGION_CONFIGS: Record<
   },
   GLOBAL: {
     regionKey: 'EUROPE',
-    regionLabel: 'Europe & Global (USD)',
+    regionLabel: 'Outside Pakistan / International (USD)',
     currency: 'USD',
     symbol: '$',
-    clientLanguages: [{ id: 'en', label: 'English' }],
+    clientLanguages: [
+      { id: 'en', label: 'English' },
+      { id: 'ar', label: 'العربية (Arabic)' },
+      { id: 'ur', label: 'اردو / Roman Urdu' },
+    ],
     packages: [
       {
         id: 'STARTER',
         name: 'Starter Setup',
         setupFee: 75,
-        monthlyMaint: 7.5,
+        monthlyMaint: 8,
         bookingsLimit: '500 bookings/mo',
         badge: 'Entry',
         features: [
-          '24/7 WhatsApp Auto-Reply Concierge',
+          '24/7 WhatsApp Auto-Reply Concierge (English, Arabic & Urdu)',
           'Live Appointment Queue & Chair Status Tracker',
           '1-Tap Service Rate Editor Synced to Bot',
         ],
@@ -464,18 +469,194 @@ const REGION_CONFIGS: Record<
       },
     ],
     paymentChannels: [
-      { id: 'Stripe', label: 'Stripe / International Card', detail: 'Instant Global Card Checkout (USD)' },
-      { id: 'Wire', label: 'SWIFT / Wire Transfer', detail: 'WORKCRAFT-GLOBAL-SWIFT' },
+      { id: 'Stripe', label: 'Stripe / Apple Pay / Card', detail: 'Instant Global Card Checkout (USD)' },
+      { id: 'Card', label: 'International Debit / Credit Card', detail: 'Visa, Mastercard & Amex (USD)' },
+      { id: 'Wire', label: 'SWIFT / Wire Transfer', detail: 'WORKCRAFT-GLOBAL-SWIFT-USD' },
     ],
   },
 };
 
-function getRegionFromPhone(phone: string) {
+export const SERVICE_TRANSLATIONS: Record<string, { ur: string; ar: string }> = {
+  'Master Haircut & Skin Fade': { ur: 'ماسٹر ہیر کٹ اور سکن فید', ar: 'قص شعر متطور وتدرج دقيق' },
+  'Royal Beard Sculpt & Ozone Steam': { ur: 'رائل بیئرڈ ڈیزائن اور اوزون اسٹیم', ar: 'تحديد وتشذيب اللحية مع البخار الملكي' },
+  'Charcoal Detox Facial & Scrub': { ur: 'چارکول ڈیٹوکس فیشل اور اسکرب', ar: 'تنظيف بشرة بالفحم وسنفرة عميقة' },
+  'Executive Groom Styling & Wash': { ur: 'ایگزیکٹو گرومنگ اور ہیئر واش', ar: 'تصفيف وغسيل الشعر للرجال' },
+  'Head Massage & Herbal Oil Treatment': { ur: 'سر کا مساج اور ہربل آئل ٹریٹمنٹ', ar: 'مساج الرأس مع الزيوت الطبيعية' },
+  'Signature Party Makeup & Styling': { ur: 'سگنیچر پارٹی میک اپ اور اسٹائلنگ', ar: 'مكياج سهرة مميز وتصفيف' },
+  'Barat / Walima Bridal Package': { ur: 'بارات / ولیمہ برائیڈل پیکیج', ar: 'باقة العروس الكاملة للزفاف' },
+  'Hydra-Facial & Skin Polish': { ur: 'ہائیڈرا فیشل اور اسکن پالش', ar: 'هيدرافيشل وصنفرة وتفتيح البشرة' },
+  'Keratin Hair Protein Treatment': { ur: 'کیراٹین ہیئر پروٹین ٹریٹمنٹ', ar: 'علاج بروتين الكيراتين للشعر' },
+  'Full Mani-Pedi & Paraffin Wax': { ur: 'مکمل مینی پیڈی اور پیرافین ویکس', ar: 'مانيكير وباديكير مع شمع البارافين' },
+};
+
+export function getLocalizedServiceName(name: string, lang: ClientChatLang): string {
+  if (lang === 'en') return name;
+  return SERVICE_TRANSLATIONS[name]?.[lang] || name;
+}
+
+export const UPGRADE_MODAL_I18N: Record<
+  VoiceLang,
+  {
+    kicker: string;
+    title: (salonName: string) => string;
+    creditNote: (pkgName: string, sym: string, fee: number) => string;
+    fullPrice: string;
+    payDiff: (sym: string, amt: number) => string;
+    newMaintFee: (sym: string, amt: number) => string;
+    paymentChannelTitle: (currency: string) => string;
+    differencePayLabel: (sym: string, amt: number) => string;
+    tidLabel: string;
+    tidPlaceholder: string;
+    confirmUpgradeBtn: (sym: string, amt: number) => string;
+    upgradingBtn: string;
+    closeBtn: string;
+    successToast: (pkgName: string, sym: string, amt: number) => string;
+    whatsappGreeting: (owner: string, salon: string, pkgName: string, sym: string, amt: number, tid: string) => string;
+  }
+> = {
+  ur: {
+    kicker: 'صرف فرق کی ادائیگی · 100% ایڈجسٹمنٹ',
+    title: (salon) => `${salon} پیکیج اپگریڈ کریں`,
+    creditNote: (pkg, sym, fee) =>
+      `آپ کی موجودہ ${pkg} سیٹ اپ فیس (${sym}${fee.toLocaleString()}) کا 100% کریڈٹ ایڈجسٹ کر دیا گیا ہے۔ صرف بقایا فرق ادا کریں۔`,
+    fullPrice: 'مکمل قیمت:',
+    payDiff: (sym, amt) => `صرف فرق ادا کریں: ${sym}${amt.toLocaleString()}`,
+    newMaintFee: (sym, amt) => `نئی 10% ماہانہ مینٹیننس فیس: ${sym}${amt.toLocaleString()} / ماہ`,
+    paymentChannelTitle: (curr) => `ادائیگی کا چینل منتخب کریں (${curr})`,
+    differencePayLabel: (sym, amt) => `بقایا فرق: ${sym}${amt.toLocaleString()}`,
+    tidLabel: 'ٹرانزیکشن ریفرنس / ادائیگی کی تفصیل:',
+    tidPlaceholder: 'ٹرانزیکشن ID یا بھیجنے والے اکاؤنٹ کا نمبر درج کریں (TID مثلاً EP-98210)',
+    confirmUpgradeBtn: (sym, amt) => `ادائیگی ${sym}${amt.toLocaleString()} اور اپگریڈ کنفرم کریں ←`,
+    upgradingBtn: 'اپگریڈ ہو رہا ہے...',
+    closeBtn: 'بند کریں',
+    successToast: (pkg, sym, amt) =>
+      `مبارک ہو! پیکیج کامیابی سے ${pkg} پر اپگریڈ ہو گیا ہے۔ فرق (${sym}${amt.toLocaleString()}) موصول ہو گیا ہے اور تصدیقی میسج واٹس ایپ پر بھیج دیا گیا ہے۔`,
+    whatsappGreeting: (owner, salon, pkg, sym, amt, tid) =>
+      `محترم ${owner} صاحب! السلام علیکم۔ مبارک ہو! آپ کا سیلون "${salon}" کامیابی سے WORKCRAFT کے "${pkg}" پر اپگریڈ ہو گیا ہے۔ پچھلی سیٹ اپ فیس 100% ایڈجسٹ کرنے کے بعد بقایا فرق (${sym}${amt.toLocaleString()}) موصول ہو گیا ہے۔ (TID: ${tid})۔ آپ کے نئے اعلیٰ فیچرز اور خودکار واٹس ایپ سروسز مکمل فعال ہیں۔ شکریہ!`,
+  },
+  ar: {
+    kicker: 'دفع الفرق فقط · تسوية 100%',
+    title: (salon) => `ترقية باقة ${salon}`,
+    creditNote: (pkg, sym, fee) =>
+      `تم اعتماد 100% من رسوم تأسيس باقتك الحالية ${pkg} (${sym}${fee.toLocaleString()}). ادفع فقط الفرق المتبقي.`,
+    fullPrice: 'السعر الكامل:',
+    payDiff: (sym, amt) => `ادفع الفرق فقط: ${sym}${amt.toLocaleString()}`,
+    newMaintFee: (sym, amt) => `رسوم الصيانة الشهرية الجديدة (10%): ${sym}${amt.toLocaleString()} / شهرياً`,
+    paymentChannelTitle: (curr) => `اختر وسيلة الدفع المعتمدة (${curr})`,
+    differencePayLabel: (sym, amt) => `المبلغ المتبقي: ${sym}${amt.toLocaleString()}`,
+    tidLabel: 'تفاصيل الدفع / رقم الحوالة:',
+    tidPlaceholder: 'أدخل رقم المعاملة أو رقم الحساب المحول منه (TID مثلاً TR-82910)',
+    confirmUpgradeBtn: (sym, amt) => `دفع ${sym}${amt.toLocaleString()} وتأكيد الترقية فوراً ←`,
+    upgradingBtn: 'جارٍ الترقية وتفعيل الباقة...',
+    closeBtn: 'إغلاق',
+    successToast: (pkg, sym, amt) =>
+      `تمت ترقية الباقة بنجاح إلى ${pkg}! تم استلام الفرق (${sym}${amt.toLocaleString()}) وإرسال رسالة التأكيد عبر واتساب.`,
+    whatsappGreeting: (owner, salon, pkg, sym, amt, tid) =>
+      `مرحباً بك يا ${owner}! نبارك لكم ترقية صالونكم "${salon}" إلى باقة WORKCRAFT المتميزة "${pkg}". تم اعتماد رصيدكم السابق كاملاً ودفع الفرق (${sym}${amt.toLocaleString()}) بنجاح. (رقم المعاملة: ${tid}). جميع المزايا المتقدمة وخدمات واتساب الذكية مفعلة الآن. شكراً لثقتكم!`,
+  },
+  en: {
+    kicker: 'PAY DIFFERENCE ONLY · 100% SETUP CREDIT',
+    title: (salon) => `Upgrade ${salon} Package`,
+    creditNote: (pkg, sym, fee) =>
+      `Your current ${pkg} setup fee (${sym}${fee.toLocaleString()}) is credited 100%. Pay only the remaining difference.`,
+    fullPrice: 'Full Price:',
+    payDiff: (sym, amt) => `Pay Difference: ${sym}${amt.toLocaleString()}`,
+    newMaintFee: (sym, amt) => `New 10% Monthly Maintenance: ${sym}${amt.toLocaleString()}/mo`,
+    paymentChannelTitle: (curr) => `Select Payment Channel (${curr})`,
+    differencePayLabel: (sym, amt) => `Remaining Difference: ${sym}${amt.toLocaleString()}`,
+    tidLabel: 'Payment Reference / Transaction Proof:',
+    tidPlaceholder: 'Enter Transaction ID or sender mobile number (e.g. TID: EP-98210)',
+    confirmUpgradeBtn: (sym, amt) => `Pay ${sym}${amt.toLocaleString()} & Upgrade Now →`,
+    upgradingBtn: 'Upgrading & Verifying...',
+    closeBtn: 'Close',
+    successToast: (pkg, sym, amt) =>
+      `Upgraded to ${pkg}! Difference of ${sym}${amt.toLocaleString()} received and confirmation sent to salon WhatsApp.`,
+    whatsappGreeting: (owner, salon, pkg, sym, amt, tid) =>
+      `Dear ${owner}! Greetings. Congratulations, your salon "${salon}" has been successfully upgraded to WORKCRAFT "${pkg}". Your previous setup fee was credited 100% and the remaining difference of ${sym}${amt.toLocaleString()} has been cleared. (TID: ${tid}). Your new high-tier features and automated concierge are now live. Thank you!`,
+  },
+};
+
+export const MAINT_MODAL_I18N: Record<
+  VoiceLang,
+  {
+    kicker: string;
+    title: (salon: string) => string;
+    description: (sym: string, amt: number, phone: string) => string;
+    feeHeading: string;
+    dueDateHeading: string;
+    channelHeading: (curr: string) => string;
+    tidLabel: string;
+    tidPlaceholder: string;
+    payBtn: (sym: string, amt: number) => string;
+    processingBtn: string;
+    cancelBtn: string;
+    whatsappNotice: (owner: string, salon: string, sym: string, amt: number, channel: string, tid: string) => string;
+  }
+> = {
+  ur: {
+    kicker: 'ماہانہ 10% مینٹیننس فیس ادائیگی · خودکار سسٹم بحالی',
+    title: (salon) => `${salon} کی مینٹیننس فیس ادا کریں`,
+    description: (sym, amt, phone) =>
+      `ماہانہ 10% مینٹیننس فیس (${sym}${amt.toLocaleString()}) اپنے رجسٹرڈ واٹس ایپ نمبر (${phone}) سے کسی بھی چینل کے ذریعے ادا کر کے فوری Tier-1 ترجیح اور لائیو میٹرکس بحال کریں۔`,
+    feeHeading: 'مقررہ ماہانہ فیس:',
+    dueDateHeading: 'آخری تاریخ: ہر ماہ کی 5 تاریخ',
+    channelHeading: (curr) => `ادائیگی کا چینل منتخب کریں (${curr})`,
+    tidLabel: 'ٹرانزیکشن آئی ڈی یا بھیجنے والے اکاؤنٹ کی تفصیل:',
+    tidPlaceholder: 'مثلاً TID یا JazzCash / EasyPaisa / بینک ریفرنس نمبر درج کریں',
+    payBtn: (sym, amt) => `فیس ${sym}${amt.toLocaleString()} ادا کریں اور ترجیح بحال کریں ←`,
+    processingBtn: 'تصدیق ہو رہی ہے...',
+    cancelBtn: 'منسوخ کریں',
+    whatsappNotice: (owner, salon, sym, amt, ch, tid) =>
+      `محترم ${owner} صاحب! السلام علیکم۔ آپ کے سیلون "${salon}" کی ماہانہ 10% مینٹیننس فیس (${sym}${amt.toLocaleString()}) بذریعہ ${ch} کامیابی سے موصول ہو گئی ہے۔ (TID: ${tid})۔ آپ کا لائیو ڈیش بورڈ، میٹرکس اور Tier-1 ترجیحی واٹس ایپ سپورٹ مکمل بحال ہے۔ شکریہ!`,
+  },
+  ar: {
+    kicker: 'سداد رسوم الصيانة الشهرية 10% · استعادة الأولوية',
+    title: (salon) => `سداد رسوم صيانة ${salon}`,
+    description: (sym, amt, phone) =>
+      `سدد رسوم الصيانة الشهرية (${sym}${amt.toLocaleString()}) عبر القنوات المعتمدة لحساب صالونك المسجل (${phone}) لاستعادة الإحصائيات الحية والدعم ذي الأولوية فوراً.`,
+    feeHeading: 'الرسوم الشهرية المستحقة:',
+    dueDateHeading: 'تاريخ الاستحقاق: 5 من كل شهر ميلادي',
+    channelHeading: (curr) => `اختر قناة الدفع (${curr})`,
+    tidLabel: 'رقم الإيصال أو المعاملة (TID):',
+    tidPlaceholder: 'أدخل رقم المعاملة أو رقم الحساب المحول منه (TID)',
+    payBtn: (sym, amt) => `سداد ${sym}${amt.toLocaleString()} واستعادة الأولوية ←`,
+    processingBtn: 'جارٍ التحقق والتأكيد...',
+    cancelBtn: 'إلغاء',
+    whatsappNotice: (owner, salon, sym, amt, ch, tid) =>
+      `مرحباً بك يا ${owner}! تم استلام رسوم الصيانة الشهرية (${sym}${amt.toLocaleString()}) لصالون "${salon}" بنجاح عبر ${ch}. (رقم الإيصال: ${tid}). تم فتح لوحة الإحصائيات واستعادة الأولوية الفورية للواتساب. شكراً لكم!`,
+  },
+  en: {
+    kicker: '10% MONTHLY MAINTENANCE PAYMENT · AUTO PRIORITY RESTORATION',
+    title: (salon) => `Pay Maintenance Fee for ${salon}`,
+    description: (sym, amt, phone) =>
+      `Clear your 10% monthly maintenance fee (${sym}${amt.toLocaleString()}) from your registered SIM (${phone}) to unlock live metrics and maintain Tier-1 priority auto-replies.`,
+    feeHeading: 'Monthly Due Fee:',
+    dueDateHeading: 'Due Date: 5th of Every Month',
+    channelHeading: (curr) => `Select Payment Channel (${curr})`,
+    tidLabel: 'Transaction ID / Sender Account Proof:',
+    tidPlaceholder: 'Enter TID or sender account reference (e.g. TID: EP-90482)',
+    payBtn: (sym, amt) => `Pay ${sym}${amt.toLocaleString()} & Restore Priority →`,
+    processingBtn: 'Verifying Transaction...',
+    cancelBtn: 'Cancel',
+    whatsappNotice: (owner, salon, sym, amt, ch, tid) =>
+      `Dear ${owner}! Greetings. The 10% monthly maintenance fee of ${sym}${amt.toLocaleString()} for "${salon}" has been successfully cleared via ${ch}. (TID: ${tid}). Your live stats, business metrics, and Tier-1 concierge priority are active. Thank you!`,
+  },
+};
+
+function getRegionFromPhone(phone: string, location?: string) {
   const cleaned = phone.replace(/\s+/g, '');
-  if (cleaned.startsWith('+92')) return REGION_CONFIGS.PK;
-  if (cleaned.startsWith('+971')) return REGION_CONFIGS.AE;
-  if (cleaned.startsWith('+966')) return REGION_CONFIGS.SA;
-  if (cleaned.startsWith('+44')) return REGION_CONFIGS.GB;
+  const loc = (location || '').toLowerCase();
+  const isPakistan =
+    cleaned.startsWith('+92') ||
+    loc.includes('pakistan') ||
+    loc.includes('lahore') ||
+    loc.includes('karachi') ||
+    loc.includes('islamabad') ||
+    loc.includes('rawalpindi') ||
+    loc.includes('faisalabad') ||
+    loc.includes('multan');
+  if (isPakistan) return REGION_CONFIGS.PK;
+  // Outside Pakistan salons use US Dollar (USD) configuration
   return REGION_CONFIGS.GLOBAL;
 }
 
@@ -512,7 +693,7 @@ export const INITIAL_CLIENT_SALONS: ClientSalon[] = [
     location: 'Jumeirah 1, Dubai, UAE',
     planId: 'VIP',
     plan: 'VIP Executive',
-    maint: 59,
+    maint: 16,
     language: 'ur', // Asian barber in MENA: hears voice & reads Founder notices in Urdu while clients chat in Arabic!
     onboardingLanguage: 'ur',
   },
@@ -524,7 +705,7 @@ export const INITIAL_CLIENT_SALONS: ClientSalon[] = [
     location: 'Soho, London, UK',
     planId: 'STARTER',
     plan: 'Starter Setup',
-    maint: 6,
+    maint: 8,
     language: 'en',
     onboardingLanguage: 'en',
   },
@@ -550,6 +731,7 @@ interface SalonOwnerDashboardProps {
   ownerName?: string;
   phone?: string;
   salonCategory?: 'MENS' | 'LADIES';
+  onboardedData?: OnboardedSalonPayload | null;
   isFounderInspector?: boolean;
   onOpenSimulator?: () => void;
   onClose?: () => void;
@@ -558,14 +740,57 @@ interface SalonOwnerDashboardProps {
 export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   selectedSalonName,
   salonCategory,
+  onboardedData,
   isFounderInspector = false,
   onClose,
 }) => {
-  const [salonsState, setSalonsState] = useState<ClientSalon[]>(INITIAL_CLIENT_SALONS);
-  const [selectedSalonId, setSelectedSalonId] = useState<string>('1');
+  const [salonsState, setSalonsState] = useState<ClientSalon[]>(() => {
+    if (!onboardedData) return INITIAL_CLIENT_SALONS;
+    const customEntry: ClientSalon = {
+      id: 'onboarded-live',
+      name: onboardedData.salonName,
+      owner: onboardedData.ownerName,
+      phone: onboardedData.phone,
+      location: onboardedData.location,
+      planId: onboardedData.planId,
+      plan: onboardedData.planName,
+      maint: onboardedData.monthlyMaint,
+      language: onboardedData.language,
+      onboardingLanguage: onboardedData.language,
+    };
+    const filtered = INITIAL_CLIENT_SALONS.filter(
+      (s) => s.name.toLowerCase() !== onboardedData.salonName.trim().toLowerCase()
+    );
+    return [customEntry, ...filtered];
+  });
+  const [selectedSalonId, setSelectedSalonId] = useState<string>(
+    onboardedData ? 'onboarded-live' : '1'
+  );
+
+  useEffect(() => {
+    if (!onboardedData) return;
+    const customEntry: ClientSalon = {
+      id: 'onboarded-live',
+      name: onboardedData.salonName,
+      owner: onboardedData.ownerName,
+      phone: onboardedData.phone,
+      location: onboardedData.location,
+      planId: onboardedData.planId,
+      plan: onboardedData.planName,
+      maint: onboardedData.monthlyMaint,
+      language: onboardedData.language,
+      onboardingLanguage: onboardedData.language,
+    };
+    setSalonsState((prev) => [
+      customEntry,
+      ...prev.filter((s) => s.id !== 'onboarded-live' && s.name.toLowerCase() !== onboardedData.salonName.trim().toLowerCase()),
+    ]);
+    setSelectedSalonId('onboarded-live');
+  }, [onboardedData]);
 
   // Query 3: Match exact clicked salon when Founder inspects from Overview or Clients
   useEffect(() => {
+    if (onboardedData) return;
     const targetName = selectedSalonName?.trim().toLowerCase();
     if (!targetName) return;
     const exactOrPartial = salonsState.find((s) => {
@@ -576,10 +801,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     if (exactOrPartial) {
       setSelectedSalonId(exactOrPartial.id);
     }
-  }, [selectedSalonName, salonsState]);
+  }, [selectedSalonName, salonsState, onboardedData]);
 
   const currentSalon = salonsState.find((s) => s.id === selectedSalonId) || salonsState[0];
-  const regionConfig = getRegionFromPhone(currentSalon.phone);
+  const regionConfig = getRegionFromPhone(currentSalon.phone, currentSalon.location);
   const currentPackage =
     regionConfig.packages.find((p) => p.id === currentSalon.planId) || regionConfig.packages[0];
   const higherPackages = regionConfig.packages.filter(
@@ -591,7 +816,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     'QUEUE' | 'RATES_BOT' | 'MARKETING' | 'GROWTH_KIT' | 'BILLING_SLA'
   >('QUEUE');
 
-  // Query 1 (Prev): Top-Right Upgrade Modal State
+  // Query 1: Top-Right Upgrade Modal & Payment Details Input
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [selectedUpgradeTargetId, setSelectedUpgradeTargetId] = useState<
     'STARTER' | 'GROWTH' | 'VIP' | 'CUSTOM' | null
@@ -599,7 +824,38 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [selectedUpgradeChannel, setSelectedUpgradeChannel] = useState<string>(
     regionConfig.paymentChannels[0].id
   );
+  const [upgradeTidInput, setUpgradeTidInput] = useState('');
   const [isProcessingUpgrade, setIsProcessingUpgrade] = useState(false);
+
+  // Query 8: Maintenance Fee Payment Modal State
+  const [isMaintPaymentModalOpen, setIsMaintPaymentModalOpen] = useState(false);
+  const [maintPaymentChannel, setMaintPaymentChannel] = useState<string>(
+    regionConfig.paymentChannels[0].id
+  );
+  const [maintPaymentTidInput, setMaintPaymentTidInput] = useState('');
+
+  // Query 7: Clickable Location Pin and Salon Timing Modal States
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
+  const [isTimingModalOpen, setIsTimingModalOpen] = useState(false);
+
+  // Query 1 & 8: WhatsApp Confirmation Receipt Received on Salon Owner's Phone
+  const [whatsAppReceiptNotice, setWhatsAppReceiptNotice] = useState<{
+    title: string;
+    body: string;
+    phone: string;
+    timestamp: string;
+  } | null>(null);
+
+  // Query 3 & 5: Interactive WhatsApp Chat Prompts (Barber Conflict & Ambiguous Time Disambiguation)
+  const [barberConflictPrompt, setBarberConflictPrompt] = useState<{
+    slot: string;
+    requestedBarber: string;
+    suggestedBarber: string;
+  } | null>(null);
+  const [timeDisambiguationPrompt, setTimeDisambiguationPrompt] = useState<{
+    rawHour: string;
+  } | null>(null);
+  const [selectedCartBarber, setSelectedCartBarber] = useState<string>('Master Aslam');
 
   // Query 1 & 4 (New): Owner Onboarding / Voice Language vs End-User Chat Language
   const [ownerLang, setOwnerLang] = useState<VoiceLang>(currentSalon.onboardingLanguage);
@@ -1007,11 +1263,70 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }, 650);
   };
 
+  const handleConfirmMaintPayment = () => {
+    setIsPayingMaint(true);
+    const chosenTid =
+      maintPaymentTidInput.trim() ||
+      `${currentSalon.phone.startsWith('+92') ? 'EP' : 'ST'}-${Math.floor(
+        10000000000 + Math.random() * 90000000000
+      )}`;
+    const channelName =
+      regionConfig.paymentChannels.find((c) => c.id === maintPaymentChannel)?.label ||
+      maintPaymentChannel;
+
+    setTimeout(() => {
+      setIsPayingMaint(false);
+      setIsMaintPaymentModalOpen(false);
+      setMaintCycleStage('PAID_ACTIVE');
+      setMaintTid(chosenTid);
+      setMaintPaidDate(
+        new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+      );
+      setMaintPaymentTidInput('');
+
+      const i18n = MAINT_MODAL_I18N[ownerLang];
+      const localizedGreeting = i18n.whatsappNotice(
+        currentSalon.owner,
+        currentSalon.name,
+        regionConfig.symbol,
+        currentSalon.maint,
+        channelName,
+        chosenTid
+      );
+
+      setMaintToast(
+        ownerLang === 'ur'
+          ? `ادائیگی تصدیق ہو گئی: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${chosenTid})۔ لائیو میٹرکس اور Tier-1 ترجیح بحال!`
+          : ownerLang === 'ar'
+          ? `تم تأكيد سداد الصيانة: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${chosenTid}). تم فتح الإحصائيات الفورية والأولوية!`
+          : `Maintenance Paid: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${chosenTid}). Live metrics & Tier-1 priority restored!`
+      );
+
+      // Automated WhatsApp Receipt Message to Salon Owner's phone
+      setWhatsAppReceiptNotice({
+        title:
+          ownerLang === 'ur'
+            ? 'واٹس ایپ رسید · مینٹیننس فیس وصولی'
+            : ownerLang === 'ar'
+            ? 'إشعار واتساب · سداد رسوم الصيانة بنجاح'
+            : 'WhatsApp Receipt · Maintenance Payment Cleared',
+        body: localizedGreeting,
+        phone: currentSalon.phone,
+        timestamp: 'Just now',
+      });
+
+      setTimeout(() => setMaintToast(null), 8000);
+    }, 650);
+  };
+
   const handleConfirmPackageUpgrade = () => {
     if (!selectedUpgradeTargetId) return;
     const targetPkg = regionConfig.packages.find((p) => p.id === selectedUpgradeTargetId);
     if (!targetPkg) return;
     const differenceAmount = Math.max(0, targetPkg.setupFee - currentPackage.setupFee);
+    const chosenTid =
+      upgradeTidInput.trim() ||
+      `UP-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
 
     setIsProcessingUpgrade(true);
     setTimeout(() => {
@@ -1025,14 +1340,34 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       setIsProcessingUpgrade(false);
       setIsUpgradeModalOpen(false);
       setSelectedUpgradeTargetId(null);
-      setMaintToast(
-        ownerLang === 'ur'
-          ? `مبارک ہو! ${targetPkg.name} پر اپگریڈ مکمل۔ صرف فرق (${regionConfig.symbol}${differenceAmount.toLocaleString()}) ادا کیا گیا۔`
-          : ownerLang === 'ar'
-          ? `تمت الترقية إلى ${targetPkg.name}! تم دفع الفرق فقط (${regionConfig.symbol}${differenceAmount.toLocaleString()}).`
-          : `Upgraded to ${targetPkg.name}! Paid remaining difference of ${regionConfig.symbol}${differenceAmount.toLocaleString()} only.`
+      setUpgradeTidInput('');
+
+      const i18n = UPGRADE_MODAL_I18N[ownerLang];
+      setMaintToast(i18n.successToast(targetPkg.name, regionConfig.symbol, differenceAmount));
+
+      // Automated WhatsApp Greeting and Upgrade Confirmation to Salon Owner's WhatsApp
+      const greetingMsg = i18n.whatsappGreeting(
+        currentSalon.owner,
+        currentSalon.name,
+        targetPkg.name,
+        regionConfig.symbol,
+        differenceAmount,
+        chosenTid
       );
-      setTimeout(() => setMaintToast(null), 7000);
+
+      setWhatsAppReceiptNotice({
+        title:
+          ownerLang === 'ur'
+            ? 'واٹس ایپ نوٹیفکیشن · پیکیج اپگریڈ تصدیق'
+            : ownerLang === 'ar'
+            ? 'إشعار واتساب · تأكيد ترقية الباقة بنجاح'
+            : 'WhatsApp Notice · Package Upgrade Confirmed',
+        body: greetingMsg,
+        phone: currentSalon.phone,
+        timestamp: 'Just now',
+      });
+
+      setTimeout(() => setMaintToast(null), 8000);
     }, 700);
   };
 
@@ -1095,6 +1430,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     : 'Mon–Thu Normal Days · Standard Menu Rates Applied';
 
   const isLadies =
+    onboardedData?.salonCategory === 'LADIES' ||
     salonCategory === 'LADIES' ||
     currentSalon.name.toLowerCase().includes('parlor') ||
     currentSalon.name.toLowerCase().includes('ladies') ||
@@ -1103,6 +1439,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
   // Rate Card State strictly locked to the onboarded category (Men's Salon vs Ladies Parlor)
   const [services, setServices] = useState(() => {
+    if (onboardedData?.services && onboardedData.services.length > 0) {
+      return onboardedData.services.map((s) => ({
+        id: s.id,
+        name: s.name,
+        price: s.price,
+        active: s.enabled,
+      }));
+    }
     if (isLadies) {
       return [
         { id: 'l1', name: 'Signature Party Makeup & Styling', price: 4500, active: true },
@@ -1132,6 +1476,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
   // Query 8: Barbers & Stylists Management State (Synced with Onboarding & LocalStorage)
   const [barbersList, setBarbersList] = useState<string[]>(() => {
+    if (onboardedData?.barbers && onboardedData.barbers.length > 0) {
+      return onboardedData.barbers;
+    }
     try {
       const saved = localStorage.getItem('wcl_salon_barbers');
       if (saved) {
@@ -1141,6 +1488,25 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     } catch {}
     return ['Master Aslam', 'Tariq Mehmood', 'Ali Raza', 'Bilal Tariq'];
   });
+
+  useEffect(() => {
+    if (!onboardedData) return;
+    setOwnerLang(onboardedData.language);
+    setEndUserLang(onboardedData.language);
+    if (onboardedData.services && onboardedData.services.length > 0) {
+      setServices(
+        onboardedData.services.map((s) => ({
+          id: s.id,
+          name: s.name,
+          price: s.price,
+          active: s.enabled,
+        }))
+      );
+    }
+    if (onboardedData.barbers && onboardedData.barbers.length > 0) {
+      setBarbersList(onboardedData.barbers);
+    }
+  }, [onboardedData]);
   const [newBarberDashboardInput, setNewBarberDashboardInput] = useState('');
   const [editingBarberIndex, setEditingBarberIndex] = useState<number | null>(null);
   const [editingBarberName, setEditingBarberName] = useState('');
@@ -1413,86 +1779,101 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [customQuery, setCustomQuery] = useState('');
 
   const handleSendQuickMenuAction = (action: 'BOOK' | 'RATES' | 'DEALS' | 'LOCATION' | 'HOURS') => {
+    if (action === 'LOCATION') {
+      setIsLocationModalOpen(true);
+    }
+    if (action === 'HOURS') {
+      setIsTimingModalOpen(true);
+    }
+
+    const isStarter = currentSalon.planId === 'STARTER';
+
     const labelMap: Record<ClientChatLang, Record<typeof action, { q: string; a: string }>> = {
       en: {
         BOOK: {
           q: 'I want to book an appointment date & time',
-          a: 'Great! Pick your preferred services and time slot in the Multi-Service Cart below to see your confirmed total.',
+          a: 'Great! Pick your preferred barber, services and time slot in the Multi-Service Cart below to see your confirmed total.',
         },
         RATES: {
           q: 'Send me your service rates list',
           a: services
             .filter((s) => s.active)
-            .map((s) => `• ${s.name}: ${regionConfig.symbol}${s.price.toLocaleString()}`)
+            .map((s) => `• ${getLocalizedServiceName(s.name, 'en')}: ${regionConfig.symbol}${s.price.toLocaleString()}`)
             .join(' | '),
         },
         DEALS: {
           q: 'What VIP deals are active today?',
-          a: isVipDealActiveNow
+          a: isStarter
+            ? `Our salon operates on clear, standard daily rates across all days of the week. View our complete rate card below!`
+            : isVipDealActiveNow
             ? `🎉 Active VIP Deal (25% OFF): Valid on Fri–Sun & 7–10 Day Campaigns! Select multiple services below to apply discount automatically.`
             : `Today is Mon–Thu (Normal Day): Standard rates apply unless a 7–10 Day VIP Campaign is active. Fri–Sun unlocks 25% OFF VIP Deals!`,
         },
         LOCATION: {
           q: 'Send salon location & Google Maps pin',
-          a: `📍 ${currentSalon.name}, ${currentSalon.location} — Google Maps Pin: maps.google.com/?q=${encodeURIComponent(currentSalon.location)}`,
+          a: `📍 ${currentSalon.name}, ${currentSalon.location} — Google Maps Pin: maps.google.com/?q=${encodeURIComponent(currentSalon.location)} (Tap to open full interactive map)`,
         },
         HOURS: {
           q: 'What are your salon opening hours?',
-          a: `🕒 Open daily 11:00 AM – 11:00 PM (Friday break 1:00 PM – 2:30 PM).`,
+          a: `🕒 Open daily 11:00 AM – 11:00 PM (Friday break 1:00 PM – 2:30 PM). Tap to see full weekly schedule!`,
         },
       },
       ur: {
         BOOK: {
           q: 'مجھے اپائنٹمنٹ کی تاریخ اور ٹائم بک کرنا ہے',
-          a: 'جی بالکل! نیچے دیئے گئے کارٹ میں اپنی سروسز اور ٹائم منتخب کریں تاکہ مکمل بل اور کنفرمیشن مل سکے۔',
+          a: 'جی بالکل! نیچے دیئے گئے کارٹ میں اپنا پسندیدہ باربر، سروسز اور وقت منتخب کریں تاکہ مکمل بل اور کنفرمیشن مل سکے۔',
         },
         RATES: {
           q: 'مجھے سروسز کی ریٹ لسٹ بھیج دیں',
           a: services
             .filter((s) => s.active)
-            .map((s) => `• ${s.name}: ${regionConfig.symbol}${s.price.toLocaleString()}`)
+            .map((s) => `• ${getLocalizedServiceName(s.name, 'ur')}: ${regionConfig.symbol}${s.price.toLocaleString()}`)
             .join(' | '),
         },
         DEALS: {
           q: 'آج کون سی VIP ڈیل چل رہی ہے؟',
-          a: isVipDealActiveNow
+          a: isStarter
+            ? `ہمارے سیلون میں تمام دن معیاری اور یکساں ریٹس لاگو ہیں۔ نیچے دی گئی مکمل ریٹ لسٹ ملاحظہ فرمائیں!`
+            : isVipDealActiveNow
             ? `🎉 VIP ڈیل فعال ہے (25% ڈسکاؤنٹ)! جمعہ، ہفتہ، اتوار یا 7 سے 10 دن کی مہم میں آٹومیٹک ڈسکاؤنٹ لگتا ہے۔`
             : `آج پیر تا جمعرات معمول کے ریٹس لاگو ہیں۔ جمعہ تا اتوار یا 7-10 دن کی VIP ڈیل پر ڈسکاؤنٹ ملتا ہے۔`,
         },
         LOCATION: {
           q: 'سیلون کی لوکیشن اور گوگل میپ پن بھیجیں',
-          a: `📍 ${currentSalon.name}، ${currentSalon.location} — گوگل میپس لنک: maps.google.com/?q=${encodeURIComponent(currentSalon.location)}`,
+          a: `📍 ${currentSalon.name}، ${currentSalon.location} — گوگل میپس لنک: maps.google.com/?q=${encodeURIComponent(currentSalon.location)} (مکمل لوکیشن میپ اوپن ہو گیا ہے)`,
         },
         HOURS: {
           q: 'سیلون کھلنے اور بند ہونے کا ٹائم کیا ہے؟',
-          a: `🕒 روزانہ صبح 11:00 بجے سے رات 11:00 بجے تک کھلا ہے (جمعہ وقفہ 1:00 تا 2:30)۔`,
+          a: `🕒 روزانہ صبح 11:00 بجے سے رات 11:00 بجے تک کھلا ہے (جمعہ وقفہ 1:00 تا 2:30)۔ شیڈول باکس کھول دیا گیا ہے!`,
         },
       },
       ar: {
         BOOK: {
           q: 'أريد حجز موعد وتاريخ',
-          a: 'أهلاً بك! اختر الخدمات والوقت المناسب من قائمة الخدمات بالأسفل لعرض السعر الإجمالي والتأكيد.',
+          a: 'أهلاً بك! اختر الحلاق المفضل والخدمات والوقت المناسب من القائمة بالأسفل لعرض السعر الإجمالي والتأكيد.',
         },
         RATES: {
           q: 'أرسل لي قائمة الأسعار والخدمات',
           a: services
             .filter((s) => s.active)
-            .map((s) => `• ${s.name}: ${regionConfig.symbol}${s.price.toLocaleString()}`)
+            .map((s) => `• ${getLocalizedServiceName(s.name, 'ar')}: ${regionConfig.symbol}${s.price.toLocaleString()}`)
             .join(' | '),
         },
         DEALS: {
           q: 'ما هي عروض VIP المتاحة اليوم؟',
-          a: isVipDealActiveNow
+          a: isStarter
+            ? `تطبق في صالوننا الأسعار الاعتيادية الموحدة لجميع الخدمات طوال أيام الأسبوع. تفضل بالاطلاع على قائمة الأسعار أدناه!`
+            : isVipDealActiveNow
             ? `🎉 عرض VIP مفعل (خصم 25%): يسري الجمعة والسبت والأحد وعروض 7-10 أيام!`
             : `اليوم من الإثنين إلى الخميس تطبق الأسعار العادية ما لم يكن عرض 7-10 أيام مفعلاً.`,
         },
         LOCATION: {
           q: 'أرسل موقع الصالون وخريطة جوجل',
-          a: `📍 ${currentSalon.name}، ${currentSalon.location} — رابط الخريطة: maps.google.com/?q=${encodeURIComponent(currentSalon.location)}`,
+          a: `📍 ${currentSalon.name}، ${currentSalon.location} — رابط الخريطة: maps.google.com/?q=${encodeURIComponent(currentSalon.location)} (تم فتح تفاصيل الموقع والملاحة)`,
         },
         HOURS: {
           q: 'ما هي ساعات العمل؟',
-          a: `🕒 يومياً من 11:00 صباحاً حتى 11:00 مساءً.`,
+          a: `🕒 يومياً من 11:00 صباحاً حتى 11:00 مساءً (استراحة الجمعة 1:00 - 2:30). تم فتح جدول الأوقات!`,
         },
       },
     };
@@ -1508,6 +1889,71 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const handleSendSimQuery = (textToSend?: string) => {
     const text = (textToSend || customQuery).trim();
     if (!text) return;
+    const lower = text.toLowerCase();
+
+    // Query 5 Check: Ambiguous time e.g. "9", "at 9", "9 baje", "الساعة 9"
+    const isBare9 =
+      /^(at\s*)?9(\s*(o'clock|baje)?)?$/i.test(text) ||
+      lower === '9' ||
+      lower === 'at 9' ||
+      lower === '9 baje' ||
+      text.includes('الساعة 9');
+    const hasAmPm =
+      lower.includes('am') ||
+      lower.includes('pm') ||
+      lower.includes('صبح') ||
+      lower.includes('شام') ||
+      lower.includes('رات') ||
+      lower.includes('صباح') ||
+      lower.includes('مساء');
+
+    if (isBare9 && !hasAmPm) {
+      setTimeDisambiguationPrompt({ rawHour: '9' });
+      const promptText =
+        endUserLang === 'ur'
+          ? 'کیا آپ کا مطلب صبح 9:00 AM ہے یا رات 9:00 PM؟ برائے مہربانی اپنا مطلوبہ وقت منتخب کریں:'
+          : endUserLang === 'ar'
+          ? 'هل تقصد 9:00 صباحاً (AM) أم 9:00 مساءً (PM)؟ يرجى تحديد الوقت المفضل:'
+          : 'Did you mean 9:00 AM (Morning) or 9:00 PM (Night)? Please select:';
+      setSimChatMessages((prev) => [
+        ...prev,
+        { sender: 'CLIENT', text: `[${endUserLang.toUpperCase()}] ${text}`, time: 'Just now' },
+        { sender: 'BOT', text: promptText, time: 'Just now' },
+      ]);
+      if (!textToSend) setCustomQuery('');
+      return;
+    }
+
+    // Query 3 Check: Barber Tariq occupied at 04:15 PM -> Suggest Barber Ali
+    const mentionsTariq = lower.includes('tariq') || lower.includes('طارق');
+    const mentions415 =
+      lower.includes('4:15') ||
+      lower.includes('04:15') ||
+      lower.includes('4') ||
+      lower.includes('سوا چار') ||
+      lower.includes('الأربعة');
+
+    if (mentionsTariq && mentions415) {
+      setBarberConflictPrompt({
+        slot: '04:15 PM',
+        requestedBarber: 'Tariq',
+        suggestedBarber: 'Ali Raza',
+      });
+      const conflictText =
+        endUserLang === 'ur'
+          ? '⚠️ باربر طارق اس وقت (04:15 PM) پر پہلے سے مصروف ہیں۔ باربر علی اس ٹائم پر بالکل دستیاب ہیں! کیا آپ باربر علی کے ساتھ اپائنٹمنٹ بک کرنا چاہتے ہیں؟'
+          : endUserLang === 'ar'
+          ? '⚠️ الحلاق طارق مشغول في هذا الوقت (04:15 PM). الحلاق علي متاح في هذا الوقت! هل ترغب في حجز الموعد مع الحلاق علي؟'
+          : '⚠️ Barber Tariq is currently occupied at 04:15 PM. Barber Ali is free on that slot! Do you want to book your appointment with Barber Ali?';
+      setSimChatMessages((prev) => [
+        ...prev,
+        { sender: 'CLIENT', text: `[${endUserLang.toUpperCase()}] ${text}`, time: 'Just now' },
+        { sender: 'BOT', text: conflictText, time: 'Just now' },
+      ]);
+      if (!textToSend) setCustomQuery('');
+      return;
+    }
+
     triggerCrossLanguageClientReply('WhatsApp Client', endUserLang, '05:00 PM', 'CONFIRMED', text);
     if (!textToSend) setCustomQuery('');
   };
@@ -2173,12 +2619,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           <button
             type="button"
             disabled={isPayingMaint}
-            onClick={handleAutoClearMaintenance}
-            className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase shrink-0 transition active:scale-95"
+            onClick={() => setIsMaintPaymentModalOpen(true)}
+            className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase shrink-0 transition active:scale-95 flex items-center gap-2"
           >
-            {isPayingMaint
-              ? 'Matching Payment...'
-              : `Pay ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} Now →`}
+            <CreditCard className="size-4" />
+            <span>Pay {regionConfig.symbol}{currentSalon.maint.toLocaleString()} Maintenance →</span>
           </button>
         </div>
       )}
@@ -2398,10 +2843,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             <button
               type="button"
               disabled={isPayingMaint}
-              onClick={handleAutoClearMaintenance}
+              onClick={() => setIsMaintPaymentModalOpen(true)}
               className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-5 py-2.5 text-xs font-mono font-bold uppercase transition active:scale-95 flex items-center gap-2"
             >
-              <CheckCircle2 className="size-4 text-[#0D1117]" />
+              <CreditCard className="size-4 text-[#0D1117]" />
               <span>
                 Pay {regionConfig.symbol}{currentSalon.maint.toLocaleString()} via {currentSalon.phone} &amp; Restore Priority →
               </span>
@@ -3045,272 +3490,551 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     >
                       ✂️ Services &amp; Rates
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSendQuickMenuAction('DEALS')}
-                      className="min-h-[36px] rounded-lg border border-[#9E6A03] bg-[#3B2E0B]/40 hover:border-[#D29922] px-2.5 py-1 text-[#D29922]"
-                    >
-                      🔥 Active VIP Deals
-                    </button>
+                    {currentSalon.planId !== 'STARTER' ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSendQuickMenuAction('DEALS')}
+                        className="min-h-[36px] rounded-lg border border-[#9E6A03] bg-[#3B2E0B]/40 hover:border-[#D29922] px-2.5 py-1 text-[#D29922]"
+                      >
+                        🔥 {endUserLang === 'ur' ? 'VIP ڈیلز' : endUserLang === 'ar' ? 'عروض VIP' : 'Active VIP Deals'}
+                      </button>
+                    ) : (
+                      <span
+                        className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1 text-[#6E7681] text-[10px] font-mono flex items-center gap-1 cursor-not-allowed"
+                        title="VIP Deals are exclusive to Growth and VIP tiers"
+                      >
+                        <Lock className="size-3 text-[#6E7681]" />
+                        <span>{endUserLang === 'ur' ? 'معمول کے ریٹس' : endUserLang === 'ar' ? 'أسعار عادية' : 'Standard Rates Only'}</span>
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleSendQuickMenuAction('LOCATION')}
                       className="min-h-[36px] rounded-lg border border-[#116329] bg-[#0D3822] hover:border-[#3FB950] px-2.5 py-1 text-[#3FB950] flex items-center gap-1"
                     >
                       <MapPin className="size-3" />
-                      <span>Location Pin</span>
+                      <span>{endUserLang === 'ur' ? 'لوکیشن پن' : endUserLang === 'ar' ? 'موقع الصالون' : 'Location Pin'}</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleSendQuickMenuAction('HOURS')}
                       className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-2.5 py-1 text-[#F0F6FC]"
                     >
-                      🕒 Salon Timing
+                      🕒 {endUserLang === 'ur' ? 'سیلون ٹائمنگ' : endUserLang === 'ar' ? 'ساعات العمل' : 'Salon Timing'}
                     </button>
                   </div>
                 )}
               </div>
 
-              {/* Step 3: VIP Deal Day-of-Week & 7-10 Day Validation Engine */}
-              <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B]/25 p-4 space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <span className="text-xs font-mono font-bold text-[#D29922] uppercase block">
-                      2. VIP Deal Pricing Engine (Fri–Sun vs Mon–Thu &amp; 7–10 Day Validation)
-                    </span>
-                    <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">
-                      Deals auto-apply on <strong className="text-[#F0F6FC]">Friday, Saturday &amp; Sunday</strong>. Monday–Thursday uses normal rates unless a <strong className="text-[#F0F6FC]">7-to-10 day continuous VIP deal</strong> is active.
-                    </p>
-                  </div>
-                  <span
-                    className={`rounded-lg border px-2.5 py-1 text-[10px] font-mono font-bold shrink-0 ${
-                      isVipDealActiveNow
-                        ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
-                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
-                    }`}
-                  >
-                    {pricingRuleBadge}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs font-mono">
-                  <div className="flex items-center gap-1.5 rounded-xl bg-[#0D1117] border border-[#30363D] p-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setDayScheduleMode('FRI_SUN_WEEKEND')}
-                      className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
-                        dayScheduleMode === 'FRI_SUN_WEEKEND'
-                          ? 'bg-[#D29922] text-[#0D1117]'
-                          : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                      }`}
-                    >
-                      Fri – Sun (Weekend Deal)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDayScheduleMode('MON_THU_NORMAL')}
-                      className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
-                        dayScheduleMode === 'MON_THU_NORMAL'
-                          ? 'bg-[#06B6D4] text-[#0D1117]'
-                          : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                      }`}
-                    >
-                      Mon – Thu (Normal Days)
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 rounded-xl bg-[#0D1117] border border-[#30363D] p-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setVipCampaignMode('WEEKEND_ONLY')}
-                      className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
-                        vipCampaignMode === 'WEEKEND_ONLY'
-                          ? 'bg-[#21262D] text-[#F0F6FC] border border-[#484F58]'
-                          : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                      }`}
-                    >
-                      Standard Fri–Sun Deal
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setVipCampaignMode('CONTINUOUS_7_10_DAYS')}
-                      className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
-                        vipCampaignMode === 'CONTINUOUS_7_10_DAYS'
-                          ? 'bg-[#0D3822] text-[#3FB950] border border-[#116329]'
-                          : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                      }`}
-                    >
-                      7–10 Day VIP Valid Deal
-                    </button>
-                  </div>
-                </div>
-
-                {/* Multi-Service Picker + Combined Total Confirmation */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                  <div className="space-y-2">
-                    <span className="text-[10px] font-mono font-bold text-[#8B949E] uppercase block">
-                      Select Multiple Services (Client View):
-                    </span>
-                    <div className="space-y-1.5">
-                      {services
-                        .filter((s) => s.active)
-                        .map((svc) => {
-                          const checked = selectedCartServiceIds.includes(svc.id);
-                          const effectivePrice = Math.round(svc.price * (1 - vipDealDiscountRate));
-                          return (
-                            <label
-                              key={svc.id}
-                              className={`min-h-[44px] flex items-center justify-between rounded-xl border px-3 py-2 text-xs cursor-pointer transition ${
-                                checked
-                                  ? 'border-[#06B6D4] bg-[#06B6D4]/10 text-[#F0F6FC]'
-                                  : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
-                              }`}
-                            >
-                              <span className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() =>
-                                    setSelectedCartServiceIds((prev) =>
-                                      prev.includes(svc.id)
-                                        ? prev.filter((id) => id !== svc.id)
-                                        : [...prev, svc.id]
-                                    )
-                                  }
-                                  className="size-4 rounded text-[#06B6D4]"
-                                />
-                                <span>{svc.name}</span>
-                              </span>
-                              <span className="font-mono font-bold text-[#D29922]">
-                                {isVipDealActiveNow && (
-                                  <span className="line-through text-[#6E7681] mr-1.5 text-[10px]">
-                                    {regionConfig.symbol}{svc.price.toLocaleString()}
-                                  </span>
-                                )}
-                                {regionConfig.symbol}{effectivePrice.toLocaleString()}
-                              </span>
-                            </label>
-                          );
-                        })}
-                    </div>
-                  </div>
-
-                  {/* Summary + Confirm Lock */}
-                  <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-3.5 flex flex-col justify-between space-y-3">
-                    <div className="space-y-2">
-                      <span className="text-[10px] font-mono font-bold text-[#06B6D4] uppercase block">
-                        Client Confirmation &amp; Rate Total:
-                      </span>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <input
-                          type="text"
-                          value={cartClientName}
-                          onChange={(e) => setCartClientName(e.target.value)}
-                          placeholder="Client Name"
-                          className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-xs"
-                        />
-                        <input
-                          type="text"
-                          value={selectedCartSlot}
-                          onChange={(e) => setSelectedCartSlot(e.target.value)}
-                          placeholder="Slot e.g. 04:30 PM"
-                          className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-xs font-mono"
-                        />
+              {/* Step 3: VIP Deal Day-of-Week & 7-10 Day Validation Engine (Strict Package Gating) */}
+              {currentSalon.planId === 'STARTER' ? (
+                <div className="rounded-2xl border border-[#9E6A03]/60 bg-[#3B2E0B]/30 p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="size-9 rounded-xl bg-[#3B2E0B] border border-[#9E6A03] grid place-items-center text-[#D29922] shrink-0 mt-0.5">
+                        <Lock className="size-4" />
                       </div>
-                      <input
-                        type="text"
-                        value={cartClientPhone}
-                        onChange={(e) => setCartClientPhone(e.target.value)}
-                        placeholder="Client WhatsApp Number"
-                        className="w-full min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-xs font-mono"
-                      />
-
-                      <div className="rounded-xl bg-[#161B22] border border-[#30363D] p-2.5 text-xs font-mono space-y-1">
-                        <div className="flex justify-between text-[#8B949E]">
-                          <span>Selected Services ({selectedCartServices.length}):</span>
-                          <span>{regionConfig.symbol}{cartRawSubtotal.toLocaleString()}</span>
-                        </div>
-                        {cartDiscountAmount > 0 && (
-                          <div className="flex justify-between text-[#3FB950]">
-                            <span>VIP Deal Discount (25%):</span>
-                            <span>-{regionConfig.symbol}{cartDiscountAmount.toLocaleString()}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between text-sm font-black text-[#D29922] pt-1 border-t border-[#21262D]">
-                          <span>Confirmed Total:</span>
-                          <span>{regionConfig.symbol}{cartFinalTotal.toLocaleString()}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={selectedCartServices.length === 0}
-                      onClick={handleConfirmEndUserCartBooking}
-                      className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] py-2.5 text-xs font-mono font-black uppercase transition active:scale-95 disabled:opacity-40"
-                    >
-                      Confirm Booking + Lock Permanent Proof + Voice Alert ✓
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Chat Thread Preview */}
-              <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-2.5 max-h-[260px] overflow-y-auto overflow-x-hidden">
-                {simChatMessages.map((msg, idx) => {
-                  const msgIsRtl = /[\u0600-\u06FF]/.test(msg.text);
-                  return (
-                    <div
-                      key={idx}
-                      className={`flex ${msg.sender === 'CLIENT' ? 'justify-start' : 'justify-end'}`}
-                    >
-                      <div
-                        className={`max-w-[85%] min-w-0 rounded-2xl p-3 text-xs leading-relaxed overflow-hidden break-words [overflow-wrap:break-word] ${
-                          msg.sender === 'CLIENT'
-                            ? 'bg-[#21262D] border border-[#30363D] text-[#F0F6FC]'
-                            : 'bg-[#0D3822] border border-[#116329] text-[#3FB950]'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-3 text-[9px] font-mono opacity-75 mb-1">
-                          <span>{msg.sender === 'CLIENT' ? 'Customer' : 'WORKCRAFT Concierge Bot'}</span>
-                          <span>{msg.time}</span>
-                        </div>
-                        <p
-                          dir={msgIsRtl ? 'rtl' : 'ltr'}
-                          className={`break-words [overflow-wrap:break-word] ${msgIsRtl ? 'text-right' : 'text-left'}`}
-                        >
-                          {msg.text}
+                      <div className="space-y-1">
+                        <span className="text-xs font-mono font-bold text-[#D29922] uppercase block">
+                          2. VIP Deal Pricing Engine (Locked on Starter Plan)
+                        </span>
+                        <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
+                          Automatic Friday–Sunday weekend deals, dynamic 25% discounts, and continuous 7–10 day promotional campaigns are exclusive to <strong className="text-[#06B6D4]">Growth Automation</strong> and <strong className="text-[#D29922]">VIP Executive</strong> packages. Your salon is currently on <strong className="text-[#F0F6FC]">Starter Setup</strong>.
                         </p>
                       </div>
                     </div>
-                  );
-                })}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedUpgradeTargetId('GROWTH');
+                        setIsUpgradeModalOpen(true);
+                      }}
+                      className="min-h-[44px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-black uppercase transition shrink-0 flex items-center justify-center gap-1.5 shadow-lg active:scale-95"
+                    >
+                      <span>⚡ Upgrade to Unlock Deals →</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B]/25 p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-mono font-bold text-[#D29922] uppercase block">
+                        2. VIP Deal Pricing Engine (Fri–Sun vs Mon–Thu &amp; 7–10 Day Validation)
+                      </span>
+                      <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">
+                        Deals auto-apply on <strong className="text-[#F0F6FC]">Friday, Saturday &amp; Sunday</strong>. Monday–Thursday uses normal rates unless a <strong className="text-[#F0F6FC]">7-to-10 day continuous VIP deal</strong> is active.
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-lg border px-2.5 py-1 text-[10px] font-mono font-bold shrink-0 ${
+                        isVipDealActiveNow
+                          ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
+                          : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
+                      }`}
+                    >
+                      {pricingRuleBadge}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs font-mono">
+                    <div className="flex items-center gap-1.5 rounded-xl bg-[#0D1117] border border-[#30363D] p-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setDayScheduleMode('FRI_SUN_WEEKEND')}
+                        className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
+                          dayScheduleMode === 'FRI_SUN_WEEKEND'
+                            ? 'bg-[#D29922] text-[#0D1117]'
+                            : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                        }`}
+                      >
+                        Fri – Sun (Weekend Deal)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDayScheduleMode('MON_THU_NORMAL')}
+                        className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
+                          dayScheduleMode === 'MON_THU_NORMAL'
+                            ? 'bg-[#06B6D4] text-[#0D1117]'
+                            : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                        }`}
+                      >
+                        Mon – Thu (Normal Days)
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 rounded-xl bg-[#0D1117] border border-[#30363D] p-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setVipCampaignMode('WEEKEND_ONLY')}
+                        className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
+                          vipCampaignMode === 'WEEKEND_ONLY'
+                            ? 'bg-[#21262D] text-[#F0F6FC] border border-[#484F58]'
+                            : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                        }`}
+                      >
+                        Standard Fri–Sun Deal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVipCampaignMode('CONTINUOUS_7_10_DAYS')}
+                        className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
+                          vipCampaignMode === 'CONTINUOUS_7_10_DAYS'
+                            ? 'bg-[#0D3822] text-[#3FB950] border border-[#116329]'
+                            : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                        }`}
+                      >
+                        7–10 Day VIP Valid Deal
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Multi-Service Picker + Combined Total Confirmation */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                <div className="space-y-2">
+                  <span className="text-[10px] font-mono font-bold text-[#8B949E] uppercase block">
+                    {endUserLang === 'ur'
+                      ? 'سروسز منتخب کریں (کسٹمر ویو):'
+                      : endUserLang === 'ar'
+                      ? 'اختر الخدمات المتعددة (عرض العميل):'
+                      : 'Select Multiple Services (Client View):'}
+                  </span>
+                  <div className="space-y-1.5">
+                    {services
+                      .filter((s) => s.active)
+                      .map((svc) => {
+                        const checked = selectedCartServiceIds.includes(svc.id);
+                        const effectivePrice = Math.round(svc.price * (1 - vipDealDiscountRate));
+                        const localizedTitle = getLocalizedServiceName(svc.name, endUserLang);
+                        return (
+                          <label
+                            key={svc.id}
+                            className={`min-h-[44px] flex items-center justify-between rounded-xl border px-3 py-2 text-xs cursor-pointer transition ${
+                              checked
+                                ? 'border-[#06B6D4] bg-[#06B6D4]/10 text-[#F0F6FC]'
+                                : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
+                            }`}
+                          >
+                            <span className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() =>
+                                  setSelectedCartServiceIds((prev) =>
+                                    prev.includes(svc.id)
+                                      ? prev.filter((id) => id !== svc.id)
+                                      : [...prev, svc.id]
+                                  )
+                                }
+                                className="size-4 rounded text-[#06B6D4]"
+                              />
+                              <span className={endUserLang === 'ur' || endUserLang === 'ar' ? 'font-sans' : ''}>
+                                {localizedTitle}
+                              </span>
+                            </span>
+                            <span className="font-mono font-bold text-[#D29922]">
+                              {isVipDealActiveNow && (
+                                <span className="line-through text-[#6E7681] mr-1.5 text-[10px]">
+                                  {regionConfig.symbol}{svc.price.toLocaleString()}
+                                </span>
+                              )}
+                              {regionConfig.symbol}{effectivePrice.toLocaleString()}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* Summary + Confirm Lock */}
+                <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-3.5 flex flex-col justify-between space-y-3">
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-mono font-bold text-[#06B6D4] uppercase block">
+                      {endUserLang === 'ur'
+                        ? 'کسٹمر کنفرمیشن اور بل ٹوٹل:'
+                        : endUserLang === 'ar'
+                        ? 'تأكيد الحجز وتفاصيل الفاتورة:'
+                        : 'Client Confirmation & Rate Total:'}
+                    </span>
+
+                    {/* Preferred Barber Selector in Cart */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-mono text-[#8B949E] block">
+                        {endUserLang === 'ur'
+                          ? 'پسندیدہ باربر منتخب کریں:'
+                          : endUserLang === 'ar'
+                          ? 'اختر الحلاق المفضل:'
+                          : 'Select Preferred Barber / Stylist:'}
+                      </label>
+                      <select
+                        value={selectedCartBarber}
+                        onChange={(e) => setSelectedCartBarber(e.target.value)}
+                        className="w-full min-h-[42px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1 text-xs text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                      >
+                        {barbersList.map((b) => (
+                          <option key={b} value={b}>
+                            {b}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Query 3: Multi-Barber Conflict Detection in Cart */}
+                    {selectedCartBarber.toLowerCase().includes('tariq') &&
+                      (selectedCartSlot === '04:15 PM' || selectedCartSlot === '4:15 PM') && (
+                        <div className="rounded-xl bg-[#4C1C1D] border border-[#da3633] p-2.5 text-xs space-y-1.5 animate-in fade-in">
+                          <div className="flex items-start gap-1.5 text-[#F85149]">
+                            <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                            <span className="text-[11px] leading-tight">
+                              {endUserLang === 'ur'
+                                ? 'باربر طارق 04:15 PM پر مصروف ہیں۔ باربر علی اس سلاٹ پر فارغ ہیں!'
+                                : endUserLang === 'ar'
+                                ? 'الحلاق طارق مشغول 04:15 PM. الحلاق علي متاح في هذا الوقت!'
+                                : 'Barber Tariq is occupied at 04:15 PM. Barber Ali is free on that slot!'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const ali =
+                                barbersList.find((b) => b.toLowerCase().includes('ali')) || 'Ali Raza';
+                              setSelectedCartBarber(ali);
+                              setMaintToast(`✓ Switched booking to ${ali} at 04:15 PM.`);
+                              setTimeout(() => setMaintToast(null), 4000);
+                            }}
+                            className="w-full py-1.5 rounded-lg bg-[#3FB950] text-[#0D1117] font-mono font-bold text-xs hover:bg-[#2ea043] transition active:scale-95"
+                          >
+                            {endUserLang === 'ur'
+                              ? 'جی ہاں، باربر علی کے ساتھ 04:15 PM بک کریں ✓'
+                              : endUserLang === 'ar'
+                              ? 'نعم، احجز مع الحلاق علي في 04:15 PM ✓'
+                              : 'Book with Barber Ali at 04:15 PM ✓'}
+                          </button>
+                        </div>
+                      )}
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <input
+                        type="text"
+                        value={cartClientName}
+                        onChange={(e) => setCartClientName(e.target.value)}
+                        placeholder={endUserLang === 'ur' ? 'کسٹمر کا نام' : endUserLang === 'ar' ? 'اسم العميل' : 'Client Name'}
+                        className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-xs"
+                      />
+                      <input
+                        type="text"
+                        value={selectedCartSlot}
+                        onChange={(e) => setSelectedCartSlot(e.target.value)}
+                        placeholder="Slot e.g. 04:30 PM"
+                        className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-xs font-mono"
+                      />
+                    </div>
+
+                    {/* Query 5: Ambiguous Time Disambiguation in Cart */}
+                    {(selectedCartSlot.trim() === '9' || selectedCartSlot.trim().toLowerCase() === 'at 9') && (
+                      <div className="rounded-xl bg-[#3B2E0B] border border-[#9E6A03] p-2.5 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 animate-in fade-in">
+                        <span className="text-[11px] text-[#D29922] font-mono">
+                          {endUserLang === 'ur'
+                            ? 'کیا آپ کا مطلب 9:00 AM ہے یا 9:00 PM؟'
+                            : endUserLang === 'ar'
+                            ? 'هل تقصد 9:00 AM أم 9:00 PM؟'
+                            : 'Did you mean 9:00 AM or 9:00 PM?'}
+                        </span>
+                        <div className="flex gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCartSlot('09:00 AM')}
+                            className="px-2.5 py-1 rounded-md bg-[#06B6D4] text-[#0D1117] text-[10px] font-mono font-bold hover:bg-[#22D3EE]"
+                          >
+                            9:00 AM {endUserLang === 'ur' ? '(صبح)' : endUserLang === 'ar' ? '(صباحاً)' : ''}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCartSlot('09:00 PM')}
+                            className="px-2.5 py-1 rounded-md bg-[#D29922] text-[#0D1117] text-[10px] font-mono font-bold hover:bg-[#e0b252]"
+                          >
+                            9:00 PM {endUserLang === 'ur' ? '(رات)' : endUserLang === 'ar' ? '(مساءً)' : ''}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <input
+                      type="text"
+                      value={cartClientPhone}
+                      onChange={(e) => setCartClientPhone(e.target.value)}
+                      placeholder={endUserLang === 'ur' ? 'کسٹمر کا واٹس ایپ نمبر' : endUserLang === 'ar' ? 'رقم واتساب العميل' : 'Client WhatsApp Number'}
+                      className="w-full min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-xs font-mono"
+                    />
+
+                    <div className="rounded-xl bg-[#161B22] border border-[#30363D] p-2.5 text-xs font-mono space-y-1">
+                      <div className="flex justify-between text-[#8B949E]">
+                        <span>
+                          {endUserLang === 'ur'
+                            ? `منتخب سروسز (${selectedCartServices.length}):`
+                            : endUserLang === 'ar'
+                            ? `الخدمات المختارة (${selectedCartServices.length}):`
+                            : `Selected Services (${selectedCartServices.length}):`}
+                        </span>
+                        <span>{regionConfig.symbol}{cartRawSubtotal.toLocaleString()}</span>
+                      </div>
+                      {cartDiscountAmount > 0 && (
+                        <div className="flex justify-between text-[#3FB950]">
+                          <span>
+                            {endUserLang === 'ur' ? 'VIP ڈیل ڈسکاؤنٹ (25%):' : endUserLang === 'ar' ? 'خصم عرض VIP (25%):' : 'VIP Deal Discount (25%):'}
+                          </span>
+                          <span>-{regionConfig.symbol}{cartDiscountAmount.toLocaleString()}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-sm font-black text-[#D29922] pt-1 border-t border-[#21262D]">
+                        <span>{endUserLang === 'ur' ? 'کل حتمی بل:' : endUserLang === 'ar' ? 'الإجمالي النهائي:' : 'Confirmed Total:'}</span>
+                        <span>{regionConfig.symbol}{cartFinalTotal.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={selectedCartServices.length === 0}
+                    onClick={handleConfirmEndUserCartBooking}
+                    className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] py-2.5 text-xs font-mono font-black uppercase transition active:scale-95 disabled:opacity-40"
+                  >
+                    {endUserLang === 'ur'
+                      ? 'اپائنٹمنٹ تصدیق + دائمی ریکارڈ لاک ✓'
+                      : endUserLang === 'ar'
+                      ? 'تأكيد الحجز + حفظ الفاتورة الدائمة ✓'
+                      : 'Confirm Booking + Lock Permanent Proof + Voice Alert ✓'}
+                  </button>
+                </div>
               </div>
 
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleSendSimQuery();
-                }}
-                className="flex items-center gap-2"
-              >
-                <input
-                  type="text"
-                  value={customQuery}
-                  onChange={(e) => setCustomQuery(e.target.value)}
-                  placeholder="Type custom client message to test voice translation & permanent log..."
-                  className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 py-2.5 text-xs text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
-                />
-                <button
-                  type="submit"
-                  className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2.5 text-xs font-mono font-bold uppercase transition flex items-center gap-1.5"
-                >
-                  <span>Send</span>
-                  <Send className="size-3.5" />
-                </button>
-              </form>
+            {/* Chat Thread Preview */}
+            <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-2.5 max-h-[300px] overflow-y-auto overflow-x-hidden">
+              {simChatMessages.map((msg, idx) => {
+                const msgIsRtl = /[\u0600-\u06FF]/.test(msg.text);
+                const hasLocationLink = msg.text.includes('maps.google.com') || msg.text.includes('📍');
+                const hasHoursLink = msg.text.includes('11:00 AM') || msg.text.includes('🕒');
+                return (
+                  <div
+                    key={idx}
+                    className={`flex ${msg.sender === 'CLIENT' ? 'justify-start' : 'justify-end'}`}
+                  >
+                    <div
+                      className={`max-w-[85%] min-w-0 rounded-2xl p-3 text-xs leading-relaxed overflow-hidden break-words [overflow-wrap:break-word] space-y-2 ${
+                        msg.sender === 'CLIENT'
+                          ? 'bg-[#21262D] border border-[#30363D] text-[#F0F6FC]'
+                          : 'bg-[#0D3822] border border-[#116329] text-[#3FB950]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3 text-[9px] font-mono opacity-75 mb-1">
+                        <span>{msg.sender === 'CLIENT' ? 'Customer' : 'WORKCRAFT Concierge Bot'}</span>
+                        <span>{msg.time}</span>
+                      </div>
+                      <p
+                        dir={msgIsRtl ? 'rtl' : 'ltr'}
+                        className={`break-words [overflow-wrap:break-word] ${msgIsRtl ? 'text-right' : 'text-left'}`}
+                      >
+                        {msg.text}
+                      </p>
+
+                      {/* Interactive In-Message Quick Action Buttons for Location & Timing */}
+                      {hasLocationLink && msg.sender === 'BOT' && (
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setIsLocationModalOpen(true)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#3FB950] text-[#0D1117] text-[10px] font-mono font-bold hover:bg-[#2ea043] transition shadow-sm"
+                          >
+                            <MapPin className="size-3" />
+                            <span>📍 Open Interactive Map &amp; Navigation</span>
+                          </button>
+                        </div>
+                      )}
+                      {hasHoursLink && msg.sender === 'BOT' && (
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setIsTimingModalOpen(true)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#06B6D4] text-[#0D1117] text-[10px] font-mono font-bold hover:bg-[#22D3EE] transition shadow-sm"
+                          >
+                            <Clock className="size-3" />
+                            <span>🕒 View Weekly Schedule &amp; Prayer Break</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* In-Chat Interactive Prompt: Ambiguous Time Disambiguation */}
+              {timeDisambiguationPrompt && (
+                <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B]/80 p-3 space-y-2 animate-in fade-in">
+                  <div className="flex items-center gap-2 text-xs font-mono text-[#D29922]">
+                    <Clock className="size-4" />
+                    <span>
+                      {endUserLang === 'ur'
+                        ? 'برائے مہربانی صبح یا شام کا وقت منتخب کریں:'
+                        : endUserLang === 'ar'
+                        ? 'يرجى تحديد الفترة الصباحية أم المسائية:'
+                        : 'Please choose Morning or Evening slot:'}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCartSlot('09:00 AM');
+                        setTimeDisambiguationPrompt(null);
+                        triggerCrossLanguageClientReply(
+                          'WhatsApp Client',
+                          endUserLang,
+                          '09:00 AM',
+                          'CONFIRMED',
+                          '09:00 AM (Morning / صبح)'
+                        );
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[#06B6D4] text-[#0D1117] text-xs font-mono font-bold hover:bg-[#22D3EE] transition"
+                    >
+                      9:00 AM {endUserLang === 'ur' ? '(صبح)' : endUserLang === 'ar' ? '(صباحاً)' : '(Morning)'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCartSlot('09:00 PM');
+                        setTimeDisambiguationPrompt(null);
+                        triggerCrossLanguageClientReply(
+                          'WhatsApp Client',
+                          endUserLang,
+                          '09:00 PM',
+                          'CONFIRMED',
+                          '09:00 PM (Night / رات)'
+                        );
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[#D29922] text-[#0D1117] text-xs font-mono font-bold hover:bg-[#e0b252] transition"
+                    >
+                      9:00 PM {endUserLang === 'ur' ? '(رات)' : endUserLang === 'ar' ? '(مساءً)' : '(Night)'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* In-Chat Interactive Prompt: Multi-Barber Conflict Tariq -> Ali */}
+              {barberConflictPrompt && (
+                <div className="rounded-xl border border-[#116329] bg-[#0D3822]/90 p-3 space-y-2 animate-in fade-in">
+                  <div className="flex items-center gap-2 text-xs font-sans text-[#3FB950]">
+                    <UserCheck className="size-4" />
+                    <span className="font-bold">
+                      {endUserLang === 'ur'
+                        ? `باربر علی رضا ${barberConflictPrompt.slot} پر دستیاب ہیں:`
+                        : endUserLang === 'ar'
+                        ? `الحلاق علي رضا متاح في ${barberConflictPrompt.slot}:`
+                        : `Barber Ali Raza is ready and available at ${barberConflictPrompt.slot}:`}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCartBarber('Ali Raza');
+                        setBarberConflictPrompt(null);
+                        triggerCrossLanguageClientReply(
+                          'WhatsApp Client',
+                          endUserLang,
+                          barberConflictPrompt.slot,
+                          'CONFIRMED',
+                          `Yes, please confirm my booking with Barber Ali Raza at ${barberConflictPrompt.slot}!`
+                        );
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[#3FB950] text-[#0D1117] text-xs font-mono font-bold hover:bg-[#2ea043] transition active:scale-95 flex items-center gap-1.5"
+                    >
+                      <Check className="size-3.5" />
+                      <span>
+                        {endUserLang === 'ur'
+                          ? 'جی ہاں، باربر علی کے ساتھ بک کریں ✓'
+                          : endUserLang === 'ar'
+                          ? 'نعم، احجز مع الحلاق علي ✓'
+                          : 'Book with Barber Ali (04:15 PM) ✓'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBarberConflictPrompt(null)}
+                      className="px-2.5 py-1.5 rounded-lg border border-[#30363D] text-[#8B949E] text-xs font-mono hover:text-[#F0F6FC]"
+                    >
+                      {endUserLang === 'ur' ? 'دوسرا وقت چنیں' : endUserLang === 'ar' ? 'اختيار وقت آخر' : 'Pick Another Slot'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          </PortalCard>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendSimQuery();
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={customQuery}
+                onChange={(e) => setCustomQuery(e.target.value)}
+                placeholder="Type custom client message to test voice translation & permanent log..."
+                className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 py-2.5 text-xs text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+              />
+              <button
+                type="submit"
+                className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2.5 text-xs font-mono font-bold uppercase transition flex items-center gap-1.5"
+              >
+                <span>Send</span>
+                <Send className="size-3.5" />
+              </button>
+            </form>
+          </div>
+        </PortalCard>
 
           {/* C. Immutable Un-Deletable Client Proof Ledger (Query 6) */}
           <PortalCard title="Immutable Client Confirmation Ledger (Cannot Be Deleted by End User)" kicker="PERMANENT SALON AUDIT TRAIL">
@@ -3703,7 +4427,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                       key={ch.id}
                       type="button"
                       disabled={isPayingMaint}
-                      onClick={handleAutoClearMaintenance}
+                      onClick={() => {
+                        setMaintPaymentChannel(ch.id);
+                        setIsMaintPaymentModalOpen(true);
+                      }}
                       className="min-h-[48px] p-3 rounded-xl border border-[#116329] bg-[#161B22] hover:bg-[#0D3822] text-left transition active:scale-95"
                     >
                       <p className="font-bold text-[#3FB950]">{ch.label}</p>
@@ -3880,7 +4607,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* TOP-RIGHT DIFFERENCE-ONLY REGIONAL UPGRADE MODAL                          */}
+      {/* 1. TOP-RIGHT DIFFERENCE-ONLY REGIONAL UPGRADE MODAL (FULLY LOCALIZED)     */}
       {/* ========================================================================= */}
       {isUpgradeModalOpen && (
         <div
@@ -3889,132 +4616,484 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         >
           <div
             onClick={(e) => e.stopPropagation()}
+            dir={ownerLang === 'ur' || ownerLang === 'ar' ? 'rtl' : 'ltr'}
             className="w-full max-w-3xl rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-5"
           >
-            <div className="flex items-start justify-between gap-3 border-b border-[#21262D] pb-4">
-              <div>
-                <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#D29922]">
-                  PAY DIFFERENCE ONLY · {regionConfig.regionLabel.toUpperCase()}
-                </span>
-                <h2 className="text-xl font-black text-[#F0F6FC] mt-0.5">
-                  Upgrade {currentSalon.name} Package
-                </h2>
-                <p className="text-xs text-[#8B949E] font-sans mt-1">
-                  Your current <strong className="text-[#06B6D4]">{currentPackage.name}</strong> setup fee (
-                  <strong className="text-[#F0F6FC]">{regionConfig.symbol}{currentPackage.setupFee.toLocaleString()}</strong>) is credited 100%. Pay only the remaining difference.
-                </p>
+            {(() => {
+              const i18n = UPGRADE_MODAL_I18N[ownerLang];
+              return (
+                <>
+                  <div className="flex items-start justify-between gap-3 border-b border-[#21262D] pb-4">
+                    <div>
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#D29922]">
+                        {i18n.kicker} · {regionConfig.regionLabel.toUpperCase()}
+                      </span>
+                      <h2 className="text-xl font-black text-[#F0F6FC] mt-0.5">
+                        {i18n.title(currentSalon.name)}
+                      </h2>
+                      <p className="text-xs text-[#8B949E] font-sans mt-1 leading-relaxed">
+                        {i18n.creditNote(currentPackage.name, regionConfig.symbol, currentPackage.setupFee)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsUpgradeModalOpen(false)}
+                      className="min-h-[44px] min-w-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC] hover:border-[#484F58]"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {higherPackages.map((pkg) => {
+                      const differenceAmount = Math.max(0, pkg.setupFee - currentPackage.setupFee);
+                      const isSelected = selectedUpgradeTargetId === pkg.id;
+                      return (
+                        <button
+                          key={pkg.id}
+                          type="button"
+                          onClick={() => setSelectedUpgradeTargetId(pkg.id)}
+                          className={`rounded-2xl border p-4 text-left transition flex flex-col justify-between space-y-3 ${
+                            isSelected
+                              ? 'border-[#D29922] bg-[#3B2E0B]/40'
+                              : 'border-[#30363D] bg-[#0D1117] hover:border-[#484F58]'
+                          } ${ownerLang === 'ur' || ownerLang === 'ar' ? 'text-right' : 'text-left'}`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-black text-[#F0F6FC]">{pkg.name}</span>
+                              <span className="rounded-md bg-[#06B6D4]/15 border border-[#06B6D4]/30 px-2 py-0.5 text-[9px] font-mono font-bold text-[#06B6D4]">
+                                {pkg.badge}
+                              </span>
+                            </div>
+                            <div className="rounded-xl bg-[#161B22] border border-[#30363D] p-2.5 font-mono">
+                              <span className="text-[10px] text-[#6E7681] block">
+                                {i18n.fullPrice} <span className="line-through">{regionConfig.symbol}{pkg.setupFee.toLocaleString()}</span>
+                              </span>
+                              <p className="text-lg font-black text-[#D29922] mt-0.5">
+                                {i18n.payDiff(regionConfig.symbol, differenceAmount)}
+                              </p>
+                              <span className="text-[10px] text-[#8B949E] block">
+                                {i18n.newMaintFee(regionConfig.symbol, pkg.monthlyMaint)}
+                              </span>
+                            </div>
+                            <ul className="space-y-1.5 pt-1">
+                              {pkg.features.map((feat) => (
+                                <li key={feat} className="text-[11px] text-[#8B949E] font-sans flex items-start gap-1.5">
+                                  <Check className="size-3.5 text-[#3FB950] shrink-0 mt-0.5" />
+                                  <span>{feat}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {selectedUpgradeTargetId && (() => {
+                    const chosenPkg = higherPackages.find((p) => p.id === selectedUpgradeTargetId);
+                    if (!chosenPkg) return null;
+                    const diff = Math.max(0, chosenPkg.setupFee - currentPackage.setupFee);
+                    return (
+                      <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-mono font-bold text-[#F0F6FC] uppercase flex items-center gap-1.5">
+                            <CreditCard className="size-4 text-[#D29922]" />
+                            <span>{i18n.paymentChannelTitle(regionConfig.currency)}</span>
+                          </span>
+                          <span className="text-xs font-mono text-[#3FB950] font-bold">
+                            {i18n.differencePayLabel(regionConfig.symbol, diff)}
+                          </span>
+                        </div>
+
+                        {/* Payment Channels for Detected Region */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {regionConfig.paymentChannels.map((ch) => (
+                            <button
+                              key={ch.id}
+                              type="button"
+                              onClick={() => setSelectedUpgradeChannel(ch.id)}
+                              className={`min-h-[48px] rounded-xl border p-2.5 text-xs font-mono transition ${
+                                selectedUpgradeChannel === ch.id
+                                  ? 'border-[#06B6D4] bg-[#06B6D4]/15 text-[#F0F6FC]'
+                                  : 'border-[#30363D] bg-[#161B22] text-[#8B949E] hover:border-[#484F58]'
+                              } ${ownerLang === 'ur' || ownerLang === 'ar' ? 'text-right' : 'text-left'}`}
+                            >
+                              <p className="font-bold text-[#06B6D4]">{ch.label}</p>
+                              <p className="text-[10px] text-[#8B949E] mt-0.5">{ch.detail}</p>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Payment Details / Transaction Reference Input Field */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-mono text-[#8B949E] block">
+                            {i18n.tidLabel}
+                          </label>
+                          <input
+                            type="text"
+                            value={upgradeTidInput}
+                            onChange={(e) => setUpgradeTidInput(e.target.value)}
+                            placeholder={i18n.tidPlaceholder}
+                            className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-xs text-[#F0F6FC] placeholder:text-[#484F58] font-mono focus:outline-none focus:border-[#D29922]"
+                          />
+                        </div>
+
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            disabled={isProcessingUpgrade}
+                            onClick={handleConfirmPackageUpgrade}
+                            className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-6 py-2.5 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center gap-2 shadow-lg"
+                          >
+                            {isProcessingUpgrade ? (
+                              <>
+                                <RefreshCw className="size-4 animate-spin" />
+                                <span>{i18n.upgradingBtn}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Receipt className="size-4" />
+                                <span>{i18n.confirmUpgradeBtn(regionConfig.symbol, diff)}</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 2. DEDICATED MAINTENANCE FEE PAYMENT MODAL (QUERY 8)                      */}
+      {/* ========================================================================= */}
+      {isMaintPaymentModalOpen && (
+        <div
+          className="fixed inset-0 z-[96] flex items-center justify-center bg-[#0D1117]/85 p-4 backdrop-blur-md"
+          onClick={() => setIsMaintPaymentModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            dir={ownerLang === 'ur' || ownerLang === 'ar' ? 'rtl' : 'ltr'}
+            className="w-full max-w-xl rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-5"
+          >
+            {(() => {
+              const i18n = MAINT_MODAL_I18N[ownerLang];
+              return (
+                <>
+                  <div className="flex items-start justify-between gap-3 border-b border-[#21262D] pb-4">
+                    <div>
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#06B6D4]">
+                        {i18n.kicker}
+                      </span>
+                      <h2 className="text-xl font-black text-[#F0F6FC] mt-0.5">
+                        {i18n.title(currentSalon.name)}
+                      </h2>
+                      <p className="text-xs text-[#8B949E] font-sans mt-1 leading-relaxed">
+                        {i18n.description(regionConfig.symbol, currentSalon.maint, currentSalon.phone)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsMaintPaymentModalOpen(false)}
+                      className="min-h-[44px] min-w-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC]"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+
+                  {/* Summary Box */}
+                  <div className="rounded-2xl border border-[#116329] bg-[#0D3822]/40 p-4 flex items-center justify-between gap-3 font-mono">
+                    <div>
+                      <span className="text-[10px] text-[#8B949E] uppercase block">{i18n.feeHeading}</span>
+                      <p className="text-2xl font-black text-[#3FB950] mt-0.5">
+                        {regionConfig.symbol}{currentSalon.maint.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-[#8B949E] block">{i18n.dueDateHeading}</span>
+                      <span className="text-xs font-bold text-[#06B6D4]">Auto-cleared via SIM</span>
+                    </div>
+                  </div>
+
+                  {/* Payment Channels for Region */}
+                  <div className="space-y-2">
+                    <span className="text-xs font-mono font-bold text-[#F0F6FC] block">
+                      {i18n.channelHeading(regionConfig.currency)}:
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {regionConfig.paymentChannels.map((ch) => (
+                        <button
+                          key={ch.id}
+                          type="button"
+                          onClick={() => setMaintPaymentChannel(ch.id)}
+                          className={`min-h-[48px] rounded-xl border p-2.5 text-xs font-mono transition ${
+                            maintPaymentChannel === ch.id
+                              ? 'border-[#06B6D4] bg-[#06B6D4]/15 text-[#F0F6FC]'
+                              : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:border-[#484F58]'
+                          } ${ownerLang === 'ur' || ownerLang === 'ar' ? 'text-right' : 'text-left'}`}
+                        >
+                          <p className="font-bold text-[#06B6D4]">{ch.label}</p>
+                          <p className="text-[10px] text-[#8B949E] mt-0.5">{ch.detail}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Transaction ID / Sender SIM input */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-[#8B949E] block">
+                      {i18n.tidLabel}
+                    </label>
+                    <input
+                      type="text"
+                      value={maintPaymentTidInput}
+                      onChange={(e) => setMaintPaymentTidInput(e.target.value)}
+                      placeholder={i18n.tidPlaceholder}
+                      className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs text-[#F0F6FC] placeholder:text-[#484F58] font-mono focus:outline-none focus:border-[#06B6D4]"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsMaintPaymentModalOpen(false)}
+                      className="min-h-[44px] px-4 py-2 rounded-xl border border-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] text-xs font-mono"
+                    >
+                      {i18n.cancelBtn}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPayingMaint}
+                      onClick={handleConfirmMaintPayment}
+                      className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-6 py-2.5 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center gap-2 shadow-lg"
+                    >
+                      {isPayingMaint ? (
+                        <>
+                          <RefreshCw className="size-4 animate-spin" />
+                          <span>{i18n.processingBtn}</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="size-4" />
+                          <span>{i18n.payBtn(regionConfig.symbol, currentSalon.maint)}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 3. INTERACTIVE LOCATION & GOOGLE MAPS PIN MODAL (QUERY 7)                 */}
+      {/* ========================================================================= */}
+      {isLocationModalOpen && (
+        <div
+          className="fixed inset-0 z-[96] flex items-center justify-center bg-[#0D1117]/80 p-4 backdrop-blur-md"
+          onClick={() => setIsLocationModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 shadow-2xl space-y-4 animate-in fade-in"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-[#21262D] pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="size-10 rounded-xl bg-[#0D3822] border border-[#116329] grid place-items-center text-[#3FB950]">
+                  <MapPin className="size-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-[#F0F6FC]">
+                    {currentSalon.name} · Location Pin
+                  </h3>
+                  <p className="text-xs text-[#8B949E] font-sans">
+                    {currentSalon.location} ({regionConfig.regionLabel})
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => setIsUpgradeModalOpen(false)}
-                className="min-h-[44px] min-w-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC] hover:border-[#484F58]"
+                onClick={() => setIsLocationModalOpen(false)}
+                className="size-9 rounded-xl border border-[#30363D] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC]"
               >
                 <X className="size-4" />
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {higherPackages.map((pkg) => {
-                const differenceAmount = Math.max(0, pkg.setupFee - currentPackage.setupFee);
-                const isSelected = selectedUpgradeTargetId === pkg.id;
-                return (
-                  <button
-                    key={pkg.id}
-                    type="button"
-                    onClick={() => setSelectedUpgradeTargetId(pkg.id)}
-                    className={`rounded-2xl border p-4 text-left transition flex flex-col justify-between space-y-3 ${
-                      isSelected
-                        ? 'border-[#D29922] bg-[#3B2E0B]/40'
-                        : 'border-[#30363D] bg-[#0D1117] hover:border-[#484F58]'
-                    }`}
-                  >
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-black text-[#F0F6FC]">{pkg.name}</span>
-                        <span className="rounded-md bg-[#06B6D4]/15 border border-[#06B6D4]/30 px-2 py-0.5 text-[9px] font-mono font-bold text-[#06B6D4]">
-                          {pkg.badge}
-                        </span>
-                      </div>
-                      <div className="rounded-xl bg-[#161B22] border border-[#30363D] p-2.5 font-mono">
-                        <span className="text-[10px] text-[#6E7681] block">
-                          Full: <span className="line-through">{regionConfig.symbol}{pkg.setupFee.toLocaleString()}</span>
-                        </span>
-                        <p className="text-lg font-black text-[#D29922] mt-0.5">
-                          Pay {regionConfig.symbol}{differenceAmount.toLocaleString()}
-                        </p>
-                        <span className="text-[10px] text-[#8B949E] block">
-                          New 10% Monthly Fee: {regionConfig.symbol}{pkg.monthlyMaint.toLocaleString()}/mo
-                        </span>
-                      </div>
-                      <ul className="space-y-1.5 pt-1">
-                        {pkg.features.map((feat) => (
-                          <li key={feat} className="text-[11px] text-[#8B949E] font-sans flex items-start gap-1.5">
-                            <Check className="size-3.5 text-[#3FB950] shrink-0 mt-0.5" />
-                            <span>{feat}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </button>
-                );
-              })}
+            {/* Simulated Google Map View Card */}
+            <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 relative overflow-hidden space-y-3">
+              <div className="h-40 rounded-xl bg-gradient-to-br from-[#161B22] via-[#21262D] to-[#0D1117] border border-[#30363D] flex flex-col items-center justify-center text-center p-4 relative">
+                <div className="size-12 rounded-full bg-[#116329]/80 border-2 border-[#3FB950] grid place-items-center text-[#3FB950] shadow-xl animate-bounce">
+                  <MapPin className="size-6" />
+                </div>
+                <p className="text-xs font-bold text-[#F0F6FC] mt-2">{currentSalon.name}</p>
+                <p className="text-[11px] text-[#8B949E] font-sans max-w-xs truncate">{currentSalon.location}</p>
+                <div className="absolute top-2 right-2 rounded-md bg-[#0D1117]/80 border border-[#30363D] px-2 py-0.5 text-[9px] font-mono text-[#06B6D4]">
+                  GPS PIN VERIFIED
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-[#161B22] p-3 border border-[#30363D] text-xs font-mono space-y-1">
+                <div className="flex justify-between text-[#8B949E]">
+                  <span>Full Address:</span>
+                  <span className="text-[#F0F6FC] font-sans font-bold">{currentSalon.location}</span>
+                </div>
+                <div className="flex justify-between text-[#8B949E]">
+                  <span>WhatsApp Contact:</span>
+                  <span className="text-[#06B6D4]">{currentSalon.phone}</span>
+                </div>
+              </div>
             </div>
 
-            {selectedUpgradeTargetId && (() => {
-              const chosenPkg = higherPackages.find((p) => p.id === selectedUpgradeTargetId);
-              if (!chosenPkg) return null;
-              const diff = Math.max(0, chosenPkg.setupFee - currentPackage.setupFee);
-              return (
-                <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-mono font-bold text-[#F0F6FC] uppercase flex items-center gap-1.5">
-                      <CreditCard className="size-4 text-[#D29922]" />
-                      <span>Payment Channel ({regionConfig.currency})</span>
-                    </span>
-                    <span className="text-xs font-mono text-[#3FB950] font-bold">
-                      Pay Difference: {regionConfig.symbol}{diff.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {regionConfig.paymentChannels.map((ch) => (
-                      <button
-                        key={ch.id}
-                        type="button"
-                        onClick={() => setSelectedUpgradeChannel(ch.id)}
-                        className={`min-h-[48px] rounded-xl border p-2.5 text-left text-xs font-mono transition ${
-                          selectedUpgradeChannel === ch.id
-                            ? 'border-[#06B6D4] bg-[#06B6D4]/15 text-[#F0F6FC]'
-                            : 'border-[#30363D] bg-[#161B22] text-[#8B949E] hover:border-[#484F58]'
-                        }`}
-                      >
-                        <p className="font-bold text-[#06B6D4]">{ch.label}</p>
-                        <p className="text-[10px] text-[#8B949E] mt-0.5">{ch.detail}</p>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      disabled={isProcessingUpgrade}
-                      onClick={handleConfirmPackageUpgrade}
-                      className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 py-2.5 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center gap-2"
-                    >
-                      {isProcessingUpgrade ? (
-                        <>
-                          <RefreshCw className="size-4 animate-spin" />
-                          <span>Upgrading...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Receipt className="size-4" />
-                          <span>Pay {regionConfig.symbol}{diff.toLocaleString()} &amp; Upgrade →</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              <a
+                href={`https://maps.google.com/?q=${encodeURIComponent(currentSalon.name + ' ' + currentSalon.location)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 min-h-[44px] rounded-xl bg-[#3FB950] hover:bg-[#2ea043] text-[#0D1117] font-mono font-bold text-xs uppercase grid place-items-center shadow-lg transition"
+              >
+                <span>🌐 Open in Google Maps →</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  setMaintToast(`✓ Location Pin sent to client via WhatsApp link.`);
+                  setIsLocationModalOpen(false);
+                  setTimeout(() => setMaintToast(null), 4000);
+                }}
+                className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#21262D] hover:bg-[#30363D] text-[#F0F6FC] text-xs font-mono px-4 transition"
+              >
+                Send via WhatsApp
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 4. SALON TIMING & WEEKLY SCHEDULE MODAL (QUERY 7)                         */}
+      {/* ========================================================================= */}
+      {isTimingModalOpen && (
+        <div
+          className="fixed inset-0 z-[96] flex items-center justify-center bg-[#0D1117]/80 p-4 backdrop-blur-md"
+          onClick={() => setIsTimingModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 shadow-2xl space-y-4 animate-in fade-in"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-[#21262D] pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="size-10 rounded-xl bg-[#3B2E0B] border border-[#9E6A03] grid place-items-center text-[#D29922]">
+                  <Clock className="size-5" />
                 </div>
-              );
-            })()}
+                <div>
+                  <h3 className="text-base font-black text-[#F0F6FC]">
+                    {currentSalon.name} · Operating Hours
+                  </h3>
+                  <p className="text-xs text-[#3FB950] font-mono flex items-center gap-1.5 mt-0.5">
+                    <span className="size-2 rounded-full bg-[#3FB950] animate-pulse" />
+                    <span>🟢 Currently Open · Daily Service</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTimingModalOpen(false)}
+                className="size-9 rounded-xl border border-[#30363D] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC]"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-2.5 text-xs font-mono">
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#161B22] border border-[#30363D]">
+                <span className="text-[#F0F6FC] font-bold">Monday – Thursday:</span>
+                <span className="text-[#06B6D4]">11:00 AM – 11:00 PM</span>
+              </div>
+              <div className="flex flex-col p-2.5 rounded-xl bg-[#3B2E0B]/30 border border-[#9E6A03] space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[#D29922] font-bold">Friday (Jummah Schedule):</span>
+                  <span className="text-[#D29922]">11:00 AM – 11:30 PM</span>
+                </div>
+                <span className="text-[10px] text-[#F85149] font-sans">
+                  ⚠️ Friday Prayer Break: Closed 1:00 PM – 2:30 PM
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#161B22] border border-[#30363D]">
+                <span className="text-[#F0F6FC] font-bold">Saturday &amp; Sunday:</span>
+                <span className="text-[#3FB950]">10:30 AM – 11:30 PM</span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-[#8B949E] font-sans">
+              ℹ️ Walk-ins are always welcomed in-chair. Pre-booking via WhatsApp is advised for weekend rush hours.
+            </p>
+
+            <div className="pt-1 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsTimingModalOpen(false)}
+                className="min-h-[44px] px-6 rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-bold uppercase transition"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5. FLOATING WHATSAPP RECEIPT NOTICE DRAWER (QUERY 1 & 8)                  */}
+      {/* ========================================================================= */}
+      {whatsAppReceiptNotice && (
+        <div className="fixed bottom-4 right-4 z-[98] max-w-md w-full p-2 animate-in slide-in-from-bottom-5">
+          <div className="rounded-3xl border-2 border-[#3FB950] bg-[#161B22] p-4 shadow-2xl space-y-2.5">
+            <div className="flex items-center justify-between gap-2 border-b border-[#21262D] pb-2">
+              <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#3FB950]">
+                <span className="size-2 rounded-full bg-[#3FB950] animate-pulse" />
+                <MessageSquare className="size-4" />
+                <span>{whatsAppReceiptNotice.title}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWhatsAppReceiptNotice(null)}
+                className="size-7 rounded-lg border border-[#30363D] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC]"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+
+            <div className="text-[11px] font-mono text-[#8B949E] flex items-center justify-between">
+              <span>To: {whatsAppReceiptNotice.phone}</span>
+              <span>{whatsAppReceiptNotice.timestamp}</span>
+            </div>
+
+            <p
+              dir={ownerLang === 'ur' || ownerLang === 'ar' ? 'rtl' : 'ltr'}
+              className="text-xs text-[#F0F6FC] font-sans leading-relaxed bg-[#0D1117] p-3 rounded-2xl border border-[#30363D]"
+            >
+              {whatsAppReceiptNotice.body}
+            </p>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setWhatsAppReceiptNotice(null)}
+                className="text-[10px] font-mono font-bold text-[#3FB950] hover:underline"
+              >
+                ✓ Dismiss WhatsApp Notice
+              </button>
+            </div>
           </div>
         </div>
       )}

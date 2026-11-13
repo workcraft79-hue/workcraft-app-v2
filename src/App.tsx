@@ -30,8 +30,7 @@ import { VoiceSection } from './components/VoiceSection';
 import { VoiceSupportDrawer } from './components/VoiceSupportDrawer';
 import { TabsSection } from './components/TabsSection';
 import { DetailSheet } from './components/DetailSheet';
-import { FieldAgentHub } from './components/FieldAgentHub';
-import { SalonPwaSimulator } from './components/SalonPwaSimulator';
+import { FieldAgentHub, OnboardedSalonPayload } from './components/FieldAgentHub';
 import { SalonOwnerDashboard } from './components/SalonOwnerDashboard';
 import { SilentSelfHealingBoundary } from './components/SilentSelfHealingBoundary';
 import {
@@ -52,6 +51,7 @@ export default function App() {
   const [inspectSalonName, setInspectSalonName] = useState<string | undefined>(undefined);
   const [hasCompletedSalonOnboarding, setHasCompletedSalonOnboarding] = useState(true);
   const [onboardedSalonName, setOnboardedSalonName] = useState<string | undefined>(undefined);
+  const [completedOnboardingData, setCompletedOnboardingData] = useState<OnboardedSalonPayload | null>(null);
 
   // Founder Command Center Workspace Navigation
   const [activeTab, setActiveTab] = useState<TabName>('Overview');
@@ -175,10 +175,12 @@ export default function App() {
       setActiveTab('Agent Hub / Onboarding');
       showToast('🔍 Previewing exact isolated Field Agent screen. Tap Return to Founder anytime.');
     } else if (mode === 'SALON_ONBOARD') {
+      setCompletedOnboardingData(null);
+      setOnboardedSalonName(undefined);
       setHasCompletedSalonOnboarding(false);
       setActiveRole('SALON_OWNER');
       setActiveTab('Salon Owner Dashboard');
-      showToast('🔍 Previewing exact 4-step New Salon Signup screen.');
+      showToast('🔍 Previewing exact 4-step Salon Self-Onboarding terminal. Tap Return to Founder anytime.');
     } else {
       setHasCompletedSalonOnboarding(true);
       setActiveRole('SALON_OWNER');
@@ -289,12 +291,17 @@ export default function App() {
     showToast(`💵 PKR ${amount.toLocaleString()} Cash Held Logged with Biometric Seal · Receipts sent to agent & ${salonName}`);
   };
 
-  const handlePairingComplete = (salonName: string) => {
+  const handlePairingComplete = (salonName: string, payload?: OnboardedSalonPayload) => {
     setActiveSalonCount((prev) => prev + 1);
     setIsSalonPwaModalOpen(false);
     setOnboardedSalonName(salonName);
+    if (payload) {
+      setCompletedOnboardingData(payload);
+    }
     setHasCompletedSalonOnboarding(true);
-    showToast(`🎉 ${salonName} Paired Successfully! Welcome to your Salon Owner Dashboard.`);
+    setActiveRole('SALON_OWNER');
+    setActiveTab('Salon Owner Dashboard');
+    showToast(`🎉 ${salonName} Paired Successfully! Welcome to your Live Salon Owner Dashboard.`);
   };
 
   const handleInspectSalon = (salonName: string) => {
@@ -310,10 +317,12 @@ export default function App() {
 
   const handleTestSocialLaunch = (source: 'Facebook' | 'Instagram' | 'TikTok') => {
     setSocialCampaignSource(`${source} Ads Campaign`);
+    setCompletedOnboardingData(null);
+    setOnboardedSalonName(undefined);
     setHasCompletedSalonOnboarding(false);
     setActiveRole('SALON_OWNER');
     setActiveTab('Salon Owner Dashboard');
-    showToast(`📱 Simulated direct mobile arrival from ${source} Ad Campaign. Founder screens bypassed!`);
+    showToast(`📱 Simulated direct mobile arrival from ${source} Ad Campaign. Direct 4-step onboarding active!`);
   };
 
   // Strict 3-Role Sidebar & Bottom Navigation Isolation (Query 1)
@@ -794,31 +803,19 @@ export default function App() {
                 onSilentRecovered={(d) => showToast(`🛡️ Auto-recovered ${d.areaName} seamlessly`)}
               >
                 {activeRole === 'SALON_OWNER' && !hasCompletedSalonOnboarding ? (
-                  <div className="max-w-4xl mx-auto space-y-4">
-                    <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div>
-                        <span className="text-[10px] font-mono font-bold uppercase text-cyan-400 block">
-                          WELCOME TO WORKCRAFT LOCAL · STEP-BY-STEP SIGNUP
-                        </span>
-                        <p className="text-xs text-[#8B949E] font-sans mt-0.5">
-                          Complete the 4 quick onboarding steps below (language, services &amp; rates, payment, and WhatsApp link) to unlock your private Salon Owner Dashboard &amp; printable PDF window poster.
-                        </p>
-                      </div>
-                      <span className="rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1 text-[10px] font-mono font-bold text-[#3FB950] shrink-0">
-                        4-Step Onboarding First
-                      </span>
-                    </div>
-                    <SalonPwaSimulator
-                      salonName={onboardedSalonName || activeOnboarding?.salonName || 'My Beauty & Grooming Salon'}
-                      token={activeOnboarding?.token || 'wc_social_signup'}
-                      socialCampaignSource={socialCampaignSource || undefined}
-                      onReturnToFounder={founderPreviewMode !== 'NONE' ? handleExitFounderPreview : undefined}
-                      onPairingComplete={handlePairingComplete}
-                    />
-                  </div>
+                  <FieldAgentHub
+                    userRole="SALON_OWNER"
+                    socialCampaignSource={socialCampaignSource}
+                    initialSalonName={onboardedSalonName || activeOnboarding?.salonName}
+                    onReturnToFounder={founderPreviewMode !== 'NONE' ? handleExitFounderPreview : undefined}
+                    onSalonCreated={handleSalonCreated}
+                    onSalonOnboardingComplete={(payload) => handlePairingComplete(payload.salonName, payload)}
+                  />
                 ) : (
                   <SalonOwnerDashboard
                     selectedSalonName={onboardedSalonName || inspectSalonName}
+                    salonCategory={completedOnboardingData?.salonCategory}
+                    onboardedData={completedOnboardingData}
                     isFounderInspector={activeRole === 'FOUNDER'}
                     onClose={activeRole === 'FOUNDER' ? () => handleTabChange('Overview') : undefined}
                   />
@@ -927,7 +924,7 @@ export default function App() {
         onOpenVoiceTicker={() => setIsVoiceDrawerOpen(true)}
       />
 
-      {/* Salon PWA Simulator Modal (Founder stays inside Unified Dashboard) */}
+      {/* Unified 4-Step Salon Onboarding Modal */}
       {isSalonPwaModalOpen && (
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0D1117]/80 p-4 backdrop-blur-md"
@@ -937,33 +934,11 @@ export default function App() {
             onClick={(e) => e.stopPropagation()}
             className="w-full max-w-4xl rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 animate-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto"
           >
-            <div className="flex items-center justify-between border-b border-[#21262D] pb-3 mb-4">
-              <div>
-                <p className="text-[10px] font-mono font-bold uppercase tracking-[.18em] text-cyan-400">
-                  LIVE SIMULATION · SALON OWNER PWA EXPERIENCE
-                </p>
-                <h3 className="text-lg font-bold text-[#F0F6FC]">
-                  {activeOnboarding?.salonName || 'Royal Fade Lounge'} · Mobile Onboarding &amp; Regional Checkout
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsSalonPwaModalOpen(false);
-                }}
-                className="min-h-[44px] min-w-[44px] grid place-items-center rounded-xl bg-[#21262D] border border-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] transition active:scale-95 shrink-0"
-                title="Close Simulator"
-                aria-label="Close Simulator"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            <SalonPwaSimulator
-              salonName={activeOnboarding?.salonName || 'Royal Fade Lounge'}
-              token={activeOnboarding?.token || 'wc_sec_rfade_9821'}
-              onPairingComplete={handlePairingComplete}
+            <FieldAgentHub
+              userRole="SALON_OWNER"
+              initialSalonName={activeOnboarding?.salonName || 'Royal Fade Lounge'}
+              onSalonCreated={handleSalonCreated}
+              onSalonOnboardingComplete={(payload) => handlePairingComplete(payload.salonName, payload)}
               onClose={() => setIsSalonPwaModalOpen(false)}
             />
           </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Smartphone,
   MapPin,
@@ -47,15 +47,33 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
+  MessageSquare,
 } from 'lucide-react';
 import { PortalCard } from './PortalCard';
 import { AddNewAgentModal } from './AddNewAgentModal';
+import { SalonWindowPosterPdf, PosterLang } from './SalonWindowPosterPdf';
 
-interface ServiceItem {
+export interface ServiceItem {
   id: string;
   name: string;
   price: number;
   enabled: boolean;
+}
+
+export interface OnboardedSalonPayload {
+  salonName: string;
+  ownerName: string;
+  phone: string;
+  location: string;
+  coords: string;
+  salonCategory: 'MENS' | 'LADIES';
+  language: ClientOnboardingLanguage;
+  planId: 'STARTER' | 'GROWTH' | 'VIP' | 'CUSTOM';
+  planName: string;
+  setupFee: number;
+  monthlyMaint: number;
+  services: ServiceItem[];
+  barbers: string[];
 }
 
 interface FieldAgentHubProps {
@@ -74,6 +92,10 @@ interface FieldAgentHubProps {
   };
   userRole?: 'FOUNDER' | 'FIELD_AGENT' | 'SALON_OWNER';
   onActiveCountriesChange?: (countries: Array<{ code: string; label: string; flag: string }>) => void;
+  socialCampaignSource?: string | null;
+  initialSalonName?: string;
+  onReturnToFounder?: () => void;
+  onSalonOnboardingComplete?: (data: OnboardedSalonPayload) => void;
 }
 
 const DEFAULT_MENS_SERVICES: ServiceItem[] = [
@@ -1596,8 +1618,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   initialEnrollAgentData,
   userRole = 'FOUNDER',
   onActiveCountriesChange,
+  socialCampaignSource,
+  initialSalonName,
+  onReturnToFounder,
+  onSalonOnboardingComplete,
 }) => {
-  // Agent Terminal Authentication State
+  const isSelfServeOwner = userRole === 'SALON_OWNER';
+
+  // Agent Terminal Authentication State (always unlocked for self-onboarding Salon Owners)
   const [isAgentAuthenticated, setIsAgentAuthenticated] = useState(true);
   const [agentIdInput, setAgentIdInput] = useState('AGT-409');
   const [agentPinInput, setAgentPinInput] = useState('7892');
@@ -1607,7 +1635,13 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Step 1: Lead Information & Phone Configuration
-  const [salonName, setSalonName] = useState('Seven Cuts Studio');
+  const [salonName, setSalonName] = useState(initialSalonName || 'Seven Cuts Studio');
+  useEffect(() => {
+    if (initialSalonName && currentStep === 1) {
+      setSalonName(initialSalonName);
+    }
+  }, [initialSalonName]);
+
   const [ownerName, setOwnerName] = useState('Hamza Tariq');
   const [selectedDialCode, setSelectedDialCode] = useState('+92');
   const [nationalPhone, setNationalPhone] = useState('3018472910');
@@ -1633,20 +1667,71 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const phoneValidation = validateNationalPhoneForCountry(selectedDialConfig, nationalPhone);
   const addressConflict = checkCityCountryIntegrity(address, phone);
 
-  // Locked Routing Mode: Inside Agent Hub, it is strictly Assisted On-Site Dual Alert
-  const onboardingAssistance = 'ASSISTED';
+  // Routing Mode: Direct Self-Serve for SALON_OWNER vs Assisted On-Site Dual Alert for Agent/Founder
+  const onboardingAssistance = isSelfServeOwner ? 'SELF_SERVE' : 'ASSISTED';
 
-  // Step 4: Alphanumeric Pairing Key (Query 7: WCL-XXXXX) & View Mode (Query 6)
-  const [pairingKey, setPairingKey] = useState('WCL-49201');
-  const [step4ViewMode, setStep4ViewMode] = useState<'QR_SCAN' | 'DIRECT_LINK'>('QR_SCAN');
+  // Step 4: Pairing Key & Mode (Single-Phone 8-Digit Code, QR Scan, or App Link)
+  const [pairingKey, setPairingKey] = useState('8429-1753');
+  const [step4ViewMode, setStep4ViewMode] = useState<'QR_SCAN' | 'DIRECT_LINK' | 'SINGLE_PHONE'>(
+    isSelfServeOwner ? 'SINGLE_PHONE' : 'QR_SCAN'
+  );
+  useEffect(() => {
+    if (isSelfServeOwner) {
+      setStep4ViewMode('SINGLE_PHONE');
+    }
+  }, [isSelfServeOwner]);
+  const [isCopiedPairingKey, setIsCopiedPairingKey] = useState(false);
+  const [isHomeShortcutInstalled, setIsHomeShortcutInstalled] = useState(false);
 
-  // Step 2: Services & Pricing
-  const [serviceCategory, setServiceCategory] = useState<'MENS' | 'LADIES'>('MENS');
+  // Step 2: Services, Category & Barbers Roster
+  const [serviceCategory, setServiceCategory] = useState<'MENS' | 'LADIES'>(() => {
+    try {
+      const savedCat = localStorage.getItem('wcl_salon_category');
+      if (savedCat === 'LADIES' || savedCat === 'MENS') return savedCat;
+    } catch {}
+    return 'MENS';
+  });
+  const handleSelectCategory = (cat: 'MENS' | 'LADIES') => {
+    setServiceCategory(cat);
+    try {
+      localStorage.setItem('wcl_salon_category', cat);
+    } catch {}
+  };
   const [mensServices, setMensServices] = useState<ServiceItem[]>(DEFAULT_MENS_SERVICES);
   const [ladiesServices, setLadiesServices] = useState<ServiceItem[]>(DEFAULT_LADIES_SERVICES);
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePrice, setNewServicePrice] = useState('2000');
   const [isAddingCustomService, setIsAddingCustomService] = useState(false);
+  const [barbersRoster, setBarbersRoster] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('wcl_salon_barbers');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return ['Master Aslam', 'Zahid Hussain', 'Ali Raza'];
+  });
+  const [newBarberInput, setNewBarberInput] = useState('');
+
+  const handleAddBarberOnboarding = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBarberInput.trim()) return;
+    const updated = [...barbersRoster, newBarberInput.trim()];
+    setBarbersRoster(updated);
+    setNewBarberInput('');
+    try {
+      localStorage.setItem('wcl_salon_barbers', JSON.stringify(updated));
+    } catch {}
+  };
+
+  const handleRemoveBarberOnboarding = (barberName: string) => {
+    const updated = barbersRoster.filter((b) => b !== barberName);
+    setBarbersRoster(updated);
+    try {
+      localStorage.setItem('wcl_salon_barbers', JSON.stringify(updated));
+    } catch {}
+  };
 
   // Step 3: Package & Setup Fee Settlement (Domestic PKR vs International USD)
   const [selectedOnboardingPackage, setSelectedOnboardingPackage] = useState<'STARTER' | 'GROWTH' | 'VIP' | 'CUSTOM'>('STARTER');
@@ -2426,18 +2511,18 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     setTimeout(() => {
       setDrawerIsSubmitting(false);
 
-      const commission = activePackage.agentCommission;
+      const commission = isSelfServeOwner ? 0 : activePackage.agentCommission;
       let newRemainingDebt = cashLiabilityHeld;
       let commissionAdjusted = false;
 
-      // Option A Net-Adjustment
-      if (cashLiabilityHeld > 0 && detectedCountry.isDomestic) {
+      // Option A Net-Adjustment (Strictly Field Agent cash settlements inside Pakistan)
+      if (!isSelfServeOwner && cashLiabilityHeld > 0 && detectedCountry.isDomestic) {
         newRemainingDebt = Math.max(0, cashLiabilityHeld - commission);
         setCashLiabilityHeld(newRemainingDebt);
         commissionAdjusted = true;
       }
 
-      if (setupPaymentMethod === 'Cash Collection' && onCashCollected) {
+      if (!isSelfServeOwner && setupPaymentMethod === 'Cash Collection' && onCashCollected) {
         onCashCollected(activePackage.setupFee, salonName);
       }
 
@@ -2452,13 +2537,15 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
         currencyPrefix: activePackage.prefix,
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         sha256Proof: 'sha256:' + (thumbprintHash || Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)),
-        recipientRoute: isIntl
+        recipientRoute: isSelfServeOwner
+          ? `Direct Self-Pay Owner Dispatch (${phone})`
+          : isIntl
           ? `Same-Currency Direct Split: 20% (${activePackage.prefix}${commission.toLocaleString()}) ➔ Agent Local ${activePackage.currency} Account · 80% (${activePackage.prefix}${workcraftShare.toLocaleString()}) ➔ WORKCRAFT (Zero Double FX Loss)`
           : 'Central SIM Gateway Dual Dispatch (Salon Owner + Field Agent Kamran Tariq)',
         commissionAdjusted,
         commissionAmount: commission,
         remainingCashOwed: newRemainingDebt,
-        isSameCurrencySplit: isIntl,
+        isSameCurrencySplit: !isSelfServeOwner && isIntl,
         workcraftNetAmount: workcraftShare,
         status: 'paid' as const,
       };
@@ -2466,7 +2553,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       setVerifiedPaymentData(receiptPayload);
       setIsPaymentVerified(true); // Unlocks the state machine guard: status: paid!
       setIsPaymentDrawerOpen(false);
-      setCurrentStep(4); // Advance to Step 4 QR pairing!
+      setCurrentStep(4); // Advance to Step 4 WhatsApp pairing!
     }, 1100);
   };
 
@@ -2505,7 +2592,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const totalSalonsOnboarded = 19;
   const isHubRtl = agentLanguage === 'ur' || agentLanguage === 'ur_roman' || agentLanguage === 'ar';
 
-  if (!isAgentAuthenticated) {
+  if (!isAgentAuthenticated && !isSelfServeOwner) {
     return (
       <div className="max-w-md mx-auto my-8 mb-28 lg:mb-10 p-6 sm:p-7 rounded-3xl border border-[#30363D] bg-[#161B22] space-y-6 animate-in zoom-in-95">
         <div className="text-center space-y-2">
@@ -2590,268 +2677,317 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     );
   }
 
+  const effectiveHubView = isSelfServeOwner ? 'ONBOARDING' : activeHubView;
+
   return (
     <div className="space-y-6 pb-28 lg:pb-10 min-w-0">
-      {/* 1. FIELD AGENT COMMAND HUB & OPERATIONAL ACTIONS (QUERIES 4 & 5) */}
-      <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-4 overflow-hidden">
-        {/* Top Header Row: Operational Hub Branding (Left) & Top-Right Language Switcher + Terminal Controls (Right) */}
+      {/* SELF-ONBOARDING HEADER (Shown ONLY for SALON_OWNER self-signup; Field Agent Hub buttons strictly hidden) */}
+      {isSelfServeOwner ? (
         <div
-          dir={isHubRtl ? 'rtl' : 'ltr'}
-          className={`flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#21262D] pb-3.5 ${
-            isHubRtl ? 'text-right' : 'text-left'
+          dir={clientOnboardingLanguage === 'en' ? 'ltr' : 'rtl'}
+          className={`rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            clientOnboardingLanguage === 'en' ? 'text-left' : 'text-right'
           }`}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-start gap-3 min-w-0">
             <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-[#21262D] border border-[#06B6D4]/40 text-[#06B6D4]">
-              <Smartphone className="size-5" />
+              <Scissors className="size-5" />
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-black text-[#F0F6FC] tracking-wide">
-                  {agentLanguage === 'ur' ? 'فیلڈ ایجنٹ پورٹل' : agentLanguage === 'ar' ? 'بوابة الوكيل الميداني' : 'Field Agent Hub'}
+                  {clientOnboardingLanguage === 'ur'
+                    ? 'سیلون آن لائن رجسٹریشن پورٹل'
+                    : clientOnboardingLanguage === 'ar'
+                    ? 'بوابة التسجيل الذاتي للصالون'
+                    : 'Salon Self-Onboarding Setup'}
                 </h2>
-                <span className="rounded-full bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[9px] font-mono font-bold text-[#3FB950]">
-                  {agentLanguage === 'ur' ? 'واٹس ایپ آٹو سنک فعال' : agentLanguage === 'ar' ? 'مزامنة واتساب التلقائية نشطة' : 'WhatsApp Auto-Sync Active'}
-                </span>
+                {socialCampaignSource && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[#0D3822] border border-[#116329] px-2.5 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
+                    <Sparkles className="size-3 shrink-0" />
+                    <span>Auto-Tagged Lead: {socialCampaignSource} · Bypassing Admin Screens ✓</span>
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-[#8B949E] font-mono mt-0.5">
-                {agentLanguage === 'ur'
-                  ? 'نیا سیلون شامل کریں، واٹس ایپ جوڑیں اور اپنی کمیشن دیکھیں'
-                  : agentLanguage === 'ar'
-                  ? 'إضافة صالون جديد، ربط واتساب، ومتابعة عمولتك'
-                  : 'Add Salons · Link WhatsApp · Track Commissions'}
+              <p className="text-xs text-[#8B949E] font-sans mt-1 leading-relaxed">
+                {clientOnboardingLanguage === 'ur'
+                  ? '4 آسان مراحل مکمل کریں (معلومات، سروسز و باربرز، پیکیج ادائیگی، اور واٹس ایپ لنک) تاکہ آپ کا ذاتی سیلون ڈیش بورڈ لائیو ہو سکے۔'
+                  : clientOnboardingLanguage === 'ar'
+                  ? 'أكمل 4 خطوات سريعة (البيانات، الخدمات والحلاقون، الباقة والدفع، وربط واتساب) لتفعيل لوحة تحكم صالونك فوراً.'
+                  : 'Complete the 4 guided setup steps below (Salon Info, Service Menu & Staff, Package Payment, and WhatsApp Link) to activate your private Salon Owner Dashboard.'}
               </p>
             </div>
           </div>
 
-          {/* Top-Right Language Switcher & App Actions */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {/* Language Switcher */}
-            <div className="flex items-center rounded-xl bg-[#0D1117] border border-[#30363D] p-1 text-xs font-mono">
-              <span className="px-1.5 text-[#6E7681] flex items-center gap-1">
-                <Globe className="size-3.5 text-[#06B6D4]" />
-              </span>
+            {onReturnToFounder && (
               <button
                 type="button"
-                onClick={() => {
-                  setAgentLanguage('en');
-                  setEnrollmentLang('en');
-                }}
-                className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'en' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                onClick={onReturnToFounder}
+                className="min-h-[40px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-3.5 py-2 text-xs font-mono font-bold transition"
               >
-                EN
+                ← Return to Founder
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAgentLanguage('ur');
-                  setEnrollmentLang('ur_roman');
-                }}
-                className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'ur' || agentLanguage === 'ur_roman' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
-              >
-                اردو
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAgentLanguage('ar');
-                  setEnrollmentLang('ar');
-                }}
-                className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'ar' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
-              >
-                العربية
-              </button>
-            </div>
-
-            {/* Query 5: Lock & Save App buttons shown strictly for Field Agent mobile terminals */}
-            {userRole === 'FIELD_AGENT' && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setIsAgentAuthenticated(false)}
-                  className="min-h-[40px] rounded-lg px-2.5 py-1.5 text-xs font-mono text-[#8B949E] hover:text-[#D29922] transition flex items-center gap-1 border border-[#30363D] bg-[#21262D] hover:border-[#D29922]"
-                  title="Lock App & Logout"
-                >
-                  <Lock className="size-3.5" />
-                  <span>{agentLanguage === 'ur' ? 'لاک' : agentLanguage === 'ar' ? 'قفل' : 'Lock'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowPwaInstallModal(true)}
-                  className="min-h-[40px] rounded-lg px-2.5 py-1.5 text-xs font-mono border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 text-[#3FB950] transition flex items-center gap-1"
-                  title="Save WorkCraft to Phone Home Screen"
-                >
-                  <Download className="size-3.5" />
-                  <span>{agentLanguage === 'ur' ? 'ایپ محفوظ کریں' : agentLanguage === 'ar' ? 'حفظ التطبيق' : 'Save App'}</span>
-                </button>
-              </>
             )}
-
             {onClose && (
               <button
+                type="button"
                 onClick={onClose}
                 className="min-h-[40px] rounded-lg p-1.5 text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#21262D] transition"
-                title="Close Hub"
+                title="Close"
               >
                 <X className="size-5" />
               </button>
             )}
           </div>
         </div>
-
-        {/* Standardized Operational Button Sequence (Query 3 & 5):
-            - When userRole === 'FOUNDER': Show all 6 operational buttons:
-              1. + Add New Field Agent
-              2. Agent Enrollment Link
-              3. Onboard a Salon & Pairing Terminal
-              4. Active Fleet Dossier
-              5. Node Repair & Diagnostics
-              6. Commission Ledger (Founder 3-way breakdown)
-            - When userRole === 'FIELD_AGENT': Strictly hide '+ Add New Field Agent' and 'Active Fleet Dossier'.
-              Shows:
-              1. Agent Enrollment Link
-              2. Onboard a Salon & Pairing Terminal
-              3. My Commission Ledger (Agent personal commission only)
-              4. Node Repair & Diagnostics
-        */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* 1. Add New Field Agent (Founder-Only Privilege) */}
-          {userRole === 'FOUNDER' && (
-            <button
-              type="button"
-              onClick={() => setIsAddAgentModalOpen(true)}
-              className="min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] shadow-md transition active:scale-95 flex items-center gap-1.5"
-              title="Founder: Add New Field Agent & Dispatch WhatsApp Invitation"
-            >
-              <UserPlus className="size-3.5 text-[#0D1117]" />
-              <span>+ Add New Field Agent</span>
-            </button>
-          )}
-
-          {/* 2. Agent Enrollment Link (Accessible to both Founder & Agent) */}
-          <button
-            type="button"
-            onClick={() => setIsRemoteEnrollmentWizardOpen(true)}
-            className="min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold border border-[#06B6D4]/50 bg-[#21262D] hover:border-[#06B6D4] text-[#06B6D4] shadow-md transition active:scale-95 flex items-center gap-1.5"
-            title="Launch Day-1 Remote Agent Enrollment Wizard"
-          >
-            <Sparkles className="size-3.5 text-[#06B6D4]" />
-            <span>Agent Enrollment Link</span>
-          </button>
-
-          {/* 3. Onboard a Salon & Pairing Terminal (Unified Single Flow - Query 3) */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveHubView('ONBOARDING');
-              setCurrentStep(1);
-            }}
-            className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-              activeHubView === 'ONBOARDING'
-                ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
-                : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
+      ) : (
+        /* 1. FIELD AGENT COMMAND HUB & OPERATIONAL ACTIONS (AGENT & FOUNDER ONLY) */
+        <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-4 overflow-hidden">
+          {/* Top Header Row: Operational Hub Branding (Left) & Top-Right Language Switcher + Terminal Controls (Right) */}
+          <div
+            dir={isHubRtl ? 'rtl' : 'ltr'}
+            className={`flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#21262D] pb-3.5 ${
+              isHubRtl ? 'text-right' : 'text-left'
             }`}
-            title="Launch 4-Step Salon Lead Onboarding & Instant QR Pairing Handshake"
           >
-            <Scissors className="size-3.5" />
-            <span>{agentLanguage === 'ur' ? 'سیلون آن بورڈنگ اور پیئرنگ' : agentLanguage === 'ar' ? 'تهيئة الصالون والربط' : 'Onboard a Salon & Pairing'}</span>
-          </button>
+            <div className="flex items-center gap-3">
+              <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-[#21262D] border border-[#06B6D4]/40 text-[#06B6D4]">
+                <Smartphone className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base font-black text-[#F0F6FC] tracking-wide">
+                    {agentLanguage === 'ur' ? 'فیلڈ ایجنٹ پورٹل' : agentLanguage === 'ar' ? 'بوابة الوكيل الميداني' : 'Field Agent Hub'}
+                  </h2>
+                  <span className="rounded-full bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[9px] font-mono font-bold text-[#3FB950]">
+                    {agentLanguage === 'ur' ? 'واٹس ایپ آٹو سنک فعال' : agentLanguage === 'ar' ? 'مزامنة واتساب التلقائية نشطة' : 'WhatsApp Auto-Sync Active'}
+                  </span>
+                </div>
+                <p className="text-xs text-[#8B949E] font-mono mt-0.5">
+                  {agentLanguage === 'ur'
+                    ? 'نیا سیلون شامل کریں، واٹس ایپ جوڑیں اور اپنی کمیشن دیکھیں'
+                    : agentLanguage === 'ar'
+                    ? 'إضافة صالون جديد، ربط واتساب، ومتابعة عمولتك'
+                    : 'Add Salons · Link WhatsApp · Track Commissions'}
+                </p>
+              </div>
+            </div>
 
-          {/* 4. Active Fleet Dossier (Founder-Only Privilege) */}
-          {userRole === 'FOUNDER' && (
+            {/* Top-Right Language Switcher & App Actions */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {/* Language Switcher */}
+              <div className="flex items-center rounded-xl bg-[#0D1117] border border-[#30363D] p-1 text-xs font-mono">
+                <span className="px-1.5 text-[#6E7681] flex items-center gap-1">
+                  <Globe className="size-3.5 text-[#06B6D4]" />
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAgentLanguage('en');
+                    setEnrollmentLang('en');
+                  }}
+                  className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'en' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                >
+                  EN
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAgentLanguage('ur');
+                    setEnrollmentLang('ur_roman');
+                  }}
+                  className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'ur' || agentLanguage === 'ur_roman' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                >
+                  اردو
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAgentLanguage('ar');
+                    setEnrollmentLang('ar');
+                  }}
+                  className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'ar' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                >
+                  العربية
+                </button>
+              </div>
+
+              {/* Query 5: Lock & Save App buttons shown strictly for Field Agent mobile terminals */}
+              {userRole === 'FIELD_AGENT' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsAgentAuthenticated(false)}
+                    className="min-h-[40px] rounded-lg px-2.5 py-1.5 text-xs font-mono text-[#8B949E] hover:text-[#D29922] transition flex items-center gap-1 border border-[#30363D] bg-[#21262D] hover:border-[#D29922]"
+                    title="Lock App & Logout"
+                  >
+                    <Lock className="size-3.5" />
+                    <span>{agentLanguage === 'ur' ? 'لاک' : agentLanguage === 'ar' ? 'قفل' : 'Lock'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPwaInstallModal(true)}
+                    className="min-h-[40px] rounded-lg px-2.5 py-1.5 text-xs font-mono border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 text-[#3FB950] transition flex items-center gap-1"
+                    title="Save WorkCraft to Phone Home Screen"
+                  >
+                    <Download className="size-3.5" />
+                    <span>{agentLanguage === 'ur' ? 'ایپ محفوظ کریں' : agentLanguage === 'ar' ? 'حفظ التطبيق' : 'Save App'}</span>
+                  </button>
+                </>
+              )}
+
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  className="min-h-[40px] rounded-lg p-1.5 text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#21262D] transition"
+                  title="Close Hub"
+                >
+                  <X className="size-5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* 1. Add New Field Agent (Founder-Only Privilege) */}
+            {userRole === 'FOUNDER' && (
+              <button
+                type="button"
+                onClick={() => setIsAddAgentModalOpen(true)}
+                className="min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] shadow-md transition active:scale-95 flex items-center gap-1.5"
+                title="Founder: Add New Field Agent & Dispatch WhatsApp Invitation"
+              >
+                <UserPlus className="size-3.5 text-[#0D1117]" />
+                <span>+ Add New Field Agent</span>
+              </button>
+            )}
+
+            {/* 2. Agent Enrollment Link (Accessible to both Founder & Agent) */}
             <button
               type="button"
-              onClick={() => setActiveHubView('FLEET')}
+              onClick={() => setIsRemoteEnrollmentWizardOpen(true)}
+              className="min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold border border-[#06B6D4]/50 bg-[#21262D] hover:border-[#06B6D4] text-[#06B6D4] shadow-md transition active:scale-95 flex items-center gap-1.5"
+              title="Launch Day-1 Remote Agent Enrollment Wizard"
+            >
+              <Sparkles className="size-3.5 text-[#06B6D4]" />
+              <span>Agent Enrollment Link</span>
+            </button>
+
+            {/* 3. Onboard a Salon & Pairing Terminal (Unified Single Flow - Query 3) */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveHubView('ONBOARDING');
+                setCurrentStep(1);
+              }}
               className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                activeHubView === 'FLEET'
+                activeHubView === 'ONBOARDING'
+                  ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
+                  : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
+              }`}
+              title="Launch 4-Step Salon Lead Onboarding & Instant QR Pairing Handshake"
+            >
+              <Scissors className="size-3.5" />
+              <span>{agentLanguage === 'ur' ? 'سیلون آن بورڈنگ اور پیئرنگ' : agentLanguage === 'ar' ? 'تهيئة الصالون والربط' : 'Onboard a Salon & Pairing'}</span>
+            </button>
+
+            {/* 4. Active Fleet Dossier (Founder-Only Privilege) */}
+            {userRole === 'FOUNDER' && (
+              <button
+                type="button"
+                onClick={() => setActiveHubView('FLEET')}
+                className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                  activeHubView === 'FLEET'
+                    ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
+                    : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
+                }`}
+              >
+                <Smartphone className="size-3.5" />
+                <span>{agentLanguage === 'ur' ? 'ایکٹیو فلیٹ ڈوزیئر' : agentLanguage === 'ar' ? 'ملفات الوكلاء' : 'Active Fleet Dossier'}</span>
+              </button>
+            )}
+
+            {/* 5. Fix Salon Connection */}
+            <button
+              type="button"
+              onClick={() => setActiveHubView('RE_PAIR')}
+              className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                activeHubView === 'RE_PAIR'
                   ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
                   : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
               }`}
             >
-              <Smartphone className="size-3.5" />
-              <span>{agentLanguage === 'ur' ? 'ایکٹیو فلیٹ ڈوزیئر' : agentLanguage === 'ar' ? 'ملفات الوكلاء' : 'Active Fleet Dossier'}</span>
+              <ShieldAlert className={`size-3.5 ${activeHubView === 'RE_PAIR' ? 'text-[#0D1117]' : 'text-[#D29922]'}`} />
+              <span>{agentLanguage === 'ur' ? 'سیلون کنکشن درست کریں' : agentLanguage === 'ar' ? 'إصلاح اتصال الصالون' : 'Fix Salon Connection'}</span>
             </button>
-          )}
 
-          {/* 5. Fix Salon Connection */}
-          <button
-            type="button"
-            onClick={() => setActiveHubView('RE_PAIR')}
-            className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-              activeHubView === 'RE_PAIR'
-                ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
-                : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
-            }`}
-          >
-            <ShieldAlert className={`size-3.5 ${activeHubView === 'RE_PAIR' ? 'text-[#0D1117]' : 'text-[#D29922]'}`} />
-            <span>{agentLanguage === 'ur' ? 'سیلون کنکشن درست کریں' : agentLanguage === 'ar' ? 'إصلاح اتصال الصالون' : 'Fix Salon Connection'}</span>
-          </button>
-
-          {/* 6. My Profile & Payout Details (Biometric-Locked Edits) */}
-          <button
-            type="button"
-            onClick={() => {
-              setDraftAgentPhone(agentWhatsApp);
-              setDraftAgentTerritory(agentTerritory);
-              setDraftAgentRegion(agentOperatingRegion);
-              setDraftAgentPayoutMethod(agentPayoutMethod);
-              setDraftAgentBankName(agentBankName);
-              setDraftAgentPayoutAccount(agentPayoutAccount);
-              setDraftAgentPayoutTitle(agentPayoutTitle);
-              setDraftAgentIban(agentIban);
-              setPayoutSaveStatus(null);
-              setActiveHubView('PROFILE');
-            }}
-            className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-              activeHubView === 'PROFILE'
-                ? 'bg-[#D29922] text-[#0D1117] shadow-md'
-                : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#D29922]'
-            }`}
-            title="Edit mobile, city, country & bank details (requires fresh biometric check)"
-          >
-            <Fingerprint className={`size-3.5 ${activeHubView === 'PROFILE' ? 'text-[#0D1117]' : 'text-[#D29922]'}`} />
-            <span>
-              {agentLanguage === 'ur'
-                ? 'میرا پروفائل اور بینک'
-                : agentLanguage === 'ar'
-                ? 'ملفي والبنك (بصمة)'
-                : 'My Profile & Bank (Biometric)'}
-            </span>
-          </button>
-
-          {/* 7. Commission Ledger (Contextual Label by Role - Query 4) */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveHubView('LEDGER');
-            }}
-            className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 sm:ml-auto ${
-              activeHubView === 'LEDGER'
-                ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
-                : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
-            }`}
-          >
-            <FileText className="size-3.5" />
-            <span>
-              {userRole === 'FIELD_AGENT'
-                ? agentLanguage === 'ur'
-                  ? 'میرا کمیشن لیجر'
+            {/* 6. My Profile & Payout Details (Biometric-Locked Edits) */}
+            <button
+              type="button"
+              onClick={() => {
+                setDraftAgentPhone(agentWhatsApp);
+                setDraftAgentTerritory(agentTerritory);
+                setDraftAgentRegion(agentOperatingRegion);
+                setDraftAgentPayoutMethod(agentPayoutMethod);
+                setDraftAgentBankName(agentBankName);
+                setDraftAgentPayoutAccount(agentPayoutAccount);
+                setDraftAgentPayoutTitle(agentPayoutTitle);
+                setDraftAgentIban(agentIban);
+                setPayoutSaveStatus(null);
+                setActiveHubView('PROFILE');
+              }}
+              className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                activeHubView === 'PROFILE'
+                  ? 'bg-[#D29922] text-[#0D1117] shadow-md'
+                  : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#D29922]'
+              }`}
+              title="Edit mobile, city, country & bank details (requires fresh biometric check)"
+            >
+              <Fingerprint className={`size-3.5 ${activeHubView === 'PROFILE' ? 'text-[#0D1117]' : 'text-[#D29922]'}`} />
+              <span>
+                {agentLanguage === 'ur'
+                  ? 'میرا پروفائل اور بینک'
                   : agentLanguage === 'ar'
-                  ? 'سجل عمولتي'
-                  : 'My Commission Ledger'
-                : agentLanguage === 'ur'
-                ? 'کمیشن لیجر'
-                : agentLanguage === 'ar'
-                ? 'سجل العمولات'
-                : 'Commission Ledger'}
-            </span>
-          </button>
-        </div>
-      </div>
+                  ? 'ملفي والبنك (بصمة)'
+                  : 'My Profile & Bank (Biometric)'}
+              </span>
+            </button>
 
-      {/* Query 9: Founder Root Kill-Switch Suspended Overlay Screen */}
-      {isAgentSuspendedByFounder && (
+            {/* 7. Commission Ledger (Contextual Label by Role - Query 4) */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveHubView('LEDGER');
+              }}
+              className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 sm:ml-auto ${
+                activeHubView === 'LEDGER'
+                  ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
+                  : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
+              }`}
+            >
+              <FileText className="size-3.5" />
+              <span>
+                {userRole === 'FIELD_AGENT'
+                  ? agentLanguage === 'ur'
+                    ? 'میرا کمیشن لیجر'
+                    : agentLanguage === 'ar'
+                    ? 'سجل عمولتي'
+                    : 'My Commission Ledger'
+                  : agentLanguage === 'ur'
+                  ? 'کمیشن لیجر'
+                  : agentLanguage === 'ar'
+                  ? 'سجل العمولات'
+                  : 'Commission Ledger'}
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Query 9: Founder Root Kill-Switch Suspended Overlay Screen (Agent/Founder only) */}
+      {!isSelfServeOwner && isAgentSuspendedByFounder && (
         <div className="rounded-2xl border-2 border-[#da3633] bg-[#4C1C1D] p-5 sm:p-6 text-center space-y-3.5 shadow-2xl backdrop-blur-md animate-in zoom-in-95">
           <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-[#0D1117] border border-[#da3633] text-[#F85149]">
             <AlertOctagon className="size-7" />
@@ -2881,7 +3017,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       {/* ========================================================================= */}
       {/* VIEW A: ONBOARDING SEQUENTIAL WIZARD (STEPS 1 - 4) */}
       {/* ========================================================================= */}
-      {activeHubView === 'ONBOARDING' && (
+      {effectiveHubView === 'ONBOARDING' && (
         <div
           dir={clientOnboardingLanguage === 'en' ? 'ltr' : 'rtl'}
           className={`space-y-6 min-w-0 ${clientOnboardingLanguage === 'en' ? 'text-left' : 'text-right'}`}
@@ -2981,15 +3117,35 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div>
                       <span className="text-[10px] font-mono uppercase tracking-wider text-[#D29922] font-bold">
-                        {t.routingLabel}
+                        {isSelfServeOwner
+                          ? clientOnboardingLanguage === 'ur'
+                            ? 'براہِ راست سیلون مالک سیلف آن بورڈنگ'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'التسجيل الذاتي المباشر لمالك الصالون'
+                            : 'Direct Self-Onboarding Active'
+                          : t.routingLabel}
                       </span>
                       <p className="text-xs text-[#8B949E] font-sans mt-0.5">
-                        {t.routingDesc}
+                        {isSelfServeOwner
+                          ? clientOnboardingLanguage === 'ur'
+                            ? 'تمام واٹس ایپ تصدیقی پیغامات، بکنگ الرٹس اور ڈیش بورڈ لنک براہِ راست آپ کے سیلون نمبر پر بھیجے جائیں گے۔'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'يتم إرسال جميع رسائل التفعيل وتأكيدات الحجز ورابط لوحة التحكم مباشرة إلى رقم واتساب صالونك.'
+                            : 'All booking confirmations, payment receipts, and your private dashboard link are sent directly to your WhatsApp number.'
+                          : t.routingDesc}
                       </p>
                     </div>
                     <div className="px-3 py-1.5 rounded-lg bg-[#0D3822] border border-[#116329] text-[#3FB950] text-xs font-mono font-bold flex items-center gap-1.5 shrink-0">
                       <Radio className="size-3.5 text-[#3FB950] animate-pulse" />
-                      <span>{t.routingBadge}</span>
+                      <span>
+                        {isSelfServeOwner
+                          ? clientOnboardingLanguage === 'ur'
+                            ? '⚡ براہِ راست سیلون مالک کنکشن'
+                            : clientOnboardingLanguage === 'ar'
+                            ? '⚡ تفعيل مباشر لمالك الصالون'
+                            : '⚡ Direct Salon Owner Verification'
+                          : t.routingBadge}
+                      </span>
                     </div>
                   </div>
 
@@ -3326,7 +3482,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <div className="flex items-center rounded-xl bg-[#0D1117] border border-[#30363D] p-1">
                     <button
                       type="button"
-                      onClick={() => setServiceCategory('MENS')}
+                      onClick={() => handleSelectCategory('MENS')}
                       className={`min-h-[36px] rounded-lg px-3 py-1.5 text-xs font-mono font-bold transition ${
                         serviceCategory === 'MENS'
                           ? 'bg-[#06B6D4] text-[#0D1117]'
@@ -3337,7 +3493,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setServiceCategory('LADIES')}
+                      onClick={() => handleSelectCategory('LADIES')}
                       className={`min-h-[36px] rounded-lg px-3 py-1.5 text-xs font-mono font-bold transition ${
                         serviceCategory === 'LADIES'
                           ? 'bg-[#06B6D4] text-[#0D1117]'
@@ -3457,6 +3613,91 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     <span>{t.addCustomService}</span>
                   </button>
                 )}
+
+                {/* Barbers & Stylists Staff Roster (Synced to Live Salon Dashboard) */}
+                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-3">
+                  <div className="flex items-center justify-between border-b border-[#21262D] pb-2">
+                    <span className="text-xs font-mono font-bold text-[#D29922] flex items-center gap-1.5">
+                      <Scissors className="size-3.5 text-[#D29922]" />
+                      <span>
+                        {clientOnboardingLanguage === 'ur'
+                          ? 'سیلون باربرز / عملے کی فہرست'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'قائمة الحلاقين / فريق العمل'
+                          : 'Barbers & Stylists Staff Roster'}
+                      </span>
+                    </span>
+                    <span className="text-[10px] font-mono text-[#06B6D4] bg-[#21262D] px-2 py-0.5 rounded border border-[#30363D]">
+                      {barbersRoster.length}{' '}
+                      {clientOnboardingLanguage === 'ur'
+                        ? 'باربرز'
+                        : clientOnboardingLanguage === 'ar'
+                        ? 'حلاقين'
+                        : 'Barbers'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
+                    {clientOnboardingLanguage === 'ur'
+                      ? 'اپنے سیلون کے باربرز یا ہیئر ڈریسرز کے نام شامل کریں۔ واٹس ایپ بوٹ گاہکوں کو بکنگ کے وقت انھی کے نام دکھائے گا اور آواز سے اناؤنس کرے گا۔'
+                      : clientOnboardingLanguage === 'ar'
+                      ? 'أضف أسماء الحلاقين أو مصففي الشعر في صالونك. سيتم اقتراحهم للعملاء عند الحجز عبر واتساب والإعلان الصوتي عند وصولهم.'
+                      : 'Add your salon barbers or stylists. WhatsApp bot will suggest them to clients during booking and announce their chair bookings aloud.'}
+                  </p>
+
+                  <div className="flex flex-wrap gap-2">
+                    {barbersRoster.map((barber, bIdx) => (
+                      <div
+                        key={`${barber}-${bIdx}`}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1 text-xs font-mono font-bold text-[#F0F6FC]"
+                      >
+                        <span>
+                          {clientOnboardingLanguage === 'ur'
+                            ? `چیئر #${bIdx + 1}: ${barber}`
+                            : clientOnboardingLanguage === 'ar'
+                            ? `كرسي #${bIdx + 1}: ${barber}`
+                            : `Chair #${bIdx + 1}: ${barber}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveBarberOnboarding(barber)}
+                          className="size-4 grid place-items-center rounded text-[#8B949E] hover:text-[#F85149] hover:bg-[#21262D] transition ml-1"
+                          title="Remove"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <form onSubmit={handleAddBarberOnboarding} className="flex gap-2 pt-1">
+                    <input
+                      type="text"
+                      value={newBarberInput}
+                      onChange={(e) => setNewBarberInput(e.target.value)}
+                      placeholder={
+                        clientOnboardingLanguage === 'ur'
+                          ? 'نیا باربر شامل کریں (مثلاً: اویس رضا)'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'اسم الحلاق الجديد (مثال: طارق علي)'
+                          : 'Add new barber (e.g. Tariq Ali)'
+                      }
+                      className="flex-1 min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-3 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                    />
+                    <button
+                      type="submit"
+                      className="min-h-[44px] rounded-lg bg-[#21262D] border border-[#30363D] hover:border-[#06B6D4] text-[#06B6D4] px-3 py-1.5 text-xs font-mono font-bold uppercase transition flex items-center gap-1 shrink-0"
+                    >
+                      <Plus className="size-3.5" />
+                      <span>
+                        {clientOnboardingLanguage === 'ur'
+                          ? 'شامل کریں'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'إضافة'
+                          : 'Add'}
+                      </span>
+                    </button>
+                  </form>
+                </div>
 
                 {/* Step 2 Actions */}
                 <div className="flex items-center justify-between pt-3 border-t border-[#21262D]">
@@ -3904,12 +4145,30 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <span className="text-[#06B6D4] font-bold">{salonName}</span>
                 </div>
 
-                {/* Handshake Mode Switcher: On-Site QR vs Remote Link & PWA */}
+                {/* Handshake Mode Switcher: Single-Phone 8-Digit Code, On-Site QR, or App Link */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-[#30363D] bg-[#0D1117] p-2.5">
                   <span className="text-[11px] font-mono font-bold text-[#8B949E]">
                     {t.modeLabel}
                   </span>
-                  <div className="flex items-center gap-1 bg-[#161B22] p-1 rounded-lg border border-[#30363D] shrink-0">
+                  <div className="flex flex-wrap items-center gap-1 bg-[#161B22] p-1 rounded-lg border border-[#30363D] shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setStep4ViewMode('SINGLE_PHONE')}
+                      className={`min-h-[36px] px-3 py-1.5 rounded-md text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                        step4ViewMode === 'SINGLE_PHONE'
+                          ? 'bg-[#06B6D4] text-[#0D1117]'
+                          : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                      }`}
+                    >
+                      <Key className="size-3.5" />
+                      <span>
+                        {clientOnboardingLanguage === 'ur'
+                          ? '8 ہندسوں کا کوڈ (سنگل فون)'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'رمز 8 أرقام (هاتف واحد)'
+                          : '8-Digit Code (Single Phone)'}
+                      </span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => setStep4ViewMode('QR_SCAN')}
@@ -3937,8 +4196,142 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   </div>
                 </div>
 
-                {/* Mode A: On-Site QR Scanner */}
-                {step4ViewMode === 'QR_SCAN' ? (
+                {/* Mode 0: Single-Phone 8-Digit Pairing Code (Ideal for Self-Onboarding on 1 Phone) */}
+                {step4ViewMode === 'SINGLE_PHONE' ? (
+                  <div className="space-y-4 animate-in fade-in duration-200">
+                    <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-2 overflow-hidden">
+                      <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#06B6D4]">
+                        <Sparkles className="size-4 shrink-0" />
+                        <span>
+                          {clientOnboardingLanguage === 'ur'
+                            ? 'واٹس ایپ 8 ہندسوں کا پیئرنگ کوڈ تیار ہو گیا'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'تم إنشاء رمز ربط واتساب المكون من 8 أرقام'
+                            : 'WhatsApp 8-Digit Pairing Code Generated'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#8B949E] font-sans leading-relaxed break-words [overflow-wrap:break-word]">
+                        {clientOnboardingLanguage === 'ur'
+                          ? 'اگر آپ ایک ہی موبائل فون سے سیلون آن بورڈ کر رہے ہیں تو آپ کو دوسری اسکرین کی ضرورت نہیں۔ بس اپنے واٹس ایپ کے Linked Devices میں یہ 8 ہندسوں کا کوڈ درج کریں۔'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'لأنك تقوم بالتسجيل من نفس هاتفك المحمول، لا تحتاج لشاشة ثانية. أدخل هذا الرمز المكون من 8 أرقام في الأجهزة المرتبطة بواتساب لتفعيل المساعد التلقائي.'
+                          : 'Onboarding directly from a single mobile phone? You do not need a second screen. Enter this 8-digit code in WhatsApp Linked Devices to authorize the WORKCRAFT cloud concierge.'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-5 text-center space-y-3 overflow-hidden">
+                      <span className="text-[10px] font-mono uppercase tracking-[.2em] text-[#6E7681] block">
+                        {clientOnboardingLanguage === 'ur'
+                          ? 'آپ کا ون ٹائم پیئرنگ کوڈ'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'رمز الاقتران الخاص بالصالون'
+                          : 'YOUR SINGLE-USE PAIRING CODE'}
+                      </span>
+                      <div
+                        dir="ltr"
+                        className="text-3xl sm:text-4xl font-black font-mono tracking-widest text-[#06B6D4] break-all [overflow-wrap:break-word]"
+                      >
+                        {pairingKey}
+                      </div>
+
+                      <div className="flex items-center justify-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                              navigator.clipboard.writeText(pairingKey);
+                            }
+                            setIsCopiedPairingKey(true);
+                            setTimeout(() => setIsCopiedPairingKey(false), 2500);
+                          }}
+                          className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#21262D] hover:border-[#06B6D4] px-4 py-2 text-xs font-mono font-bold text-[#F0F6FC] transition"
+                        >
+                          {isCopiedPairingKey ? <Check className="size-3.5 text-[#3FB950]" /> : <Copy className="size-3.5 text-[#06B6D4]" />}
+                          <span>
+                            {isCopiedPairingKey
+                              ? clientOnboardingLanguage === 'ur'
+                                ? 'کوڈ کاپی ہو گیا! ✓'
+                                : clientOnboardingLanguage === 'ar'
+                                ? 'تم نسخ الرمز! ✓'
+                                : 'Copied to Clipboard! ✓'
+                              : clientOnboardingLanguage === 'ur'
+                              ? '8 ہندسوں کا کوڈ کاپی کریں'
+                              : clientOnboardingLanguage === 'ar'
+                              ? 'نسخ رمز 8 أرقام'
+                              : 'Copy 8-Digit Code'}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div
+                        className={`pt-2 border-t border-[#21262D] flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono ${
+                          clientOnboardingLanguage === 'en' ? 'text-left' : 'text-right'
+                        }`}
+                      >
+                        <span className="text-[#06B6D4] flex items-center gap-1 font-bold">
+                          <ShieldCheck className="size-3 text-[#06B6D4] shrink-0" />
+                          <span>{t.tokenBoundBadge}</span>
+                        </span>
+                        <span className="text-[#3FB950] font-bold">
+                          {isQrBurned ? t.tokenBurned : t.tokenActive}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 text-xs font-mono space-y-2 overflow-hidden">
+                      <span className="text-[10px] font-bold text-[#D29922] uppercase block">
+                        {clientOnboardingLanguage === 'ur'
+                          ? 'جوڑنے کے 3 آسان مراحل:'
+                          : clientOnboardingLanguage === 'ar'
+                          ? '3 خطوات سهلة للربط:'
+                          : '3 Easy Steps to Connect:'}
+                      </span>
+                      <ol className="list-decimal list-inside space-y-1.5 text-[#8B949E] font-sans">
+                        <li>
+                          {clientOnboardingLanguage === 'ur'
+                            ? 'اس موبائل فون پر واٹس ایپ کھولیں۔'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'افتح تطبيق واتساب على هذا الهاتف.'
+                            : 'Open WhatsApp on this mobile phone.'}
+                        </li>
+                        <li>
+                          {clientOnboardingLanguage === 'ur' ? (
+                            <>
+                              <strong className="text-[#F0F6FC]">Settings ➔ Linked Devices ➔ Link a Device</strong> پر ٹیپ کریں۔
+                            </>
+                          ) : clientOnboardingLanguage === 'ar' ? (
+                            <>
+                              اضغط على <strong className="text-[#F0F6FC]">الإعدادات ➔ الأجهزة المرتبطة ➔ ربط جهاز</strong>.
+                            </>
+                          ) : (
+                            <>
+                              Tap <strong className="text-[#F0F6FC]">Settings ➔ Linked Devices ➔ Link a Device</strong>.
+                            </>
+                          )}
+                        </li>
+                        <li>
+                          {clientOnboardingLanguage === 'ur' ? (
+                            <>
+                              نیچے <strong className="text-[#F0F6FC]">&quot;Link with phone number instead&quot;</strong> پر کلک کر کے کوڈ{' '}
+                              <strong dir="ltr" className="text-[#06B6D4]">{pairingKey}</strong> درج کریں۔
+                            </>
+                          ) : clientOnboardingLanguage === 'ar' ? (
+                            <>
+                              اضغط على <strong className="text-[#F0F6FC]">&quot;الربط برقم الهاتف بدلاً من ذلك&quot;</strong> وأدخل الرمز{' '}
+                              <strong dir="ltr" className="text-[#06B6D4]">{pairingKey}</strong>.
+                            </>
+                          ) : (
+                            <>
+                              Tap <strong className="text-[#F0F6FC]">&quot;Link with phone number instead&quot;</strong> and enter{' '}
+                              <strong dir="ltr" className="text-[#06B6D4] break-all [overflow-wrap:break-word]">{pairingKey}</strong>.
+                            </>
+                          )}
+                        </li>
+                      </ol>
+                    </div>
+                  </div>
+                ) : step4ViewMode === 'QR_SCAN' ? (
+                  /* Mode A: On-Site QR Scanner */
                   <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-5 text-center space-y-4">
                     <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-5 text-slate-900 border-2 border-[#06B6D4]">
                       <svg viewBox="0 0 100 100" className="w-full h-full text-slate-950">
@@ -4054,12 +4447,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   </div>
                 </div>
 
-                {/* Handshake Simulation */}
+                {/* Handshake Confirmation & Onboarding Assets (2 WhatsApp Previews + Window Poster PDF + 1-Tap Shortcut) */}
                 {isPairingSimulated ? (
-                  <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-4 space-y-2 animate-in zoom-in-95">
-                    <div className="flex items-center justify-between text-[#3FB950] text-xs font-mono font-bold">
+                  <div className="rounded-2xl border border-[#116329] bg-[#0D3822] p-4 sm:p-5 space-y-4 animate-in zoom-in-95">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[#3FB950] text-xs font-mono font-bold">
                       <div className="flex items-center gap-2">
-                        <CheckCircle2 className="size-4 text-[#3FB950]" />
+                        <CheckCircle2 className="size-5 text-[#3FB950]" />
                         <span>{t.handshakeSuccess}</span>
                       </div>
                       <span className="text-[10px] text-[#D29922] font-bold bg-[#0D1117] px-2 py-0.5 rounded border border-[#9E6A03]">
@@ -4069,20 +4462,161 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     <p className="text-xs text-[#F0F6FC] font-sans leading-relaxed">
                       {t.handshakeDesc}
                     </p>
-                    <div className="pt-2 flex items-center justify-end">
+
+                    {/* Automated WhatsApp Dispatch 1: Welcome Note & Package Paid */}
+                    <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2 font-mono text-xs overflow-hidden">
+                      <div className="flex items-center justify-between text-[10px] text-[#3FB950] border-b border-[#21262D] pb-1.5">
+                        <span className="font-bold flex items-center gap-1.5">
+                          <MessageSquare className="size-3.5" />
+                          <span>WhatsApp Message 1 · Welcome &amp; Package Paid</span>
+                        </span>
+                        <span className="text-[#8B949E]">Delivered ✓✓</span>
+                      </div>
+                      <div className="rounded-lg bg-[#161B22] p-2.5 border-l-2 border-[#3FB950]">
+                        <p className="text-[#F0F6FC] text-xs font-sans leading-relaxed">
+                          {clientOnboardingLanguage === 'ur' ? (
+                            <>
+                              السلام علیکم! <strong>{salonName}</strong> کو ورک کرافٹ میں خوش آمدید۔ آپ کا{' '}
+                              <strong>{getLocalizedPackageName(activePackage.name, clientOnboardingLanguage)}</strong> پیکیج اور سیٹ اپ فیس (
+                              <strong>{activePackage.prefix}{activePackage.setupFee.toLocaleString()}</strong>) کی تصدیق ہو گئی ہے۔ واٹس ایپ خودکار بکنگ اب 24 گھنٹے لائیو ہے۔
+                            </>
+                          ) : clientOnboardingLanguage === 'ar' ? (
+                            <>
+                              مرحباً بك في وورك كرافت! تم تأكيد دفع باقة{' '}
+                              <strong>{getLocalizedPackageName(activePackage.name, clientOnboardingLanguage)}</strong> ورسوم التأسيس (
+                              <strong>{activePackage.prefix}{activePackage.setupFee.toLocaleString()}</strong>) لصالون <strong>{salonName}</strong>. الحجز عبر واتساب مفعل الآن 24/7.
+                            </>
+                          ) : (
+                            <>
+                              Welcome to WORKCRAFT Local! Your <strong>{activePackage.name}</strong> package setup fee of{' '}
+                              <strong>{activePackage.prefix}{activePackage.setupFee.toLocaleString()}</strong> is verified. 24/7 WhatsApp auto-booking is now live for <strong>{salonName}</strong>.
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Automated WhatsApp Dispatch 2: Private Dashboard Installation Link */}
+                    <div className="rounded-xl border border-[#06B6D4]/40 bg-[#0D1117] p-3.5 space-y-2 font-mono text-xs overflow-hidden">
+                      <div className="flex items-center justify-between text-[10px] text-[#06B6D4] border-b border-[#21262D] pb-1.5">
+                        <span className="font-bold flex items-center gap-1.5">
+                          <Smartphone className="size-3.5" />
+                          <span>WhatsApp Message 2 · Dashboard Installation Link</span>
+                        </span>
+                        <span className="text-[#8B949E]">Delivered ✓✓</span>
+                      </div>
+                      <div className="rounded-lg bg-[#161B22] p-2.5 border-l-2 border-[#06B6D4] space-y-1.5">
+                        <p className="text-xs text-[#F0F6FC] font-sans">
+                          {clientOnboardingLanguage === 'ur'
+                            ? 'اپنا ذاتی سیلون اونر ڈیش بورڈ انسٹال کرنے کے لیے نیچے دیے گئے لنک پر کلک کریں اور ہوم اسکرین پر شارٹ کٹ آئیکن شامل کریں:'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'لتثبيت لوحة تحكم مالك الصالون وإضافة اختصار إلى الشاشة الرئيسية، اضغط على الرابط التالي:'
+                            : 'Tap your secure link to install the Salon Owner Dashboard and add the shortcut icon to your phone home screen:'}
+                        </p>
+                        <div
+                          dir="ltr"
+                          className="p-2 rounded bg-[#0D1117] border border-[#30363D] text-[11px] text-[#06B6D4] break-all font-mono text-left"
+                        >
+                          https://portal.workcraft.local/?role=salon_owner&amp;paired=true
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 1-Click Printable Branded Window Poster & Cabin Pamphlet PDF */}
+                    <SalonWindowPosterPdf
+                      salonName={salonName}
+                      salonCategory={serviceCategory}
+                      whatsappNumber={phone}
+                      location={address}
+                      initialLanguage={clientOnboardingLanguage as PosterLang}
+                    />
+
+                    {/* 1-Tap Mobile Home Screen Shortcut */}
+                    <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img
+                          src="/icon.svg"
+                          alt="WorkCraft Mobile App Icon"
+                          className="size-10 rounded-xl border border-[#9E6A03] shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-[#F0F6FC]">WorkCraft</p>
+                          <p className="text-[10px] text-[#8B949E] font-sans truncate">
+                            {isHomeShortcutInstalled
+                              ? clientOnboardingLanguage === 'ur'
+                                ? 'ہوم اسکرین پر محفوظ ہو گیا ✓'
+                                : clientOnboardingLanguage === 'ar'
+                                ? 'تم الحفظ على الشاشة الرئيسية ✓'
+                                : 'Saved to phone home screen ✓'
+                              : clientOnboardingLanguage === 'ur'
+                              ? 'فون کی ہوم اسکرین پر شارٹ کٹ بنائیں'
+                              : clientOnboardingLanguage === 'ar'
+                              ? 'إنشاء اختصار على الشاشة الرئيسية'
+                              : '1-Tap shortcut icon on your phone'}
+                          </p>
+                        </div>
+                      </div>
+
                       <button
                         type="button"
-                        onClick={() => {
-                          setCurrentStep(1);
-                          setIsPairingSimulated(false);
-                          setIsQrBurned(false);
-                          setIsPaymentVerified(false);
-                          if (onClose) onClose();
-                        }}
-                        className="min-h-[44px] rounded-lg bg-[#D29922] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase hover:bg-[#e0b252]"
+                        onClick={() => setIsHomeShortcutInstalled(true)}
+                        className={`min-h-[44px] px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition shrink-0 border ${
+                          isHomeShortcutInstalled
+                            ? 'bg-[#0D3822] text-[#3FB950] border-[#116329]'
+                            : 'bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] border-[#06B6D4]'
+                        }`}
                       >
-                        {t.completeBtn}
+                        {isHomeShortcutInstalled ? 'Saved ✓' : 'Install Shortcut'}
                       </button>
+                    </div>
+
+                    {/* Final Role-Aware Completion Button */}
+                    <div className="pt-2 flex items-center justify-end">
+                      {isSelfServeOwner && onSalonOnboardingComplete ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSalonOnboardingComplete({
+                              salonName: salonName.trim() || 'Seven Cuts Studio',
+                              ownerName: ownerName.trim() || 'Hamza Tariq',
+                              phone,
+                              location: address.trim() || detectedCountry.defaultAddress,
+                              coords,
+                              salonCategory: serviceCategory,
+                              language: clientOnboardingLanguage,
+                              planId: selectedOnboardingPackage,
+                              planName: activePackage.name,
+                              setupFee: activePackage.setupFee,
+                              monthlyMaint: activePackage.monthlyMaint,
+                              services: activeServices,
+                              barbers: barbersRoster,
+                            });
+                          }}
+                          className="w-full sm:w-auto min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-5 py-3 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center justify-center gap-2"
+                        >
+                          <span>
+                            {clientOnboardingLanguage === 'ur'
+                              ? 'سیٹ اپ مکمل کریں اور لائیو ڈیش بورڈ کھولیں ←'
+                              : clientOnboardingLanguage === 'ar'
+                              ? 'إكمال الإعداد وفتح لوحة التحكم المباشرة ←'
+                              : 'Complete Setup & Open Live Dashboard →'}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCurrentStep(1);
+                            setIsPairingSimulated(false);
+                            setIsQrBurned(false);
+                            setIsPaymentVerified(false);
+                            if (onClose) onClose();
+                          }}
+                          className="min-h-[44px] rounded-lg bg-[#D29922] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase hover:bg-[#e0b252]"
+                        >
+                          {t.completeBtn}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -4117,7 +4651,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       {/* ========================================================================= */}
       {/* VIEW FLEET: COUNTRY-GROUPED AGENT ROSTER & SEARCH (QUERY 1)              */}
       {/* ========================================================================= */}
-      {activeHubView === 'FLEET' && (() => {
+      {effectiveHubView === 'FLEET' && (() => {
         const q = fleetSearchQuery.trim().toLowerCase();
         const filteredAgents = enrolledAgentsList.filter((agent) => {
           const detected = detectCountryFromPhone(agent.phone);
@@ -4369,7 +4903,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       {/* ========================================================================= */}
       {/* VIEW B: FIX SALON CONNECTION + 24/7 AUTO-FIX WATCHDOG (LOCALIZED)          */}
       {/* ========================================================================= */}
-      {activeHubView === 'RE_PAIR' && (() => {
+      {effectiveHubView === 'RE_PAIR' && (() => {
         const isUrdu = agentLanguage === 'ur' || agentLanguage === 'ur_roman';
         const isArabic = agentLanguage === 'ar';
         const repairDir = isUrdu || isArabic ? 'rtl' : 'ltr';
@@ -4812,7 +5346,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       {/* ========================================================================= */}
       {/* VIEW D: BIOMETRIC-LOCKED AGENT PROFILE & PAYOUT EDITOR (LOCALIZED EN/UR/AR) */}
       {/* ========================================================================= */}
-      {activeHubView === 'PROFILE' && (() => {
+      {effectiveHubView === 'PROFILE' && (() => {
         const isUrdu = agentLanguage === 'ur' || agentLanguage === 'ur_roman';
         const isArabic = agentLanguage === 'ar';
         const profileDir = isUrdu || isArabic ? 'rtl' : 'ltr';
@@ -5065,7 +5599,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       {/* ========================================================================= */}
       {/* VIEW C: ROLE-ISOLATED & LOCALIZED COMMISSION LEDGER (QUERY 4)            */}
       {/* ========================================================================= */}
-      {activeHubView === 'LEDGER' && (() => {
+      {effectiveHubView === 'LEDGER' && (() => {
         const isUrdu = agentLanguage === 'ur' || agentLanguage === 'ur_roman';
         const isArabic = agentLanguage === 'ar';
         const ledgerDir = userRole === 'FIELD_AGENT' && (isUrdu || isArabic) ? 'rtl' : 'ltr';
@@ -5716,14 +6250,30 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               )}
             </div>
 
-            {/* Auto-Detected Dual Alert Recipient Routing Mode */}
-            <div className="mt-3 rounded-xl border border-[#06B6D4]/30 bg-[#0D1117] p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
-              <span className="text-[#06B6D4] font-bold flex items-center gap-1.5">
-                <Radio className="size-3.5 text-[#06B6D4] animate-pulse" />
-                <span>{t.routingAssisted}</span>
-              </span>
-              <span className="text-[#8B949E] text-[10px]">{t.ownerAgentPush}</span>
-            </div>
+            {/* Auto-Detected Recipient Routing Mode (Direct Owner vs Agent+Owner Dual Alert) */}
+            {!isSelfServeOwner ? (
+              <div className="mt-3 rounded-xl border border-[#06B6D4]/30 bg-[#0D1117] p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                <span className="text-[#06B6D4] font-bold flex items-center gap-1.5">
+                  <Radio className="size-3.5 text-[#06B6D4] animate-pulse" />
+                  <span>{t.routingAssisted}</span>
+                </span>
+                <span className="text-[#8B949E] text-[10px]">{t.ownerAgentPush}</span>
+              </div>
+            ) : (
+              <div className="mt-3 rounded-xl border border-[#06B6D4]/30 bg-[#0D1117] p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                <span className="text-[#06B6D4] font-bold flex items-center gap-1.5">
+                  <Radio className="size-3.5 text-[#06B6D4] animate-pulse" />
+                  <span>
+                    {clientOnboardingLanguage === 'ur'
+                      ? 'براہِ راست مالک واٹس ایپ تصدیق فعال'
+                      : clientOnboardingLanguage === 'ar'
+                      ? 'تأكيد مباشر لمالك الصالون عبر واتساب'
+                      : 'Direct Owner WhatsApp Confirmation Active'}
+                  </span>
+                </span>
+                <span className="text-[#8B949E] text-[10px]">{phone}</span>
+              </div>
+            )}
 
             {/* Payer Input Form with Layer 1 Registered Phone Binding */}
             <form onSubmit={handleVerifyDrawerPayment} className="mt-3.5 space-y-3.5">
