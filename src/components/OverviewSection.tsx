@@ -11,11 +11,6 @@ import {
   ArrowRight,
   MessageSquare,
   X,
-  Copy,
-  Check,
-  Megaphone,
-  Smartphone,
-  Share2,
 } from 'lucide-react';
 import { TabName } from '../types/workcraft';
 import { SALONS } from '../data/portalData';
@@ -48,18 +43,6 @@ export const OverviewSection: React.FC<OverviewSectionProps> = ({
 }) => {
   const [dismissedVoiceCard, setDismissedVoiceCard] = useState(false);
   const [dismissedCashCard, setDismissedCashCard] = useState(false);
-  const [copiedSocialKey, setCopiedSocialKey] = useState<string | null>(null);
-  const [socialToast, setSocialToast] = useState<string | null>(null);
-
-  const handleCopySocial = (key: string, url: string, platform: string) => {
-    try {
-      navigator.clipboard.writeText(url);
-    } catch {}
-    setCopiedSocialKey(key);
-    setSocialToast(`✓ Copied ${platform} Link! Mobile clicks launch directly into Step 1.`);
-    setTimeout(() => setCopiedSocialKey(null), 3000);
-    setTimeout(() => setSocialToast(null), 5000);
-  };
 
   // Query 3: Show ONLY salons needing founder attention today (Pending 10% SLA / Dues After 5th / Connection Check)
   const attentionSalons = [
@@ -316,108 +299,6 @@ export const OverviewSection: React.FC<OverviewSectionProps> = ({
               <ArrowRight className="size-3.5" />
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* 2B. 1-TAP SOCIAL CAMPAIGN LINK ROUTER (Queries 1 & 2) */}
-      <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3.5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#21262D] pb-3">
-          <div className="flex items-center gap-2.5">
-            <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-[#06B6D4]/40 bg-[#06B6D4]/15 text-[#06B6D4]">
-              <Megaphone className="size-4" />
-            </span>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h4 className="text-sm font-bold text-[#F0F6FC]">
-                  1-Tap Social Campaign Link Generator
-                </h4>
-                <span className="rounded-md border border-[#116329] bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
-                  BYPASSES FOUNDER COMMAND ON MOBILE
-                </span>
-              </div>
-              <p className="text-xs text-[#8B949E] font-sans">
-                Copy pre-tagged campaign links for Facebook, Instagram, or TikTok. Tapping on a smartphone bypasses all admin screens and launches directly into Step 1.
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => go('Marketing')}
-            className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#21262D] hover:border-[#06B6D4] px-3 py-1.5 text-xs font-mono font-bold text-[#06B6D4] transition shrink-0"
-          >
-            <span>Full Marketing Hub</span>
-            <ArrowRight className="size-3.5" />
-          </button>
-        </div>
-
-        {socialToast && (
-          <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-2.5 text-xs font-mono text-[#3FB950] animate-in fade-in flex items-center justify-between gap-2">
-            <span>{socialToast}</span>
-            <button onClick={() => setSocialToast(null)} className="text-[#8B949E] hover:text-[#F0F6FC]">✕</button>
-          </div>
-        )}
-
-        {/* 1-Tap Copy Buttons Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-          {[
-            {
-              id: 'ov-fb',
-              platform: 'Facebook',
-              label: 'Facebook Ads Link',
-              tag: 'ref=fb',
-              badgeColor: 'border-[#1877F2]/40 bg-[#1877F2]/15 text-[#58A6FF]',
-              url: 'https://portal.workcraft.local/?onboard=true&ref=fb&utm_source=facebook&utm_medium=cpc&utm_campaign=salon_signup_q4',
-            },
-            {
-              id: 'ov-ig',
-              platform: 'Instagram',
-              label: 'Instagram Reels Link',
-              tag: 'ref=ig',
-              badgeColor: 'border-[#E1306C]/40 bg-[#E1306C]/15 text-[#FF7B72]',
-              url: 'https://portal.workcraft.local/?onboard=true&ref=ig&utm_source=instagram&utm_medium=cpc&utm_campaign=salon_signup_q4',
-            },
-            {
-              id: 'ov-tt',
-              platform: 'TikTok',
-              label: 'TikTok Viral Link',
-              tag: 'ref=tiktok',
-              badgeColor: 'border-[#00F2FE]/40 bg-[#00F2FE]/15 text-cyan-300',
-              url: 'https://portal.workcraft.local/?onboard=true&ref=tiktok&utm_source=tiktok&utm_medium=cpc&utm_campaign=salon_signup_q4',
-            },
-          ].map((camp) => {
-            const isCopied = copiedSocialKey === camp.id;
-            return (
-              <button
-                key={camp.id}
-                type="button"
-                onClick={() => handleCopySocial(camp.id, camp.url, camp.platform)}
-                className={`min-h-[48px] rounded-xl border p-3 text-left transition flex items-center justify-between gap-2 ${
-                  isCopied
-                    ? 'border-[#116329] bg-[#0D3822]'
-                    : 'border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] hover:bg-[#21262D]'
-                }`}
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`size-2 rounded-full ${camp.id === 'ov-fb' ? 'bg-[#1877F2]' : camp.id === 'ov-ig' ? 'bg-[#E1306C]' : 'bg-[#00F2FE]'}`} />
-                    <span className="text-xs font-bold text-[#F0F6FC] truncate">{camp.label}</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-[#8B949E] block truncate mt-0.5">
-                    Auto-tag: <strong className="text-cyan-400">{camp.tag}</strong>
-                  </span>
-                </div>
-
-                <span className={`size-8 rounded-lg border grid place-items-center shrink-0 transition ${
-                  isCopied
-                    ? 'border-[#116329] bg-[#161B22] text-[#3FB950]'
-                    : 'border-[#30363D] bg-[#161B22] text-[#8B949E]'
-                }`}>
-                  {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                </span>
-              </button>
-            );
-          })}
         </div>
       </div>
 

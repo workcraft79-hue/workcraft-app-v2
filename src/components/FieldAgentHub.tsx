@@ -248,10 +248,15 @@ export const detectCountryFromPhone = (phoneStr: string, cityOrCountryHint?: str
   if (clean.startsWith('+') && clean.length >= 2) {
     const dialDigitsMatch = clean.match(/^\+(\d{1,3})/);
     const dialPrefix = dialDigitsMatch ? `+${dialDigitsMatch[1]}` : '+INTL';
-    const codeKey = `INTL_${dialDigitsMatch ? dialDigitsMatch[1] : 'WW'}`;
+    const rawCountryPart = (cityOrCountryHint || '').split(',').pop()?.trim() || '';
+    const customCountryLabel =
+      rawCountryPart && rawCountryPart.length >= 2 && !/^\d+$/.test(rawCountryPart)
+        ? rawCountryPart
+        : `International (${dialPrefix})`;
+    const codeKey = `INTL_${dialDigitsMatch ? dialDigitsMatch[1] : customCountryLabel.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6) || 'WW'}`;
     return {
       code: codeKey,
-      name: `International (${dialPrefix})`,
+      name: customCountryLabel,
       currency: 'USD',
       prefix: '$',
       localCurrency: 'USD',
@@ -261,7 +266,7 @@ export const detectCountryFromPhone = (phoneStr: string, cityOrCountryHint?: str
       isDomestic: false,
       region: 'GLOBAL',
       dialCode: dialPrefix,
-      defaultCity: 'Metro City',
+      defaultCity: (cityOrCountryHint || '').split(',')[0]?.trim() || 'Metro City',
       defaultAddress: 'Central Business District',
       defaultCoords: '0.0000° N, 0.0000° E',
     };
@@ -2215,7 +2220,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   // Founder Multi-Agent Ledger Filter & Fleet Dossier Search/Region State
   const [founderSelectedLedgerAgent, setFounderSelectedLedgerAgent] = useState<string>('ALL');
   const [fleetSearchQuery, setFleetSearchQuery] = useState('');
-  const [fleetRegionFilter, setFleetRegionFilter] = useState<'ALL' | 'PK' | 'MENA' | 'EUROPE' | 'GLOBAL'>('ALL');
+  const [fleetRegionFilter, setFleetRegionFilter] = useState<string>('ALL');
 
   // Query 2, 4, 15: Founder Fleet Command & Central Agent Dossiers
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
@@ -2227,6 +2232,11 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     phone: string;
     city: string;
     category: string;
+    countryCode?: string;
+    countryName?: string;
+    countryFlag?: string;
+    currency?: string;
+    dialCode?: string;
     cnicOrId: string;
     payoutMethod: string;
     payoutAccount: string;
@@ -5043,69 +5053,98 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* VIEW FLEET: COUNTRY-GROUPED AGENT ROSTER & SEARCH (QUERY 1)              */}
+      {/* VIEW FLEET: AUTO-UPDATING COUNTRY-GROUPED AGENT ROSTER & SEARCH (QUERY 1) */}
       {/* ========================================================================= */}
       {effectiveHubView === 'FLEET' && (() => {
+        const resolveAgentCountry = (agent: (typeof enrolledAgentsList)[number]) => {
+          const detected = detectCountryFromPhone(
+            agent.phone,
+            `${agent.city} ${agent.countryName || ''}`
+          );
+          return {
+            code: agent.countryCode || detected.code,
+            name: agent.countryName || detected.name,
+            flag: agent.countryFlag || detected.flag,
+            currency: agent.currency || detected.localCurrency,
+            dialCode: agent.dialCode || detected.dialCode,
+            region: detected.region,
+          };
+        };
+
+        // Build dynamic country tabs automatically from all active + newly added countries
+        const countrySummaryMap = new Map<
+          string,
+          { code: string; name: string; flag: string; currency: string; count: number }
+        >();
+        enrolledAgentsList.forEach((agent) => {
+          const c = resolveAgentCountry(agent);
+          const existing = countrySummaryMap.get(c.code);
+          if (existing) {
+            existing.count += 1;
+          } else {
+            countrySummaryMap.set(c.code, {
+              code: c.code,
+              name: c.name,
+              flag: c.flag,
+              currency: c.currency,
+              count: 1,
+            });
+          }
+        });
+        const dynamicCountryTabs = Array.from(countrySummaryMap.values());
+
         const q = fleetSearchQuery.trim().toLowerCase();
         const filteredAgents = enrolledAgentsList.filter((agent) => {
-          const detected = detectCountryFromPhone(agent.phone);
-          const regionMatch =
-            fleetRegionFilter === 'ALL' ||
-            (fleetRegionFilter === 'PK' && detected.region === 'PK') ||
-            (fleetRegionFilter === 'MENA' && detected.region === 'MENA') ||
-            (fleetRegionFilter === 'EUROPE' && detected.region === 'EUROPE') ||
-            (fleetRegionFilter === 'GLOBAL' && detected.region !== 'PK' && detected.region !== 'MENA' && detected.region !== 'EUROPE');
-          if (!regionMatch) return false;
+          const resolved = resolveAgentCountry(agent);
+          const countryMatch =
+            fleetRegionFilter === 'ALL' || resolved.code === fleetRegionFilter;
+          if (!countryMatch) return false;
           if (!q) return true;
           return (
             agent.name.toLowerCase().includes(q) ||
             agent.id.toLowerCase().includes(q) ||
             agent.phone.toLowerCase().includes(q) ||
             agent.city.toLowerCase().includes(q) ||
-            detected.name.toLowerCase().includes(q)
+            resolved.name.toLowerCase().includes(q) ||
+            resolved.currency.toLowerCase().includes(q)
           );
         });
 
-        const allRegionGroups: Array<{
-          key: 'PK' | 'MENA' | 'EUROPE' | 'GLOBAL';
-          title: string;
-          flag: string;
-          agents: typeof enrolledAgentsList;
-        }> = [
+        // Dynamically group agents by country (auto-creates new country sections immediately)
+        const groupMap = new Map<
+          string,
           {
-            key: 'PK',
-            title: 'Pakistan Field Agents',
-            flag: '🇵🇰',
-            agents: filteredAgents.filter((a) => detectCountryFromPhone(a.phone).region === 'PK'),
-          },
-          {
-            key: 'MENA',
-            title: 'UAE & Gulf (MENA) Agents',
-            flag: '🇦🇪',
-            agents: filteredAgents.filter((a) => detectCountryFromPhone(a.phone).region === 'MENA'),
-          },
-          {
-            key: 'EUROPE',
-            title: 'United Kingdom & Europe Agents',
-            flag: '🇬🇧',
-            agents: filteredAgents.filter((a) => detectCountryFromPhone(a.phone, a.city).region === 'EUROPE'),
-          },
-          {
-            key: 'GLOBAL',
-            title: 'North America, Asia-Pacific & Other Markets',
-            flag: '🌐',
-            agents: filteredAgents.filter((a) => {
-              const r = detectCountryFromPhone(a.phone, a.city).region;
-              return r !== 'PK' && r !== 'MENA' && r !== 'EUROPE';
-            }),
-          },
-        ];
-        const regionGroups = allRegionGroups.filter((g) => g.agents.length > 0);
+            key: string;
+            title: string;
+            flag: string;
+            currency: string;
+            agents: typeof enrolledAgentsList;
+          }
+        >();
+        filteredAgents.forEach((agent) => {
+          const resolved = resolveAgentCountry(agent);
+          const group = groupMap.get(resolved.code);
+          if (group) {
+            group.agents.push(agent);
+          } else {
+            groupMap.set(resolved.code, {
+              key: resolved.code,
+              title: `${resolved.name} Field Agents`,
+              flag: resolved.flag,
+              currency: resolved.currency,
+              agents: [agent],
+            });
+          }
+        });
+        const regionGroups = Array.from(groupMap.values());
 
         return (
-          <PortalCard title="Active Fleet Dossier — Regional Agent Registry" kicker="FOUNDER CENTRAL DIRECTORY">
+          <PortalCard
+            title="Active Fleet Dossier — Regional Agent Registry"
+            kicker={`FOUNDER CENTRAL DIRECTORY · ${dynamicCountryTabs.length} COUNTR${dynamicCountryTabs.length === 1 ? 'Y' : 'IES'} LIVE`}
+          >
             <div className="space-y-5">
-              {/* Search Bar + Priority Region Filter Pills */}
+              {/* Search Bar + Auto-Updated Dynamic Country Filter Pills */}
               <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 rounded-2xl border border-[#30363D] bg-[#0D1117] p-3">
                 <div className="relative flex-1">
                   <Search className="size-4 text-[#06B6D4] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -5113,7 +5152,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     type="text"
                     value={fleetSearchQuery}
                     onChange={(e) => setFleetSearchQuery(e.target.value)}
-                    placeholder="Search agent by name, ID (e.g. AGT-409), WhatsApp, or city..."
+                    placeholder="Search agent by name, ID (e.g. AGT-409), country, currency, or city..."
                     className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] pl-10 pr-8 py-2.5 text-xs font-mono text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
                   />
                   {fleetSearchQuery && (
@@ -5129,24 +5168,29 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
-                  {[
-                    { key: 'ALL', label: `All (${enrolledAgentsList.length})` },
-                    { key: 'PK', label: '🇵🇰 Pakistan' },
-                    { key: 'MENA', label: '🇦🇪 UAE & MENA' },
-                    { key: 'EUROPE', label: '🇬🇧 United Kingdom & Europe' },
-                    { key: 'GLOBAL', label: '🌐 Americas & Intl' },
-                  ].map((tab) => (
+                  <button
+                    type="button"
+                    onClick={() => setFleetRegionFilter('ALL')}
+                    className={`min-h-[36px] px-3 py-1.5 rounded-xl font-bold transition border ${
+                      fleetRegionFilter === 'ALL'
+                        ? 'bg-[#D29922] text-[#0D1117] border-[#D29922]'
+                        : 'bg-[#161B22] text-[#8B949E] border-[#30363D] hover:text-[#F0F6FC] hover:border-[#484F58]'
+                    }`}
+                  >
+                    All ({enrolledAgentsList.length})
+                  </button>
+                  {dynamicCountryTabs.map((tab) => (
                     <button
-                      key={tab.key}
+                      key={tab.code}
                       type="button"
-                      onClick={() => setFleetRegionFilter(tab.key as any)}
+                      onClick={() => setFleetRegionFilter(tab.code)}
                       className={`min-h-[36px] px-3 py-1.5 rounded-xl font-bold transition border ${
-                        fleetRegionFilter === tab.key
+                        fleetRegionFilter === tab.code
                           ? 'bg-[#D29922] text-[#0D1117] border-[#D29922]'
                           : 'bg-[#161B22] text-[#8B949E] border-[#30363D] hover:text-[#F0F6FC] hover:border-[#484F58]'
                       }`}
                     >
-                      {tab.label}
+                      {tab.flag} {tab.name} ({tab.count})
                     </button>
                   ))}
                 </div>
@@ -5171,12 +5215,15 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   {regionGroups.map((group) => (
                     <div key={group.key} className="space-y-3">
                       {/* Country / Region Group Header */}
-                      <div className="flex items-center justify-between border-b border-[#21262D] pb-2">
+                      <div className="flex items-center justify-between border-b border-[#21262D] pb-2 flex-wrap gap-2">
                         <div className="flex items-center gap-2">
                           <span className="text-lg leading-none">{group.flag}</span>
                           <h3 className="text-sm font-mono font-bold uppercase tracking-wider text-[#F0F6FC]">
                             {group.title}
                           </h3>
+                          <span className="rounded bg-[#161B22] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono text-[#D29922]">
+                            {group.currency}
+                          </span>
                         </div>
                         <span className="rounded-full bg-[#21262D] border border-[#06B6D4]/40 px-2.5 py-0.5 text-[10px] font-mono font-bold text-[#06B6D4]">
                           {group.agents.length} {group.agents.length === 1 ? 'Agent' : 'Agents'}
@@ -5185,7 +5232,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
 
                       <div className="grid gap-4 md:grid-cols-2">
                         {group.agents.map((agent) => {
-                          const agentCountry = detectCountryFromPhone(agent.phone);
+                          const agentCountry = resolveAgentCountry(agent);
                           return (
                             <div
                               key={agent.id}
@@ -5211,7 +5258,9 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                                       <span className="rounded bg-[#0D3822] border border-[#116329] px-1.5 py-0.5 text-[9px] font-mono font-bold text-[#3FB950]">
                                         #{agent.id}
                                       </span>
-                                      <span className="text-xs" title={agentCountry.name}>{agentCountry.flag}</span>
+                                      <span className="rounded bg-[#161B22] border border-[#30363D] px-1.5 py-0.5 text-[9px] font-mono text-[#06B6D4]">
+                                        {agentCountry.flag} {agentCountry.name} · {agentCountry.currency}
+                                      </span>
                                     </div>
                                     <p className="text-xs text-[#8B949E] font-mono mt-0.5">{agent.phone}</p>
                                     <p className="text-[11px] text-[#06B6D4] font-mono mt-0.5">{agent.city}</p>
@@ -5233,15 +5282,15 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                                   <span className="font-bold text-[#F0F6FC] truncate block">{agent.cnicOrId}</span>
                                 </div>
                                 <div>
-                                  <span className="text-[9px] text-[#6E7681] block uppercase">Payout Channel</span>
-                                  <span className="font-bold text-[#D29922] truncate block">{agent.payoutMethod}</span>
+                                  <span className="text-[9px] text-[#6E7681] block uppercase">Payout Channel ({agentCountry.currency})</span>
+                                  <span className="font-bold text-[#D29922] truncate block">{agent.payoutMethod} · {agent.bankName || 'Local Rail'}</span>
                                 </div>
                                 <div className="col-span-2 pt-1 border-t border-[#21262D] flex flex-wrap items-center justify-between gap-2 text-[10px] min-w-0">
                                   <span className="text-[#8B949E] flex items-center gap-1 min-w-0 flex-1">
                                     <Fingerprint className="size-3 text-[#06B6D4] shrink-0" />
                                     <span dir="ltr" className="break-all overflow-hidden [overflow-wrap:break-word] min-w-0">{agent.thumbHash}</span>
                                   </span>
-                                  <span className="text-[#3FB950] font-bold shrink-0">✓ Day-1 Complete</span>
+                                  <span className="text-[#3FB950] font-bold shrink-0">✓ {agent.enrolledAt}</span>
                                 </div>
                               </div>
 
@@ -5375,10 +5424,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
           : {
               cardTitle: 'Fix Salon Connection (Auto-Fix System)',
               cardKicker: 'QUICK RECONNECT HELP',
-              watchdogTitle: 'Auto-Fix Watchdog: Active 24/7 (Automatic)',
-              watchdogBadge: 'Self-Healing Active',
+              watchdogTitle: 'Auto-Fix Watchdog & Owner Self Re-Login: Active 24/7',
+              watchdogBadge: 'Self-Service & Self-Healing Active',
               watchdogDesc:
-                'WorkCraft watches every salon WhatsApp line 24/7 and automatically repairs network drops, SIM switches, or phone restarts on its own. Only use the backup QR or Remote Link options below if a salon owner manually logged out inside WhatsApp Linked Devices.',
+                'WorkCraft watches every salon WhatsApp line 24/7 and repairs drops automatically. If any salon owner logs out or changes phones, they can sign back in themselves anytime using their registered WhatsApp number + 1-tap OTP inside the Salon Owner Portal—with zero physical agent visit or Founder involvement needed.',
               intro:
                 'Choose the backup step if manual action is ever needed: 1-tap login OTP when changing phones, on-site QR scan with owner, or remote link.',
               searchLabel: 'Search & Select Salon:',
@@ -7076,7 +7125,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
         isOpen={isAddAgentModalOpen}
         onClose={() => setIsAddAgentModalOpen(false)}
         onAgentAdded={(newAgent) => {
-          const det = detectCountryFromPhone(newAgent.phone, newAgent.city);
+          const det = detectCountryFromPhone(
+            newAgent.phone,
+            `${newAgent.city} ${newAgent.countryName || ''}`
+          );
           const idCfg = getNationalIdConfigForCountry(det, 'en');
           const payoutCfg = getPayoutConfigForCountry(det);
           setEnrolledAgentsList((prev) => [
@@ -7088,15 +7140,20 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               phone: newAgent.phone,
               city: newAgent.city,
               category: newAgent.category,
+              countryCode: newAgent.countryCode || det.code,
+              countryName: newAgent.countryName || det.name,
+              countryFlag: newAgent.countryFlag || det.flag,
+              currency: newAgent.currency || det.localCurrency,
+              dialCode: newAgent.dialCode || det.dialCode,
               cnicOrId: idCfg.sampleId,
               payoutMethod: payoutCfg.defaultMethod,
               payoutAccount: newAgent.phone,
               payoutTitle: newAgent.name,
               bankName: payoutCfg.defaultBank,
-              status: 'INVITATION DISPATCHED',
-              enrolledAt: 'Pending Day-1 Activation',
+              status: 'ACTIVE · AUTO-PROVISIONED',
+              enrolledAt: `Added ${new Date().toLocaleDateString()} · ${newAgent.countryName || det.name}`,
               selfieVerified: false,
-              thumbHash: 'PENDING ENROLLMENT',
+              thumbHash: 'PENDING DAY-1 THUMBPRINT',
               legalRemittanceAgreed: false,
               legalTermsText: 'Pending remote acceptance',
             },

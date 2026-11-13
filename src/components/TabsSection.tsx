@@ -17,6 +17,8 @@ import {
   Sparkles,
   ArrowRight,
   Scissors,
+  Send,
+  UsersRound,
 } from 'lucide-react';
 import { TabName } from '../types/workcraft';
 import { SALONS, ARCHIVED_SALONS } from '../data/portalData';
@@ -28,7 +30,7 @@ interface TabsSectionProps {
   setPaymentRouting: (method: string) => void;
   onInspectSalon?: (salonName: string) => void;
   onLaunchFounderPreview?: (mode: 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE') => void;
-  onTestSocialLaunch?: (source: 'Facebook' | 'Instagram' | 'TikTok') => void;
+  onTestSocialLaunch?: (source: 'Facebook' | 'Instagram' | 'TikTok' | 'WhatsApp') => void;
 }
 
 export const TabsSection: React.FC<TabsSectionProps> = ({
@@ -46,12 +48,26 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
   const [founderAlertPhone, setFounderAlertPhone] = useState('+92 321 0000000');
   const [savedPhoneToast, setSavedPhoneToast] = useState(false);
 
-  // Founder Social Campaign Link Copy & Custom Generator State (Queries 1 & 2)
+  // Founder Social Campaign Link Copy & Custom Generator State
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
   const [customCampaignName, setCustomCampaignName] = useState('dha_salons_promo');
   const [customCampaignCategory, setCustomCampaignCategory] = useState<'ALL' | 'MENS' | 'LADIES'>('ALL');
   const [customCampaignLanguage, setCustomCampaignLanguage] = useState<'URDU' | 'ARABIC' | 'ROMAN_URDU' | 'ENGLISH'>('URDU');
   const [marketingToast, setMarketingToast] = useState<string | null>(null);
+
+  // Query 5: Founder Broadcast to All Already-Registered Salons (Feature / Service Announcements)
+  const [broadcastRegionFilter, setBroadcastRegionFilter] = useState<'ALL' | 'PK' | 'MENA' | 'EU'>('ALL');
+  const [broadcastTierFilter, setBroadcastTierFilter] = useState<'ALL' | 'STARTER' | 'GROWTH' | 'VIP' | 'CUSTOM'>('ALL');
+  const [broadcastTitle, setBroadcastTitle] = useState('New Feature Live: Instant Self Re-Login & Updated Voice Concierge');
+  const [broadcastMessageEn, setBroadcastMessageEn] = useState(
+    'New WorkCraft update is live! Your salon can now manage multiple barbers, send VIP deal alerts, and sign back in anytime using your WhatsApp number with 1-tap OTP.'
+  );
+  const [broadcastDispatchedReceipt, setBroadcastDispatchedReceipt] = useState<{
+    count: number;
+    regionLabel: string;
+    tierLabel: string;
+    time: string;
+  } | null>(null);
 
   const handleCopyLink = (id: string, url: string, label: string) => {
     try {
@@ -676,7 +692,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
           </div>
         )}
 
-        {/* 3B. Marketing & Social Campaign Routing Tab (Queries 1 & 2) */}
+        {/* 3B. Founder Marketing: Broadcast to Registered Salons + New Salon Ad Links */}
         {active === 'Marketing' && (
           <div className="space-y-6">
             {/* Real-time Toast Feedback */}
@@ -696,32 +712,230 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
               </div>
             )}
 
-            {/* Architecture Banner */}
+            {/* ========================================================================= */}
+            {/* PART 1 (QUERY 5): FOUNDER BROADCAST TO ALL REGISTERED SALONS               */}
+            {/* ========================================================================= */}
+            <div className="rounded-2xl border border-[#D29922]/50 bg-[#161B22] p-4 sm:p-5 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#21262D] pb-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]">
+                    <UsersRound className="size-4" />
+                  </span>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-mono font-black uppercase tracking-wider text-[#F0F6FC]">
+                        Founder Broadcast to Registered Salons
+                      </h3>
+                      <span className="rounded-md bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
+                        EXISTING CLIENTS ONLY
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#8B949E] font-sans mt-0.5">
+                      Announce new WorkCraft features, services, or important notices directly to all active registered salons via WhatsApp in each salon&apos;s saved language.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Audience Filters */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="text-xs font-mono text-[#8B949E] block space-y-1">
+                  <span>TARGET REGION / COUNTRY</span>
+                  <select
+                    value={broadcastRegionFilter}
+                    onChange={(e) => {
+                      setBroadcastRegionFilter(e.target.value as any);
+                      setBroadcastDispatchedReceipt(null);
+                    }}
+                    className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-xs font-mono text-[#F0F6FC] focus:outline-none focus:border-[#D29922]"
+                  >
+                    <option value="ALL">All Registered Countries (24 Active Salons)</option>
+                    <option value="PK">🇵🇰 Pakistan Salons Only (15 Salons · Urdu / English)</option>
+                    <option value="MENA">🇦🇪 UAE &amp; Gulf (MENA) Salons (6 Salons · Arabic / Urdu)</option>
+                    <option value="EU">🇬🇧 UK &amp; International Salons (3 Salons · English)</option>
+                  </select>
+                </label>
+
+                <label className="text-xs font-mono text-[#8B949E] block space-y-1">
+                  <span>PACKAGE TIER TARGET</span>
+                  <select
+                    value={broadcastTierFilter}
+                    onChange={(e) => {
+                      setBroadcastTierFilter(e.target.value as any);
+                      setBroadcastDispatchedReceipt(null);
+                    }}
+                    className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-xs font-mono text-[#F0F6FC] focus:outline-none focus:border-[#D29922]"
+                  >
+                    <option value="ALL">All Package Tiers</option>
+                    <option value="STARTER">Starter Setup Salons</option>
+                    <option value="GROWTH">Growth Automation Salons</option>
+                    <option value="VIP">VIP Executive Salons</option>
+                    <option value="CUSTOM">Custom Enterprise Salons</option>
+                  </select>
+                </label>
+              </div>
+
+              {/* Quick Feature / Service Update Templates */}
+              <div className="flex flex-wrap gap-2">
+                {[
+                  {
+                    label: 'New Feature Launch',
+                    title: 'New Feature Live: Instant Self Re-Login & Updated Voice Concierge',
+                    msg: 'New WorkCraft update is live! Your salon can now manage multiple barbers, send VIP deal alerts, and sign back in anytime using your WhatsApp number with 1-tap OTP.',
+                  },
+                  {
+                    label: 'New Service Category',
+                    title: 'New Service Menu Templates Added',
+                    msg: 'We just added new service presets to your Live Salon Dashboard. Open Settings ➔ Rates to enable new grooming & styling packages in 1 tap.',
+                  },
+                  {
+                    label: 'Upgrade Promo Notice',
+                    title: 'Zero-Loss Tier Upgrade Reminder',
+                    msg: 'Upgrade your WorkCraft plan anytime directly from your Live Dashboard by paying only the remaining package difference—zero double charge.',
+                  },
+                ].map((tpl) => (
+                  <button
+                    key={tpl.label}
+                    type="button"
+                    onClick={() => {
+                      setBroadcastTitle(tpl.title);
+                      setBroadcastMessageEn(tpl.msg);
+                      setBroadcastDispatchedReceipt(null);
+                    }}
+                    className="min-h-[34px] rounded-lg border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] px-3 py-1 text-[11px] font-mono font-bold text-[#D29922] transition"
+                  >
+                    Use: {tpl.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="space-y-2.5">
+                <input
+                  type="text"
+                  value={broadcastTitle}
+                  onChange={(e) => setBroadcastTitle(e.target.value)}
+                  placeholder="Announcement Title..."
+                  className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs font-mono font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                />
+                <textarea
+                  value={broadcastMessageEn}
+                  onChange={(e) => setBroadcastMessageEn(e.target.value)}
+                  rows={3}
+                  placeholder="Write your announcement once—WorkCraft delivers it to each salon in their saved onboarding language (Urdu, Arabic, or English)..."
+                  className="w-full rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-xs font-sans text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                />
+              </div>
+
+              {/* Automatic Per-Language Dispatch Preview */}
+              <div className="grid gap-2.5 md:grid-cols-3 text-[11px]">
+                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-1">
+                  <span className="text-[10px] font-mono font-bold text-[#3FB950]">🇵🇰 Urdu Salons Preview</span>
+                  <p dir="rtl" className="text-right text-[#F0F6FC] font-sans leading-relaxed">
+                    WorkCraft نیا فیچر اپڈیٹ: {broadcastTitle} — تفصیلات آپ کے لائیو ڈیش بورڈ میں دستیاب ہیں۔
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-1">
+                  <span className="text-[10px] font-mono font-bold text-[#06B6D4]">🇦🇪 Arabic Salons Preview</span>
+                  <p dir="rtl" className="text-right text-[#F0F6FC] font-sans leading-relaxed">
+                    تحديث جديد من WorkCraft: {broadcastTitle} — متاح الآن في لوحة تحكم صالونك.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-1">
+                  <span className="text-[10px] font-mono font-bold text-[#D29922]">🇬🇧 English Salons Preview</span>
+                  <p className="text-[#F0F6FC] font-sans leading-relaxed">
+                    {broadcastTitle}: {broadcastMessageEn}
+                  </p>
+                </div>
+              </div>
+
+              {broadcastDispatchedReceipt && (
+                <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-3 text-xs font-mono text-[#3FB950] flex items-center justify-between gap-2 flex-wrap">
+                  <span>
+                    ✓ Broadcast sent safely to <strong>{broadcastDispatchedReceipt.count} Registered Salons</strong> ({broadcastDispatchedReceipt.regionLabel} · {broadcastDispatchedReceipt.tierLabel}) at {broadcastDispatchedReceipt.time}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <span className="text-[11px] font-mono text-[#8B949E]">
+                  Sent via Central WorkCraft Line · Zero personal Founder number exposure
+                </span>
+                <button
+                  type="button"
+                  disabled={!broadcastMessageEn.trim()}
+                  onClick={() => {
+                    const baseByRegion =
+                      broadcastRegionFilter === 'PK'
+                        ? 15
+                        : broadcastRegionFilter === 'MENA'
+                        ? 6
+                        : broadcastRegionFilter === 'EU'
+                        ? 3
+                        : 24;
+                    const count =
+                      broadcastTierFilter === 'ALL'
+                        ? baseByRegion
+                        : Math.max(1, Math.round(baseByRegion / 3));
+                    setBroadcastDispatchedReceipt({
+                      count,
+                      regionLabel:
+                        broadcastRegionFilter === 'ALL'
+                          ? 'All Countries'
+                          : broadcastRegionFilter,
+                      tierLabel:
+                        broadcastTierFilter === 'ALL' ? 'All Tiers' : broadcastTierFilter,
+                      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    });
+                    setMarketingToast(`✓ Broadcast queued for ${count} registered salons in their saved languages!`);
+                    setTimeout(() => setMarketingToast(null), 5000);
+                  }}
+                  className="min-h-[48px] inline-flex items-center gap-2 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 py-2.5 text-xs font-mono font-black uppercase transition active:scale-95 disabled:opacity-45"
+                >
+                  <Send className="size-4" />
+                  <span>Send Broadcast to Registered Salons →</span>
+                </button>
+              </div>
+            </div>
+
+            {/* ========================================================================= */}
+            {/* PART 2 (QUERIES 4 & 6): NEW SALON ACQUISITION SOCIAL CAMPAIGN LINKS        */}
+            {/* ========================================================================= */}
             <div className="rounded-2xl border border-[#06B6D4]/40 bg-[#06B6D4]/10 p-4 sm:p-5 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-[#06B6D4]">
                   <Megaphone className="size-5 shrink-0" />
                   <h3 className="text-sm font-mono font-black uppercase tracking-wider">
-                    1-Tap Social Campaign Link Generator &amp; Direct Traffic Router
+                    New Salon Acquisition · Social Ad Link Generator
                   </h3>
                 </div>
-                <span className="rounded-md bg-[#0D1117] border border-[#06B6D4]/40 px-2.5 py-1 text-[10px] font-mono font-bold text-[#06B6D4]">
-                  PURE FOUNDER ISOLATION
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-md bg-[#0D1117] border border-[#06B6D4]/40 px-2.5 py-1 text-[10px] font-mono font-bold text-[#06B6D4]">
+                    FOR PROSPECTIVE NEW SALONS
+                  </span>
+                  {onLaunchFounderPreview && (
+                    <button
+                      type="button"
+                      onClick={() => onLaunchFounderPreview('SALON_LIVE')}
+                      className="rounded-md bg-[#21262D] hover:border-[#06B6D4] border border-[#30363D] px-2.5 py-1 text-[10px] font-mono font-bold text-[#F0F6FC] transition"
+                    >
+                      Preview Live Salon Portal →
+                    </button>
+                  )}
+                </div>
               </div>
               <p className="text-xs text-[#F0F6FC] font-sans leading-relaxed">
-                WorkCraft links contain automatic device and source tags. When a salon owner clicks your ad on mobile, the app <strong className="text-[#3FB950]">completely bypasses Founder screens</strong> and launches them directly into <strong>Step 1 of the 4-step onboarding flow</strong>.
+                These links are for recruiting <strong className="text-[#06B6D4]">new, unregistered salons</strong> on Facebook, Instagram, TikTok, or WhatsApp groups. When a prospective owner clicks an ad link on their phone, the app automatically opens <strong className="text-[#3FB950]">Step 1 of Salon Self-Onboarding</strong> with Founder admin screens completely hidden.
               </p>
             </div>
 
-            {/* Pre-Built Social Campaign Cards (Facebook, Instagram, TikTok, WhatsApp) */}
+            {/* Pre-Built Social Campaign Cards (Facebook, Instagram, TikTok, WhatsApp Referral) */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <h4 className="text-xs font-mono font-bold text-[#D29922] uppercase tracking-wider">
-                  Pre-Built Social Campaign Links (Auto-Tagged)
+                  Pre-Built New Salon Ad Links (Auto-Tagged)
                 </h4>
                 <span className="text-[10px] font-mono text-[#8B949E]">
-                  Tap to Copy or Test Direct Mobile Launch
+                  Use &ldquo;Preview Signup Ad Flow&rdquo; to inspect what a new prospect sees after clicking your ad
                 </span>
               </div>
 
@@ -731,45 +945,41 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     id: 'fb',
                     source: 'Facebook' as const,
                     name: 'Facebook Ads & Meta Stories',
-                    badge: 'FACEBOOK ADS',
+                    badge: 'FACEBOOK ADS · NEW SIGNUPS',
                     badgeColor: 'border-[#1877F2]/40 bg-[#1877F2]/15 text-[#58A6FF]',
-                    color: 'text-[#58A6FF]',
                     url: 'https://portal.workcraft.local/?onboard=true&ref=fb&utm_source=facebook&utm_medium=cpc&utm_campaign=salon_signup_q4',
                     stats: '14.8% CTR · 38 Salons Onboarded · High Conversion',
-                    desc: 'Drop prospective salon owners straight into Step 1 from Facebook Feed or Story ads without viewing admin tools.',
+                    desc: 'Drop prospective salon owners straight into Step 1 self-onboarding from Facebook Feed or Story ads.',
                   },
                   {
                     id: 'ig',
                     source: 'Instagram' as const,
                     name: 'Instagram Reels & Bio Link',
-                    badge: 'INSTAGRAM REELS',
+                    badge: 'INSTAGRAM REELS · NEW SIGNUPS',
                     badgeColor: 'border-[#E1306C]/40 bg-[#E1306C]/15 text-[#FF7B72]',
-                    color: 'text-[#FF7B72]',
                     url: 'https://portal.workcraft.local/?onboard=true&ref=ig&utm_source=instagram&utm_medium=cpc&utm_campaign=salon_signup_q4',
                     stats: '18.2% CTR · 46 Salons Onboarded · Visual Barbers',
-                    desc: 'Perfect for viral salon transformation reels and bio links. Auto-tags traffic from Instagram campaigns.',
+                    desc: 'Designed for Instagram salon transformation reels and bio links. Lands prospective owners in Step 1.',
                   },
                   {
                     id: 'tiktok',
                     source: 'TikTok' as const,
                     name: 'TikTok Viral Video Campaigns',
-                    badge: 'TIKTOK VIRAL',
+                    badge: 'TIKTOK VIRAL · NEW SIGNUPS',
                     badgeColor: 'border-[#00F2FE]/40 bg-[#00F2FE]/15 text-cyan-300',
-                    color: 'text-cyan-300',
                     url: 'https://portal.workcraft.local/?onboard=true&ref=tiktok&utm_source=tiktok&utm_medium=cpc&utm_campaign=salon_signup_q4',
                     stats: '21.5% CTR · 52 Salons Onboarded · Gen-Z Stylists',
-                    desc: 'High-speed mobile funnel for short video promos. Automatically lands owner into Step 1 on their phone.',
+                    desc: 'High-speed mobile funnel for short video promos. Lands prospects straight into Step 1 on mobile.',
                   },
                   {
                     id: 'whatsapp',
-                    source: 'Facebook' as const,
-                    name: 'WhatsApp Groups & Direct Referral',
-                    badge: 'WHATSAPP DIRECT',
+                    source: 'WhatsApp' as const,
+                    name: 'WhatsApp Groups & New Salon Referral',
+                    badge: 'NEW SALON SIGNUP LINK',
                     badgeColor: 'border-[#25D366]/40 bg-[#25D366]/15 text-[#3FB950]',
-                    color: 'text-[#3FB950]',
-                    url: 'https://portal.workcraft.local/?onboard=true&ref=social&utm_source=whatsapp',
+                    url: 'https://portal.workcraft.local/?onboard=true&ref=whatsapp&utm_source=whatsapp',
                     stats: '34.0% Conversion · 1-to-1 Trusted Referral',
-                    desc: 'Clean direct WhatsApp link for salon community groups, parlor owners networks, and warm referrals.',
+                    desc: 'Share in salon owner WhatsApp groups so unregistered owners can click and onboard themselves (not for broadcasting to existing clients—use Broadcast panel above).',
                   },
                 ].map((item) => {
                   const isCopied = copiedLinkId === item.id;
@@ -822,10 +1032,10 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                             }
                           }}
                           className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#30363D] bg-[#21262D] hover:border-[#D29922] px-3 py-2 text-xs font-mono font-bold text-[#D29922] transition"
-                          title="Simulate tapping this link on mobile"
+                          title="Simulates what a new salon owner sees when they click this social ad link on mobile (opens Step 1 Onboarding)"
                         >
                           <Smartphone className="size-3.5" />
-                          <span>Test Launch →</span>
+                          <span>Preview Signup Ad Flow →</span>
                         </button>
                       </div>
                     </div>
@@ -839,7 +1049,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
               <div className="flex items-center gap-2 text-[#D29922]">
                 <Sparkles className="size-4 shrink-0" />
                 <h4 className="text-xs font-mono font-bold uppercase tracking-wider">
-                  Generate Custom Auto-Tagged Campaign Link
+                  Generate Custom Auto-Tagged Acquisition Link
                 </h4>
               </div>
 
@@ -856,7 +1066,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 </label>
 
                 <label className="text-xs font-mono text-[#8B949E] block space-y-1">
-                  <span>TARGET CATEGORY</span>
+                  <span>TARGET SALON CATEGORY</span>
                   <select
                     value={customCampaignCategory}
                     onChange={(e) => setCustomCampaignCategory(e.target.value as 'ALL' | 'MENS' | 'LADIES')}
@@ -893,7 +1103,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 return (
                   <div className="rounded-xl border border-[#06B6D4]/40 bg-[#161B22] p-3.5 space-y-2">
                     <div className="flex items-center justify-between text-[11px] font-mono">
-                      <span className="text-[#06B6D4] font-bold">Generated Direct Campaign Link:</span>
+                      <span className="text-[#06B6D4] font-bold">Generated Direct Signup Ad Link:</span>
                       <span className="text-[#3FB950]">Bypasses Founder Command ✓</span>
                     </div>
                     <div className="text-xs font-mono text-[#F0F6FC] break-all select-all p-2 rounded-lg bg-[#0D1117] border border-[#30363D]">
@@ -922,9 +1132,10 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                           }
                         }}
                         className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#21262D] hover:border-[#D29922] px-3.5 py-2 text-xs font-mono font-bold text-[#D29922] transition"
+                        title="Simulates clicking this link to preview the Step 1 Onboarding experience"
                       >
                         <Smartphone className="size-3.5" />
-                        <span>Test Link in Step 1</span>
+                        <span>Preview Signup Ad Flow →</span>
                       </button>
                     </div>
                   </div>
@@ -935,16 +1146,16 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
             {/* Architecture Explainer Diagram */}
             <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-5 space-y-3">
               <h4 className="text-xs font-mono font-bold text-[#8B949E] uppercase tracking-wider">
-                Traffic Routing Architecture (How Zero Founder Leakage Works)
+                How Prospect Ad Links Route to Self-Onboarding (Zero Founder Leakage)
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-center font-mono text-[11px]">
                 <div className="p-3 rounded-xl border border-[#30363D] bg-[#161B22] space-y-1">
                   <span className="text-[#06B6D4] font-bold block">1. Click Ad</span>
-                  <p className="text-[10px] text-[#8B949E] font-sans">Owner taps FB/IG/TikTok ad on their smartphone</p>
+                  <p className="text-[10px] text-[#8B949E] font-sans">New salon owner taps FB/IG/TikTok/WA ad link on phone</p>
                 </div>
                 <div className="p-3 rounded-xl border border-[#116329] bg-[#0D3822] space-y-1">
                   <span className="text-[#3FB950] font-bold block">2. Auto-Bypass</span>
-                  <p className="text-[10px] text-[#8B949E] font-sans">Role isolates to SALON_OWNER · 100% hidden founder</p>
+                  <p className="text-[10px] text-[#8B949E] font-sans">Role isolates to SALON_OWNER · Founder screens hidden</p>
                 </div>
                 <div className="p-3 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] space-y-1">
                   <span className="text-[#D29922] font-bold block">3. 4-Step Setup</span>

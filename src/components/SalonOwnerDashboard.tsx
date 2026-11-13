@@ -34,6 +34,8 @@ import {
   Edit2,
   Trash2,
   UserCheck,
+  LogOut,
+  Key,
 } from 'lucide-react';
 import { PortalCard } from './PortalCard';
 import { BroadcastTab } from './Tabs/BroadcastTab';
@@ -845,6 +847,22 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     phone: string;
     timestamp: string;
   } | null>(null);
+
+  // Query 2 (Self-Service Owner Re-Login): Instant WhatsApp OTP reconnect without physical agent or Founder
+  const [isOwnerLoggedOut, setIsOwnerLoggedOut] = useState<boolean>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('relogin') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [reLoginStep, setReLoginStep] = useState<'PHONE' | 'OTP'>('PHONE');
+  const [reLoginPhoneInput, setReLoginPhoneInput] = useState<string>(currentSalon.phone);
+  const [reLoginOtpInput, setReLoginOtpInput] = useState<string>('');
+  const [reLoginGeneratedOtp, setReLoginGeneratedOtp] = useState<string>('849201');
+  const [reLoginError, setReLoginError] = useState<string | null>(null);
+  const [reLoginMatchedSalonId, setReLoginMatchedSalonId] = useState<string>(currentSalon.id);
 
   // Query 3 & 5: Interactive WhatsApp Chat Prompts (Barber Conflict & Ambiguous Time Disambiguation)
   const [barberConflictPrompt, setBarberConflictPrompt] = useState<{
@@ -2249,6 +2267,299 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   }
 
   // ============================================================================
+  // QUERY 2: SELF-SERVICE SALON OWNER RE-LOGIN (ZERO AGENT / FOUNDER NEEDED)
+  // ============================================================================
+  if (!isFounderInspector && isOwnerLoggedOut) {
+    const normalizePhoneDigits = (val: string) => val.replace(/\D/g, '');
+    const matchedReLoginSalon =
+      salonsState.find((s) => s.id === reLoginMatchedSalonId) || currentSalon;
+    const isReLoginRtl = ownerLang === 'ur' || ownerLang === 'ar';
+
+    const rlText =
+      ownerLang === 'ar'
+        ? {
+            kicker: 'تسجيل دخول ذاتي لمالك الصالون · بدون وكيل أو مؤسس',
+            title: 'إعادة تسجيل الدخول واستعادة الاتصال',
+            subtitle:
+              'هل قمت بتسجيل الخروج أو تغيير هاتفك؟ روبوت الواتساب الخاص بصالونك لا يزال يعمل. أدخل رقم الواتساب المسجل لتصلك رسالة OTP بضغطة واحدة.',
+            phoneLabel: 'رقم الواتساب المسجل للصالون',
+            quickLabel: 'أو اختر صالونك المسجل للاختبار السريع:',
+            sendOtpBtn: 'إرسال رمز الدخول السريع عبر الواتساب ←',
+            otpTitle: 'تم إرسال رمز الدخول تلقائياً إلى واتسابك',
+            otpLabel: 'أدخل رمز التحقق (6 أرقام)',
+            autoFillBtn: 'تعبئة تلقائية وتسجيل الدخول فوراً ✓',
+            verifyBtn: 'تأكيد الدخول واستعادة اللوحة ←',
+            backPhone: 'تغيير الرقم',
+            errNotFound: 'الرجاء إدخال رقم واتساب مسجل صحيح للصالون.',
+            errOtp: 'رمز التحقق غير صحيح. استخدم الرمز المرسل أعلاه.',
+            botSafeBadge: 'الرد التلقائي للزبائن نشط 24/7 أثناء تسجيل الخروج ✓',
+          }
+        : ownerLang === 'ur'
+        ? {
+            kicker: 'سیلون مالک کا خودکار لاگ ان · بغیر ایجنٹ یا فاؤنڈر مدد',
+            title: 'خودکار ری-لاگ ان اور واٹس ایپ بحالی',
+            subtitle:
+              'اگر آپ لاگ آؤٹ ہو گئے ہیں یا نیا فون استعمال کر رہے ہیں تو ایجنٹ یا فاؤنڈر کے بغیر خود دوبارہ لاگ ان کریں۔ اپنا رجسٹرڈ واٹس ایپ نمبر درج کریں اور OTP سے فوراً ڈیش بورڈ کھولیں۔',
+            phoneLabel: 'سیلون کا رجسٹرڈ واٹس ایپ نمبر',
+            quickLabel: 'یا فوری ٹیسٹ کے لیے رجسٹرڈ سیلون منتخب کریں:',
+            sendOtpBtn: 'میرے واٹس ایپ پر لاگ ان کوڈ بھیجیں ←',
+            otpTitle: 'لاگ ان کوڈ آپ کے واٹس ایپ پر بھیج دیا گیا ہے',
+            otpLabel: '6 ہندسوں کا OTP کوڈ درج کریں',
+            autoFillBtn: 'ایک کلک میں کوڈ بھریں اور لاگ ان کریں ✓',
+            verifyBtn: 'تصدیق کریں اور لائیو ڈیش بورڈ کھولیں ←',
+            backPhone: 'نمبر تبدیل کریں',
+            errNotFound: 'براہ کرم سیلون کا درست رجسٹرڈ واٹس ایپ نمبر درج کریں۔',
+            errOtp: 'OTP کوڈ درست نہیں ہے۔ اوپر موصول ہونے والا کوڈ درج کریں۔',
+            botSafeBadge: 'لاگ آؤٹ کے دوران بھی کسٹمر آٹو ریپلائی 24/7 آن ہے ✓',
+          }
+        : {
+            kicker: 'SELF-SERVICE OWNER ACCESS · ZERO AGENT OR FOUNDER VISIT',
+            title: 'Salon Owner Self Re-Login & Instant Connect',
+            subtitle:
+              'Logged out or switched to a new smartphone? Your salon WhatsApp concierge continues running 24/7. Enter your registered WhatsApp number to receive a 1-tap login OTP and restore your Live Dashboard in seconds.',
+            phoneLabel: 'Registered Salon WhatsApp Number',
+            quickLabel: 'Quick-fill a registered salon number to test:',
+            sendOtpBtn: 'Send 1-Tap Login Code to My WhatsApp →',
+            otpTitle: 'Automatic Login OTP Sent to Your WhatsApp',
+            otpLabel: 'Enter 6-Digit Login Code',
+            autoFillBtn: '1-Tap Auto-Fill & Sign Back In ✓',
+            verifyBtn: 'Verify Code & Open Live Dashboard →',
+            backPhone: 'Change Number',
+            errNotFound: 'Please enter a valid registered salon WhatsApp number.',
+            errOtp: 'Invalid OTP code. Please enter the 6-digit code sent to your WhatsApp.',
+            botSafeBadge: 'Client Auto-Booking Bot Stays Live 24/7 While Logged Out ✓',
+          };
+
+    const handleSendSelfOtp = (e: React.FormEvent) => {
+      e.preventDefault();
+      setReLoginError(null);
+      const enteredDigits = normalizePhoneDigits(reLoginPhoneInput);
+      if (enteredDigits.length < 7) {
+        setReLoginError(rlText.errNotFound);
+        return;
+      }
+
+      const found = salonsState.find((s) => {
+        const sDigits = normalizePhoneDigits(s.phone);
+        return (
+          sDigits === enteredDigits ||
+          (enteredDigits.length >= 7 && sDigits.endsWith(enteredDigits.slice(-7)))
+        );
+      });
+
+      const targetSalon = found || currentSalon;
+      setReLoginMatchedSalonId(targetSalon.id);
+      setOwnerLang(targetSalon.onboardingLanguage);
+      const nextCode = Math.floor(100000 + Math.random() * 899999).toString();
+      setReLoginGeneratedOtp(nextCode);
+      setReLoginOtpInput('');
+      setReLoginStep('OTP');
+    };
+
+    const completeSelfReLogin = (otpVal: string) => {
+      if (otpVal.trim() !== reLoginGeneratedOtp) {
+        setReLoginError(rlText.errOtp);
+        return;
+      }
+      setSelectedSalonId(matchedReLoginSalon.id);
+      setOwnerLang(matchedReLoginSalon.onboardingLanguage);
+      setIsOwnerLoggedOut(false);
+      setReLoginStep('PHONE');
+      setReLoginOtpInput('');
+      setReLoginError(null);
+      setWhatsAppReceiptNotice({
+        title:
+          ownerLang === 'ar'
+            ? 'تم تسجيل الدخول واستعادة الاتصال بنجاح'
+            : ownerLang === 'ur'
+            ? 'خودکار لاگ ان اور واٹس ایپ بحالی مکمل!'
+            : 'Self Re-Login & Connection Restored!',
+        body:
+          ownerLang === 'ar'
+            ? `أهلاً بعودتك ${matchedReLoginSalon.owner}! تم تسجيل دخول "${matchedReLoginSalon.name}" بنجاح دون الحاجة لوكيل أو مؤسس.`
+            : ownerLang === 'ur'
+            ? `خوش آمدید ${matchedReLoginSalon.owner}! "${matchedReLoginSalon.name}" بغیر ایجنٹ یا فاؤنڈر کے خودکار طور پر دوبارہ لاگ ان ہو گیا ہے۔`
+            : `Welcome back ${matchedReLoginSalon.owner}! "${matchedReLoginSalon.name}" signed back in automatically via WhatsApp OTP—zero physical agent or Founder help needed.`,
+        phone: matchedReLoginSalon.phone,
+        timestamp: 'Just now · WhatsApp Auto-Auth ✓✓',
+      });
+      setTimeout(() => setWhatsAppReceiptNotice(null), 8000);
+    };
+
+    return (
+      <div className="max-w-xl mx-auto py-8 px-2 pb-28 lg:pb-12">
+        <div
+          dir={isReLoginRtl ? 'rtl' : 'ltr'}
+          className={`rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-7 space-y-5 shadow-2xl ${
+            isReLoginRtl ? 'text-right' : 'text-left'
+          }`}
+        >
+          {/* Language switcher bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#21262D] pb-3.5">
+            <span className="rounded-full border border-[#116329] bg-[#0D3822] px-3 py-1 text-[10px] font-mono font-bold text-[#3FB950]">
+              {rlText.botSafeBadge}
+            </span>
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-[#0D1117] border border-[#30363D]">
+              {[
+                { id: 'ur' as const, label: '🇵🇰 اردو' },
+                { id: 'en' as const, label: '🇬🇧 EN' },
+                { id: 'ar' as const, label: '🇦🇪 العربية' },
+              ].map((lang) => (
+                <button
+                  key={lang.id}
+                  type="button"
+                  onClick={() => setOwnerLang(lang.id)}
+                  className={`min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition ${
+                    ownerLang === lang.id
+                      ? 'bg-[#06B6D4] text-[#0D1117]'
+                      : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                  }`}
+                >
+                  {lang.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-[#06B6D4]">
+              <Key className="size-4 shrink-0" />
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider">
+                {rlText.kicker}
+              </span>
+            </div>
+            <h2 className="text-2xl font-black text-[#F0F6FC] tracking-tight">
+              {rlText.title}
+            </h2>
+            <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
+              {rlText.subtitle}
+            </p>
+          </div>
+
+          {reLoginError && (
+            <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] p-3 text-xs font-mono text-[#F85149]">
+              {reLoginError}
+            </div>
+          )}
+
+          {reLoginStep === 'PHONE' ? (
+            <form onSubmit={handleSendSelfOtp} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-mono font-bold text-[#F0F6FC] block">
+                  {rlText.phoneLabel}
+                </label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={reLoginPhoneInput}
+                  onChange={(e) => setReLoginPhoneInput(e.target.value)}
+                  placeholder="+92 321 8472910"
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-sm font-mono text-left text-[#06B6D4] focus:outline-none focus:border-[#06B6D4]"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-mono text-[#8B949E] block">
+                  {rlText.quickLabel}
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {salonsState.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => {
+                        setReLoginPhoneInput(s.phone);
+                        setReLoginMatchedSalonId(s.id);
+                        setOwnerLang(s.onboardingLanguage);
+                      }}
+                      className="min-h-[34px] rounded-lg border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-2.5 py-1 text-[11px] font-mono text-[#F0F6FC] transition"
+                    >
+                      {s.name} (<span dir="ltr">{s.phone}</span>)
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-5 py-3 text-xs font-mono font-black uppercase transition active:scale-95"
+              >
+                {rlText.sendOtpBtn}
+              </button>
+            </form>
+          ) : (
+            <div className="space-y-4 animate-in fade-in">
+              <div className="rounded-2xl border border-[#116329] bg-[#0D3822] p-4 space-y-2">
+                <div className="flex items-center justify-between gap-2 text-xs font-mono text-[#3FB950] font-bold">
+                  <span>{rlText.otpTitle}</span>
+                  <span dir="ltr">{matchedReLoginSalon.phone}</span>
+                </div>
+                <div className="rounded-xl border border-[#116329] bg-[#0D1117] p-3 font-mono text-xs text-[#F0F6FC] space-y-1">
+                  <p className="text-[11px] text-[#8B949E]">
+                    WhatsApp Message from WorkCraft System:
+                  </p>
+                  <p>
+                    Salon: <strong className="text-[#06B6D4]">{matchedReLoginSalon.name}</strong> · Login Code:{' '}
+                    <strong className="text-[#D29922] text-sm tracking-widest" dir="ltr">
+                      {reLoginGeneratedOtp}
+                    </strong>
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-mono font-bold text-[#F0F6FC] block">
+                  {rlText.otpLabel}
+                </label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  maxLength={6}
+                  value={reLoginOtpInput}
+                  onChange={(e) => setReLoginOtpInput(e.target.value)}
+                  placeholder="6-digit OTP (e.g. 849201)"
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-base font-mono font-bold tracking-widest text-center text-[#D29922] focus:outline-none focus:border-[#06B6D4]"
+                />
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReLoginOtpInput(reLoginGeneratedOtp);
+                    completeSelfReLogin(reLoginGeneratedOtp);
+                  }}
+                  className="min-h-[48px] rounded-xl bg-[#3FB950] hover:bg-[#4ec961] text-[#0D1117] px-4 py-2.5 text-xs font-mono font-black uppercase transition active:scale-95"
+                >
+                  {rlText.autoFillBtn}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => completeSelfReLogin(reLoginOtpInput)}
+                  className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2.5 text-xs font-mono font-black uppercase transition active:scale-95"
+                >
+                  {rlText.verifyBtn}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setReLoginStep('PHONE');
+                  setReLoginError(null);
+                }}
+                className="text-xs font-mono text-[#8B949E] hover:text-[#F0F6FC] underline"
+              >
+                {rlText.backPhone}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
   // SALON OWNER FULL PWA DASHBOARD
   // ============================================================================
   return (
@@ -2408,6 +2719,21 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   ? '5th Final Due Day'
                   : 'Priority Service Active'}
               </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setReLoginPhoneInput(currentSalon.phone);
+                setReLoginMatchedSalonId(currentSalon.id);
+                setReLoginStep('PHONE');
+                setIsOwnerLoggedOut(true);
+              }}
+              className="min-h-[48px] flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] px-3 py-2 text-xs font-mono font-bold text-[#8B949E] hover:text-[#D29922] transition"
+              title="Log out and test self-service WhatsApp OTP re-login without agent or Founder help"
+            >
+              <LogOut className="size-3.5" />
+              <span>Log Out</span>
             </button>
 
             {onClose && (

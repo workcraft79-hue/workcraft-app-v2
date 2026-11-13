@@ -315,14 +315,14 @@ export default function App() {
     setIsSidebarOpen(false);
   };
 
-  const handleTestSocialLaunch = (source: 'Facebook' | 'Instagram' | 'TikTok') => {
+  const handleTestSocialLaunch = (source: 'Facebook' | 'Instagram' | 'TikTok' | 'WhatsApp') => {
     setSocialCampaignSource(`${source} Ads Campaign`);
     setCompletedOnboardingData(null);
     setOnboardedSalonName(undefined);
     setHasCompletedSalonOnboarding(false);
     setActiveRole('SALON_OWNER');
     setActiveTab('Salon Owner Dashboard');
-    showToast(`📱 Simulated direct mobile arrival from ${source} Ad Campaign. Direct 4-step onboarding active!`);
+    showToast(`📱 Previewing mobile Step 1 signup arrival from ${source} Ad Campaign!`);
   };
 
   // Strict 3-Role Sidebar & Bottom Navigation Isolation (Query 1)
@@ -754,7 +754,7 @@ export default function App() {
                       ? 'Read-only view of each salon package, 5th-of-month payment status, and onboarding language.'
                       : 'Live queue, hands-free voice alerts, rate editor, upgrades, video deals, and window poster PDF.'
                     : activeTab === 'Marketing'
-                    ? '1-Tap auto-tagged social campaign links for Facebook, Instagram, and TikTok that bypass founder screens on mobile.'
+                    ? 'Broadcast new features to all registered salons and share social signup ad links.'
                     : activeTab === 'Voice'
                     ? 'Listen to salon owner voice messages and reply automatically in their language.'
                     : activeTab === 'Settings'

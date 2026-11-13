@@ -33,6 +33,11 @@ interface AddNewAgentModalProps {
     phone: string;
     city: string;
     category: string;
+    countryCode?: string;
+    countryName?: string;
+    countryFlag?: string;
+    currency?: string;
+    dialCode?: string;
   }) => void;
   onOpenRemoteEnrollment?: (agent: {
     id: string;
@@ -41,6 +46,11 @@ interface AddNewAgentModalProps {
     phone: string;
     city: string;
     category: string;
+    countryCode?: string;
+    countryName?: string;
+    countryFlag?: string;
+    currency?: string;
+    dialCode?: string;
   }) => void;
 }
 
@@ -58,8 +68,8 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
   const [dispatchedSuccess, setDispatchedSuccess] = useState(false);
 
   // Auto-generate unique sequential Agent ID & 4-digit security PIN
-  const [generatedId] = useState(() => 'AGT-' + Math.floor(410 + Math.random() * 50));
-  const [generatedPin] = useState(() => Math.floor(1000 + Math.random() * 9000).toString());
+  const [generatedId, setGeneratedId] = useState(() => 'AGT-' + Math.floor(410 + Math.random() * 500));
+  const [generatedPin, setGeneratedPin] = useState(() => Math.floor(1000 + Math.random() * 9000).toString());
 
   const detectedCountry = detectCountryFromPhone(agentPhone, `${agentCity} ${agentCountry}`);
 
@@ -68,14 +78,14 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
   const validTerritories = REGIONAL_CITY_MAP[detectedCountry.code]?.cities || [];
 
   const countryPresets = [
-    { code: 'PK', name: 'Pakistan', flag: '🇵🇰', prefix: '+92', defaultCity: 'Karachi South' },
-    { code: 'AE', name: 'UAE', flag: '🇦🇪', prefix: '+971', defaultCity: 'Dubai Marina' },
-    { code: 'SA', name: 'Saudi Arabia', flag: '🇸🇦', prefix: '+966', defaultCity: 'Riyadh Olaya' },
-    { code: 'GB', name: 'United Kingdom', flag: '🇬🇧', prefix: '+44', defaultCity: 'London Central' },
-    { code: 'US', name: 'United States', flag: '🇺🇸', prefix: '+1', defaultCity: 'New York City' },
-    { code: 'CA', name: 'Canada', flag: '🇨🇦', prefix: '+1', defaultCity: 'Toronto Downtown' },
-    { code: 'DE', name: 'Germany', flag: '🇩🇪', prefix: '+49', defaultCity: 'Berlin Mitte' },
-    { code: 'AU', name: 'Australia', flag: '🇦🇺', prefix: '+61', defaultCity: 'Sydney CBD' },
+    { code: 'PK', name: 'Pakistan', flag: '🇵🇰', prefix: '+92', defaultCity: 'Karachi South', sampleDigits: '302 7819203' },
+    { code: 'AE', name: 'UAE', flag: '🇦🇪', prefix: '+971', defaultCity: 'Dubai Marina', sampleDigits: '50 8491022' },
+    { code: 'SA', name: 'Saudi Arabia', flag: '🇸🇦', prefix: '+966', defaultCity: 'Riyadh Olaya', sampleDigits: '55 4819203' },
+    { code: 'GB', name: 'United Kingdom', flag: '🇬🇧', prefix: '+44', defaultCity: 'London Central', sampleDigits: '7712 894012' },
+    { code: 'US', name: 'United States', flag: '🇺🇸', prefix: '+1', defaultCity: 'New York City', sampleDigits: '212 555 0198' },
+    { code: 'CA', name: 'Canada', flag: '🇨🇦', prefix: '+1', defaultCity: 'Toronto Downtown', sampleDigits: '416 555 0198' },
+    { code: 'DE', name: 'Germany', flag: '🇩🇪', prefix: '+49', defaultCity: 'Berlin Mitte', sampleDigits: '151 23456789' },
+    { code: 'AU', name: 'Australia', flag: '🇦🇺', prefix: '+61', defaultCity: 'Sydney CBD', sampleDigits: '412 345 678' },
   ];
 
   const handleCountrySelect = (preset: { name: string; prefix: string; defaultCity: string; sampleDigits?: string }) => {
@@ -90,6 +100,7 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
 
   if (!isOpen) return null;
 
+  const resolvedCountryName = agentCountry.trim() || detectedCountry.name;
   const enrollUrl = `https://portal.workcraft.local/enroll?id=${generatedId}&pin=${generatedPin}&phone=${encodeURIComponent(agentPhone)}&name=${encodeURIComponent(agentName || 'Agent')}`;
 
   const isWesternGreeting =
@@ -102,7 +113,7 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
     ? `Mr. ${agentName || '[Agent Name]'}`
     : `Assalamu Alaikum ${agentName || '[Agent Name]'}`;
 
-  const whatsappMessage = `${greetingHeader}! Welcome to WORKCRAFT Local Field Force. You have been appointed for ${agentCity || '[City]'}, ${agentCountry || '[Country]'}. Your Agent ID is ${generatedId} and 4-digit Security PIN is ${generatedPin}. Open your secure link to complete enrollment: ${enrollUrl}`;
+  const whatsappMessage = `${greetingHeader}! Welcome to WORKCRAFT Local Field Force. You have been appointed for ${agentCity || '[City]'}, ${resolvedCountryName}. Your Agent ID is ${generatedId} and 4-digit Security PIN is ${generatedPin}. Open your secure link to complete enrollment: ${enrollUrl}`;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,11 +131,16 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
           pin: generatedPin,
           name: agentName.trim(),
           phone: agentPhone.trim(),
-          city: `${agentCity.trim()}, ${agentCountry}`,
+          city: `${agentCity.trim()}, ${resolvedCountryName}`,
           category: 'Universal (All Salons, Barbershops & Parlors)',
+          countryCode: detectedCountry.code,
+          countryName: resolvedCountryName,
+          countryFlag: detectedCountry.flag,
+          currency: detectedCountry.localCurrency,
+          dialCode: detectedCountry.dialCode,
         });
       }
-    }, 1100);
+    }, 800);
   };
 
   return (
@@ -210,8 +226,13 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
                       pin: generatedPin,
                       name: agentName.trim(),
                       phone: agentPhone.trim(),
-                      city: `${agentCity.trim()}, ${agentCountry}`,
+                      city: `${agentCity.trim()}, ${resolvedCountryName}`,
                       category: 'Universal (All Salons, Barbershops & Parlors)',
+                      countryCode: detectedCountry.code,
+                      countryName: resolvedCountryName,
+                      countryFlag: detectedCountry.flag,
+                      currency: detectedCountry.localCurrency,
+                      dialCode: detectedCountry.dialCode,
                     });
                     onClose();
                   }}
@@ -223,10 +244,28 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
               )}
               <button
                 type="button"
-                onClick={onClose}
-                className="flex-1 min-h-[48px] rounded-xl bg-[#21262D] border border-[#30363D] hover:border-[#484F58] text-[#F0F6FC] px-4 py-3 text-xs font-mono font-bold uppercase transition active:scale-95"
+                onClick={() => {
+                  setDispatchedSuccess(false);
+                  setAgentName('');
+                  setGeneratedId('AGT-' + Math.floor(410 + Math.random() * 500));
+                  setGeneratedPin(Math.floor(1000 + Math.random() * 9000).toString());
+                }}
+                className="min-h-[48px] rounded-xl bg-[#0D3822] border border-[#116329] hover:border-[#3FB950] text-[#3FB950] px-4 py-3 text-xs font-mono font-bold uppercase transition active:scale-95"
               >
-                Close &amp; Return to Hub
+                + Add Another Agent
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDispatchedSuccess(false);
+                  setAgentName('');
+                  setGeneratedId('AGT-' + Math.floor(410 + Math.random() * 500));
+                  setGeneratedPin(Math.floor(1000 + Math.random() * 9000).toString());
+                  onClose();
+                }}
+                className="min-h-[48px] rounded-xl bg-[#21262D] border border-[#30363D] hover:border-[#484F58] text-[#F0F6FC] px-4 py-3 text-xs font-mono font-bold uppercase transition active:scale-95"
+              >
+                Done &amp; View Fleet →
               </button>
             </div>
           </div>
