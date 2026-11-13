@@ -1440,12 +1440,20 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   // Rate Card State strictly locked to the onboarded category (Men's Salon vs Ladies Parlor)
   const [services, setServices] = useState(() => {
     if (onboardedData?.services && onboardedData.services.length > 0) {
-      return onboardedData.services.map((s) => ({
-        id: s.id,
-        name: s.name,
-        price: s.price,
-        active: s.enabled,
-      }));
+      return onboardedData.services.map((s) => {
+        if (s.translations && (s.translations.ur || s.translations.ar)) {
+          SERVICE_TRANSLATIONS[s.name] = {
+            ur: s.translations.ur || s.name,
+            ar: s.translations.ar || s.name,
+          };
+        }
+        return {
+          id: s.id,
+          name: s.name,
+          price: s.price,
+          active: s.enabled,
+        };
+      });
     }
     if (isLadies) {
       return [
@@ -1495,12 +1503,20 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setEndUserLang(onboardedData.language);
     if (onboardedData.services && onboardedData.services.length > 0) {
       setServices(
-        onboardedData.services.map((s) => ({
-          id: s.id,
-          name: s.name,
-          price: s.price,
-          active: s.enabled,
-        }))
+        onboardedData.services.map((s) => {
+          if (s.translations && (s.translations.ur || s.translations.ar)) {
+            SERVICE_TRANSLATIONS[s.name] = {
+              ur: s.translations.ur || s.name,
+              ar: s.translations.ar || s.name,
+            };
+          }
+          return {
+            id: s.id,
+            name: s.name,
+            price: s.price,
+            active: s.enabled,
+          };
+        })
       );
     }
     if (onboardedData.barbers && onboardedData.barbers.length > 0) {

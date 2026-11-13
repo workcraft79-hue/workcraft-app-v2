@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Smartphone,
   MapPin,
@@ -47,15 +47,39 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
+  MessageSquare,
 } from 'lucide-react';
 import { PortalCard } from './PortalCard';
 import { AddNewAgentModal } from './AddNewAgentModal';
+import { SalonWindowPosterPdf, PosterLang } from './SalonWindowPosterPdf';
 
-interface ServiceItem {
+export interface ServiceItem {
   id: string;
   name: string;
   price: number;
   enabled: boolean;
+  translations?: {
+    en?: string;
+    ur?: string;
+    ar?: string;
+  };
+  isAutoTranslating?: boolean;
+}
+
+export interface OnboardedSalonPayload {
+  salonName: string;
+  ownerName: string;
+  phone: string;
+  location: string;
+  coords: string;
+  salonCategory: 'MENS' | 'LADIES';
+  language: ClientOnboardingLanguage;
+  planId: 'STARTER' | 'GROWTH' | 'VIP' | 'CUSTOM';
+  planName: string;
+  setupFee: number;
+  monthlyMaint: number;
+  services: ServiceItem[];
+  barbers: string[];
 }
 
 interface FieldAgentHubProps {
@@ -74,6 +98,10 @@ interface FieldAgentHubProps {
   };
   userRole?: 'FOUNDER' | 'FIELD_AGENT' | 'SALON_OWNER';
   onActiveCountriesChange?: (countries: Array<{ code: string; label: string; flag: string }>) => void;
+  socialCampaignSource?: string | null;
+  initialSalonName?: string;
+  onReturnToFounder?: () => void;
+  onSalonOnboardingComplete?: (data: OnboardedSalonPayload) => void;
 }
 
 const DEFAULT_MENS_SERVICES: ServiceItem[] = [
@@ -1392,8 +1420,107 @@ export const getRegionalPaymentRails = (
   return rails;
 };
 
-export const getLocalizedServiceName = (name: string, lang: ClientOnboardingLanguage) => {
-  if (lang === 'en') return name;
+const CLIENT_SERVICE_GLOSSARY: Array<[RegExp, string, string]> = [
+  [/\bbeard oil treatment\b/i, 'داڑھی آئل ٹریٹمنٹ', 'علاج اللحية بالزيت'],
+  [/\bbeard trim\b/i, 'داڑھی کی کٹائی و سیٹنگ', 'تشذيب وتحديد اللحية'],
+  [/\bbeard sculpt\b/i, 'داڑھی اسکلپٹنگ و خط', 'نحت وتحديد اللحية'],
+  [/\bbeard color\b/i, 'داڑھی کلرنگ', 'صبغ اللحية'],
+  [/\bbeard styling\b/i, 'داڑھی اسٹائلنگ', 'تصفيف اللحية'],
+  [/\bhot towel shave\b/i, 'ہاٹ ٹاول شیو', 'حلاقة بالمنشفة الساخنة'],
+  [/\broyal shave\b/i, 'شاہی شیو', 'حلاقة ملكية'],
+  [/\bexecutive haircut\b/i, 'ایگزیکٹو ہیئر کٹ', 'قص شعر تنفيذي'],
+  [/\bkids haircut\b/i, 'بچوں کا ہیئر کٹ', 'قص شعر للأطفال'],
+  [/\bskin fade\b/i, 'اسکن فیڈ کٹنگ', 'تدريج سكن فيد'],
+  [/\bclassic haircut\b/i, 'کلاسک ہیئر کٹ', 'قص شعر كلاسيكي'],
+  [/\bdeep cleansing facial\b/i, 'ڈیپ کلینزنگ فیشل', 'تنظيف عميق للبشرة'],
+  [/\bhydra\s*facial\b/i, 'ہائیڈرا فیشل', 'جلسة هيدرافيشل'],
+  [/\bgold facial\b/i, 'گولڈ فیشل', 'جلسة الذهب للوجه'],
+  [/\bcharcoal facial\b/i, 'چارکول فیشل', 'تنظيف بشرة بالفحم'],
+  [/\bskin polish\b/i, 'اسکن پالش', 'صنفرة وتفتيح البشرة'],
+  [/\bkeratin treatment\b/i, 'کیراٹین ٹریٹمنٹ', 'علاج الكيراتين للشعر'],
+  [/\bhair protein\b/i, 'ہیئر پروٹین ٹریٹمنٹ', 'بروتين لتقوية الشعر'],
+  [/\bhead massage\b/i, 'سر کا مساج', 'تدليك الرأس'],
+  [/\bshoulder massage\b/i, 'کندھوں کا مساج', 'تدليك الكتفين'],
+  [/\bmanicure\b/i, 'مینی کیور', 'مانيكير'],
+  [/\bpedicure\b/i, 'پیڈی کیور', 'باديكير'],
+  [/\bparty makeup\b/i, 'پارٹی میک اپ', 'مكياج حفلات'],
+  [/\bbridal makeup\b/i, 'برائیڈل میک اپ', 'مكياج عرائس'],
+  [/\bthreading\b/i, 'تھریڈنگ', 'فتلة / تنظيف الحواجب'],
+  [/\bwaxing\b/i, 'ویکسنگ', 'إزالة الشعر بالشمع'],
+  [/\bbleach\b/i, 'اسکن بلیچ', 'تشقير وتفتيح'],
+  [/\bhair color\b/i, 'ہیئر کلر', 'صبغة شعر'],
+  [/\bscalp\b/i, 'اسکیلپ', 'فروة الرأس'],
+  [/\bozone\b/i, 'اوزون', 'أوزون'],
+  [/\bsteam\b/i, 'اسٹیم (بھاپ)', 'بخار'],
+  [/\bfacial\b/i, 'فیشل', 'تنظيف بشرة'],
+  [/\bwash\b/i, 'واش', 'غسيل'],
+  [/\bhaircut\b/i, 'ہیئر کٹ', 'قص شعر'],
+  [/\bshave\b/i, 'شیو', 'حلاقة'],
+  [/\bbeard\b/i, 'داڑھی', 'اللحية'],
+  [/\bhair\b/i, 'بالوں کا', 'الشعر'],
+  [/\boil\b/i, 'آئل', 'زيت'],
+  [/\bmassage\b/i, 'مساج', 'مساج وتدليك'],
+  [/\btreatment\b/i, 'ٹریٹمنٹ', 'علاج'],
+  [/\btrim\b/i, 'ٹرم', 'تشذيب'],
+  [/\bspa\b/i, 'سپا', 'سبا'],
+  [/\bcombo\b/i, 'کومبو پیکیج', 'باقة شاملة'],
+  [/\bpackage\b/i, 'پیکیج', 'باقة'],
+  [/\bstyling\b/i, 'اسٹائلنگ', 'تصفيف'],
+  [/\bscrub\b/i, 'اسکرب', 'سنفرة'],
+  [/\bcleansing\b/i, 'کلینزنگ', 'تنظيف'],
+  [/\bwhitening\b/i, 'وائٹننگ', 'تفتيح'],
+  [/\bdetox\b/i, 'ڈیٹاکس', 'تنقية'],
+  [/\bglow\b/i, 'گلو', 'نضارة'],
+  [/\bpremium\b/i, 'پریمیم', 'فاخر'],
+  [/\bluxury\b/i, 'لگژری', 'ملكي فاخر'],
+  [/\broyal\b/i, 'رائل', 'ملكي'],
+  [/\borganic\b/i, 'آرگینک', 'طبيعي عضوي'],
+  [/\bherbal\b/i, 'ہربل', 'أعشاب طبيعية'],
+  [/\bprotein\b/i, 'پروٹین', 'بروتين'],
+  [/\bkeratin\b/i, 'کیراٹین', 'كيراتين'],
+  [/\bblowdry\b/i, 'بلو ڈرائی', 'سشوار'],
+];
+
+const quickTranslateSalonText = (text: string, lang: 'ur' | 'ar'): string => {
+  let working = text.trim();
+  for (const [pattern, urVal, arVal] of CLIENT_SERVICE_GLOSSARY) {
+    working = working.replace(pattern, lang === 'ur' ? urVal : arVal);
+  }
+  const urMap: Record<string, string> = {
+    a: 'ا', b: 'ب', c: 'ک', d: 'ڈ', e: 'ی', f: 'ف', g: 'گ', h: 'ہ', i: 'ی',
+    j: 'ج', k: 'ک', l: 'ل', m: 'م', n: 'ن', o: 'و', p: 'پ', q: 'ق', r: 'ر',
+    s: 'س', t: 'ٹ', u: 'و', v: 'و', w: 'و', x: 'کس', y: 'ی', z: 'ز',
+  };
+  const arMap: Record<string, string> = {
+    a: 'ا', b: 'ب', c: 'ك', d: 'د', e: 'ي', f: 'ف', g: 'غ', h: 'ه', i: 'ي',
+    j: 'ج', k: 'ك', l: 'ل', m: 'م', n: 'ن', o: 'و', p: 'ب', q: 'ق', r: 'ر',
+    s: 'س', t: 'ت', u: 'و', v: 'ف', w: 'و', x: 'كس', y: 'ي', z: 'ز',
+  };
+  const map = lang === 'ur' ? urMap : arMap;
+  return working
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((tok) => {
+      if (/[a-zA-Z]/.test(tok) && !/^(VIP|HD|24K|LED)$/i.test(tok)) {
+        let out = tok.toLowerCase();
+        out = lang === 'ur'
+          ? out.replace(/sh/g, 'ش').replace(/ch/g, 'چ').replace(/th/g, 'تھ').replace(/kh/g, 'خ').replace(/gh/g, 'غ').replace(/ph/g, 'ف').replace(/oo/g, 'و').replace(/ee/g, 'ی')
+          : out.replace(/sh/g, 'ش').replace(/ch/g, 'تش').replace(/th/g, 'ث').replace(/kh/g, 'خ').replace(/gh/g, 'غ').replace(/ph/g, 'ف').replace(/oo/g, 'و').replace(/ee/g, 'ي');
+        return Array.from(out).map((ch) => map[ch] || ch).join('');
+      }
+      return tok;
+    })
+    .join(' ')
+    .trim();
+};
+
+export const getLocalizedServiceName = (
+  name: string,
+  lang: ClientOnboardingLanguage,
+  customTranslations?: { en?: string; ur?: string; ar?: string }
+) => {
+  if (lang === 'en') return customTranslations?.en || name;
+  if (customTranslations?.[lang]) return customTranslations[lang]!;
   const translations: Record<string, { ur: string; ar: string }> = {
     'Master Haircut': { ur: 'ماسٹر ہیئر کٹ (بالوں کی کٹنگ)', ar: 'قص شعر احترافي (ماستر)' },
     'Skin Fade Styling': { ur: 'اسکن فیڈ اسٹائلنگ (سائیڈ فیڈ)', ar: 'تدريج وتحديد سكن فيد' },
@@ -1418,7 +1545,11 @@ export const getLocalizedServiceName = (name: string, lang: ClientOnboardingLang
     'Bridal Hair Styling & Wash': { ur: 'برائیڈل ہیئر اسٹائلنگ اور واش', ar: 'تصفيف وتسريحات شعر للعرائس' },
     'Luxury HD Bridal Makeup': { ur: 'لگژری ایچ ڈی برائیڈل میک اپ', ar: 'مكياج عرائس سينمائي فاخر' },
   };
-  return translations[name]?.[lang] || name;
+  if (translations[name]?.[lang]) return translations[name][lang];
+  if (/[a-zA-Z]/.test(name)) {
+    return quickTranslateSalonText(name, lang);
+  }
+  return name;
 };
 
 export const getLocalizedPackageName = (name: string, lang: ClientOnboardingLanguage) => {
@@ -1443,40 +1574,42 @@ export const getLocalizedPackageFeatures = (pkgId: string, lang: ClientOnboardin
     switch (pkgId) {
       case 'STARTER':
         return [
-          { title: '24/7 خودکار واٹس ایپ بکنگ بوٹ', included: true },
+          { title: '24/7 خودکار واٹس ایپ بکنگ بوٹ (سروس مینو اور فوری بکنگ)', included: true },
           { title: 'ماہانہ 500 گاہک بکنگز کی گنجائش', included: true },
-          { title: 'بکنگ کا فوری کنفرمیشن و ریمائنڈر میسج', included: true },
-          { title: 'گوگل 5-اسٹار ریویو بوسٹر (غیر فعال)', included: false },
-          { title: 'ویڈیو ڈیلز اور وائرل ریلز (غیر فعال)', included: false },
-          { title: 'ماہانہ 10% مینٹیننس (مفت ہوسٹنگ و بیک اپ)', included: true },
+          { title: 'بکنگ کا فوری واٹس ایپ کنفرمیشن اور ریمائنڈر میسج', included: true },
+          { title: 'باربرز / اسٹائلسٹس چیئر لسٹ اور ٹائم سلاٹس سیٹ اپ', included: true },
+          { title: 'گوگل میپس پن لوکیشن اور سیلون ٹائمنگ آٹو ریپلائی', included: true },
+          { title: 'پرنٹ ایبل سیلون ونڈو پوسٹر اور واٹس ایپ QR کوڈ', included: true },
         ];
       case 'GROWTH':
         return [
-          { title: '24/7 خودکار واٹس ایپ بکنگ بوٹ', included: true },
+          { title: 'اسٹارٹر پیکیج کی تمام سروسز اور فیچرز شامل ہیں', included: true },
           { title: 'ماہانہ 1,500 گاہک بکنگز کی گنجائش', included: true },
           { title: 'گوگل 5-اسٹار ریویو بوسٹر (سروس کے 30 منٹ بعد خودکار)', included: true, highlight: true },
-          { title: 'براہ راست گوگل میپس 5★ فلٹر و ریٹنگ اضافہ', included: true },
-          { title: 'ویڈیو ڈیلز اور وائرل ریلز (غیر فعال)', included: false },
-          { title: 'ماہانہ 10% مینٹیننس اور 60 منٹ ہیلنگ گارنٹی', included: true },
+          { title: 'اسمارٹ ریٹنگ فلٹر (5★ گوگل میپس پر اور کم ریٹنگ پرائیویٹ)', included: true },
+          { title: 'ملٹی باربر وقت تصادم چیک اور متبادل خالی باربر کی تجویز', included: true },
+          { title: 'ریگولر گاہکوں کو 21 تا 30 دن بعد واپسی کا پرائیویٹ واٹس ایپ میسج', included: true },
+          { title: 'بیک اپ سم اور خودکار کنکشن بحالی (60 منٹ سے کم ریکوری)', included: true },
         ];
       case 'VIP':
         return [
-          { title: '24/7 ترجیحی واٹس ایپ بوٹ کلسٹر', included: true },
-          { title: 'ماہانہ 3,000 گاہک بکنگز کی گنجائش', included: true },
-          { title: 'گوگل 5-اسٹار ریویو بوسٹر (VIP ترجیح)', included: true },
-          { title: 'ویڈیو اپلوڈ اور وائرل ڈیلز فیچر انلاکڈ', included: true, highlight: true },
-          { title: '1 ویڈیو ڈیل (1,500 روپے) یا 4 ویڈیو ڈیلز (4,000 روپے ماہانہ)', included: true },
-          { title: '7 تا 10 دن کا ویڈیو کنورژن آڈٹ', included: true },
-          { title: 'ماہانہ 10% مینٹیننس اور ڈیڈیکیٹڈ سپورٹ مینیجر', included: true },
+          { title: 'گروتھ آٹومیشن پیکیج کے تمام فیچرز اور سروسز شامل ہیں', included: true },
+          { title: 'ماہانہ 3,000 گاہک بکنگز کی گنجائش اور VIP ترجیح', included: true },
+          { title: 'ویڈیو ڈیلز اور وائرل ریلز فیچر مکمل انلاکڈ (ویک اینڈ و ہفتہ وار ڈیلز)', included: true, highlight: true },
+          { title: 'لچکدار ویڈیو مہمات: 1 ویڈیو ڈیل (1,500 روپے) یا 4 ویڈیو ڈیلز (4,000 روپے)', included: true },
+          { title: '7 تا 10 دن کا ویڈیو کنورژن آڈٹ اور بکنگ رزلٹ ٹریکنگ', included: true },
+          { title: 'واٹس ایپ براڈکاسٹ اور گاہک واپسی (Win-Back) مہم ٹولز', included: true },
+          { title: 'ڈیڈیکیٹڈ ترجیحی اکاؤنٹ سپورٹ', included: true },
         ];
       case 'CUSTOM':
       default:
         return [
-          { title: 'ملٹی سم گیٹ وے اور کسٹم واٹس ایپ راؤٹنگ', included: true },
-          { title: 'لامحدود بکنگز اور ملٹی برانچ نیٹ ورک کنٹرول', included: true },
-          { title: 'لامحدود گوگل 5-اسٹار پروموشنل مہمات', included: true },
-          { title: 'کسٹم ویڈیو پروڈکشن اور سوشل ریلز پروموشن', included: true },
-          { title: '24/7 ترجیحی سپورٹ اور فوری مدد (10% ماہانہ)', included: true },
+          { title: 'وی آئی پی ایگزیکٹو کے تمام فیچرز اور ملٹی برانچ کنٹرول', included: true },
+          { title: 'ملٹی سم گیٹ وے کلسٹر اور تمام برانچز کی مرکزی راؤٹنگ', included: true, highlight: true },
+          { title: 'لامحدود گاہک بکنگز اور لامحدود برانچ نیٹ ورک کوریج', included: true },
+          { title: 'تمام برانچز کے لیے لامحدود گوگل 5-اسٹار ریویو مہمات', included: true },
+          { title: 'کسٹم ویڈیو ڈیلز پروڈکشن، وائرل پرومو براڈکاسٹ اور کریئیٹر کوآرڈینیشن', included: true },
+          { title: '24/7 ترجیحی انجینئرنگ سپورٹ اور فوری خودکار ریکوری', included: true },
         ];
     }
   }
@@ -1485,40 +1618,42 @@ export const getLocalizedPackageFeatures = (pkgId: string, lang: ClientOnboardin
     switch (pkgId) {
       case 'STARTER':
         return [
-          { title: 'بوت حجز واتساب آلي يعمل على مدار 24/7', included: true },
+          { title: 'بوت حجز واتساب آلي يعمل 24/7 (قائمة الخدمات والأسعار الفورية)', included: true },
           { title: 'سعة استيعاب 500 حجز شهرياً', included: true },
-          { title: 'إشعار وتأكيد فوري للحجوزات', included: true },
-          { title: 'معزز تقييمات جوجل 5 نجوم (غير مدرج)', included: false },
-          { title: 'عروض الفيديو والريلز التسويقية (غير مدرج)', included: false },
-          { title: 'صيانة شهرية 10% (استضافة وضمان تشغيل)', included: true },
+          { title: 'إشعار وتأكيد وتذكير فوري للحجوزات عبر واتساب', included: true },
+          { title: 'إعداد قائمة الحلاقين / المصففين وجدولة الكراسي', included: true },
+          { title: 'رد تلقائي بموقع الصالون على خرائط جوجل وساعات العمل', included: true },
+          { title: 'ملصق واجهة الصالون للطباعة مع رمز QR للحجز المباشر', included: true },
         ];
       case 'GROWTH':
         return [
-          { title: 'بوت واتساب فائق السرعة 24/7', included: true },
+          { title: 'يشمل جميع مميزات وخدمات باقة التأسيس الأولى', included: true },
           { title: 'سعة استيعاب 1,500 حجز شهرياً', included: true },
-          { title: 'معزز تقييمات جوجل 5 نجوم التلقائي (بعد 30 دقيقة)', included: true, highlight: true },
-          { title: 'رفع التقييم المباشر على خرائط جوجل', included: true },
-          { title: 'عروض الفيديو والريلز التسويقية (غير مدرج)', included: false },
-          { title: 'صيانة شهرية 10% مع دعم تعافي في أقل من 60 دقيقة', included: true },
+          { title: 'معزز تقييمات جوجل 5 نجوم التلقائي (بعد 30 دقيقة من الزيارة)', included: true, highlight: true },
+          { title: 'فلتر ذكي للتقييمات (5★ لخرائط جوجل والتقييمات الأقل للمالك فقط)', included: true },
+          { title: 'فحص تعارض مواعيد الحلاقين واقتراح الحلاق المتاح تلقائياً', included: true },
+          { title: 'تذكير تلقائي للعملاء المعتادين كل 21–30 يوماً للعودة بالسعر الكامل', included: true },
+          { title: 'شريحة SIM احتياطية وإصلاح تلقائي للاتصال في أقل من 60 دقيقة', included: true },
         ];
       case 'VIP':
         return [
-          { title: 'بوت واتساب عالي الكثافة والأولوية القصوى', included: true },
-          { title: 'سعة استيعاب 3,000 حجز شهرياً', included: true },
-          { title: 'معزز تقييمات جوجل 5 نجوم الممتاز', included: true },
-          { title: 'فتح ميزة عروض وفيديوهات الصالون التسويقية', included: true, highlight: true },
-          { title: 'عرض فيديو واحد ($15) أو 4 فيديوهات ($40 شهرياً)', included: true },
-          { title: 'تدقيق ومتابعة تفاعل الفيديو لمدة 7-10 أيام', included: true },
-          { title: 'صيانة شهرية 10% ومدير حساب مخصص', included: true },
+          { title: 'يشمل جميع مميزات وخدمات باقة النمو الآلي', included: true },
+          { title: 'سعة استيعاب 3,000 حجز شهرياً بأولوية قصوى', included: true },
+          { title: 'فتح ميزة عروض الفيديو والريلز التسويقية (عروض نهاية الأسبوع والأيام العادية)', included: true, highlight: true },
+          { title: 'حملات مرنة: عرض فيديو واحد ($15) أو 4 عروض فيديو ($40)', included: true },
+          { title: 'تدقيق ومتابعة تفاعل الفيديو وتحويل الحجوزات لمدة 7–10 أيام', included: true },
+          { title: 'أدوات البث الجماعي وحملات استعادة العملاء عبر واتساب', included: true },
+          { title: 'مدير حساب ودعم فني مخصص بأولوية عالية', included: true },
         ];
       case 'CUSTOM':
       default:
         return [
-          { title: 'مجموعة بوابات SIM متعددة وتوزيع للفروع', included: true },
-          { title: 'حجوزات غير محدودة وتغطية لجميع الفروع', included: true },
-          { title: 'حملات تقييمات جوجل غير محدودة', included: true },
-          { title: 'إنتاج حملات فيديو مخصصة وترويج احترافي', included: true },
-          { title: 'دعم تقني مباشر 24/7 بموجب اتفاقية 10%', included: true },
+          { title: 'يشمل جميع مميزات باقة VIP مع إدارة الفروع المتعددة', included: true },
+          { title: 'بوابات SIM متعددة وتوزيع مركزي للرسائل عبر الفروع', included: true, highlight: true },
+          { title: 'حجوزات غير محدودة وتغطية كاملة لشبكة الفروع', included: true },
+          { title: 'حملات تقييمات جوجل 5 نجوم غير محدودة لجميع الفروع', included: true },
+          { title: 'إدارة حملات الفيديو المخصصة وبث العروض التسويقية الفيروسية', included: true },
+          { title: 'دعم هندسي مباشر 24/7 واستعادة فورية تلقائية', included: true },
         ];
     }
   }
@@ -1527,40 +1662,42 @@ export const getLocalizedPackageFeatures = (pkgId: string, lang: ClientOnboardin
   switch (pkgId) {
     case 'STARTER':
       return [
-        { title: '24/7 Autonomous WhatsApp Booking Concierge', included: true },
+        { title: '24/7 Autonomous WhatsApp Booking Concierge & Live Rate Card', included: true },
         { title: '500 salon bookings / month capacity', included: true },
-        { title: 'Instant booking confirmation & reminder SMS', included: true },
-        { title: 'Google 5-Star Review Booster (Disabled)', included: false },
-        { title: 'Viral Video Deals & Reels Feature (Disabled)', included: false },
-        { title: 'Monthly 10% Maintenance (Cloud hosting, auto-healing)', included: true },
+        { title: 'Instant WhatsApp booking confirmation & reminder messages', included: true },
+        { title: 'Staff barber / stylist chair roster & slot scheduling', included: true },
+        { title: 'Google Maps pin & opening hours instant auto-reply', included: true },
+        { title: 'Printable Salon Window Poster PDF & WhatsApp QR Setup', included: true },
       ];
     case 'GROWTH':
       return [
-        { title: '24/7 Autonomous WhatsApp Booking Concierge', included: true },
+        { title: 'Includes all Starter Setup features & services', included: true },
         { title: '1,500 salon bookings / month capacity', included: true },
-        { title: 'Google 5-Star Review Booster (Auto-prompted 30 mins after checkout)', included: true, highlight: true },
-        { title: 'Direct Google Maps 5★ filter & review multiplier', included: true },
-        { title: 'Viral Video Deals & Reels Feature (Disabled)', included: false },
-        { title: 'Monthly 10% Maintenance with 24/7 auto-fix protection', included: true },
+        { title: 'Google 5-Star Review Booster (Auto-sent 30 mins after checkout)', included: true, highlight: true },
+        { title: 'Smart rating router (5★ goes to Google Maps, lower stays private)', included: true },
+        { title: 'Multi-barber conflict check & automatic free barber suggestion', included: true },
+        { title: 'Private 21–30 day regular client return reminders at full rates', included: true },
+        { title: 'Backup SIM failover & 24/7 auto-healing (<60m recovery)', included: true },
       ];
     case 'VIP':
       return [
-        { title: 'Priority Multi-Branch WhatsApp Auto-Reply System', included: true },
-        { title: '3,000 salon bookings / month capacity', included: true },
-        { title: 'Google 5-Star Review Booster (VIP priority)', included: true },
-        { title: 'Viral Video Deals & Reels Feature Unlocked', included: true, highlight: true },
-        { title: '1 video deal ($15 / PKR 1.5k) or 4 video deals ($40 / PKR 4k / mo)', included: true },
-        { title: '7 to 10 day conversion tracking & results', included: true },
-        { title: 'Monthly 10% Maintenance & dedicated account manager', included: true },
+        { title: 'Includes all Growth Automation features & services', included: true },
+        { title: '3,000 salon bookings / month capacity with priority routing', included: true },
+        { title: 'Viral Video Deals & Reels feature unlocked (weekend & weekday deals)', included: true, highlight: true },
+        { title: 'Flexible promo runs: 1 video deal ($15 / PKR 1.5k) or 4 video deals ($40 / PKR 4k)', included: true },
+        { title: '7 to 10 day video conversion tracking & booking audit', included: true },
+        { title: 'WhatsApp broadcast & client win-back promotional tools', included: true },
+        { title: 'Dedicated priority account support', included: true },
       ];
     case 'CUSTOM':
     default:
       return [
-        { title: 'Multi-Branch WhatsApp & Custom Shop Routing', included: true },
-        { title: 'Unlimited salon bookings / multi-branch network', included: true },
-        { title: 'Unlimited Google 5-Star campaigns & viral promo broadcast', included: true },
-        { title: 'Custom video marketing production & creator coordination', included: true },
-        { title: 'Priority 24/7 support & fast auto-recovery (10% monthly)', included: true },
+        { title: 'Includes all VIP Executive features across multi-branch chains', included: true },
+        { title: 'Multi-SIM WhatsApp Gateway Cluster & centralized branch routing', included: true, highlight: true },
+        { title: 'Unlimited salon bookings across your entire branch network', included: true },
+        { title: 'Unlimited Google 5-Star review & feedback campaigns per branch', included: true },
+        { title: 'Custom video marketing production & viral promo broadcast campaigns', included: true },
+        { title: 'Dedicated 24/7 engineering support & instant auto-recovery', included: true },
       ];
   }
 };
@@ -1596,8 +1733,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   initialEnrollAgentData,
   userRole = 'FOUNDER',
   onActiveCountriesChange,
+  socialCampaignSource,
+  initialSalonName,
+  onReturnToFounder,
+  onSalonOnboardingComplete,
 }) => {
-  // Agent Terminal Authentication State
+  const isSelfServeOwner = userRole === 'SALON_OWNER';
+
+  // Agent Terminal Authentication State (always unlocked for self-onboarding Salon Owners)
   const [isAgentAuthenticated, setIsAgentAuthenticated] = useState(true);
   const [agentIdInput, setAgentIdInput] = useState('AGT-409');
   const [agentPinInput, setAgentPinInput] = useState('7892');
@@ -1607,7 +1750,13 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Step 1: Lead Information & Phone Configuration
-  const [salonName, setSalonName] = useState('Seven Cuts Studio');
+  const [salonName, setSalonName] = useState(initialSalonName || 'Seven Cuts Studio');
+  useEffect(() => {
+    if (initialSalonName && currentStep === 1) {
+      setSalonName(initialSalonName);
+    }
+  }, [initialSalonName]);
+
   const [ownerName, setOwnerName] = useState('Hamza Tariq');
   const [selectedDialCode, setSelectedDialCode] = useState('+92');
   const [nationalPhone, setNationalPhone] = useState('3018472910');
@@ -1633,20 +1782,71 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const phoneValidation = validateNationalPhoneForCountry(selectedDialConfig, nationalPhone);
   const addressConflict = checkCityCountryIntegrity(address, phone);
 
-  // Locked Routing Mode: Inside Agent Hub, it is strictly Assisted On-Site Dual Alert
-  const onboardingAssistance = 'ASSISTED';
+  // Routing Mode: Direct Self-Serve for SALON_OWNER vs Assisted On-Site Dual Alert for Agent/Founder
+  const onboardingAssistance = isSelfServeOwner ? 'SELF_SERVE' : 'ASSISTED';
 
-  // Step 4: Alphanumeric Pairing Key (Query 7: WCL-XXXXX) & View Mode (Query 6)
-  const [pairingKey, setPairingKey] = useState('WCL-49201');
-  const [step4ViewMode, setStep4ViewMode] = useState<'QR_SCAN' | 'DIRECT_LINK'>('QR_SCAN');
+  // Step 4: Pairing Key & Mode (Single-Phone 8-Digit Code, QR Scan, or App Link)
+  const [pairingKey, setPairingKey] = useState('8429-1753');
+  const [step4ViewMode, setStep4ViewMode] = useState<'QR_SCAN' | 'DIRECT_LINK' | 'SINGLE_PHONE'>(
+    isSelfServeOwner ? 'SINGLE_PHONE' : 'QR_SCAN'
+  );
+  useEffect(() => {
+    if (isSelfServeOwner) {
+      setStep4ViewMode('SINGLE_PHONE');
+    }
+  }, [isSelfServeOwner]);
+  const [isCopiedPairingKey, setIsCopiedPairingKey] = useState(false);
+  const [isHomeShortcutInstalled, setIsHomeShortcutInstalled] = useState(false);
 
-  // Step 2: Services & Pricing
-  const [serviceCategory, setServiceCategory] = useState<'MENS' | 'LADIES'>('MENS');
+  // Step 2: Services, Category & Barbers Roster
+  const [serviceCategory, setServiceCategory] = useState<'MENS' | 'LADIES'>(() => {
+    try {
+      const savedCat = localStorage.getItem('wcl_salon_category');
+      if (savedCat === 'LADIES' || savedCat === 'MENS') return savedCat;
+    } catch {}
+    return 'MENS';
+  });
+  const handleSelectCategory = (cat: 'MENS' | 'LADIES') => {
+    setServiceCategory(cat);
+    try {
+      localStorage.setItem('wcl_salon_category', cat);
+    } catch {}
+  };
   const [mensServices, setMensServices] = useState<ServiceItem[]>(DEFAULT_MENS_SERVICES);
   const [ladiesServices, setLadiesServices] = useState<ServiceItem[]>(DEFAULT_LADIES_SERVICES);
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePrice, setNewServicePrice] = useState('2000');
   const [isAddingCustomService, setIsAddingCustomService] = useState(false);
+  const [barbersRoster, setBarbersRoster] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('wcl_salon_barbers');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return ['Master Aslam', 'Zahid Hussain', 'Ali Raza'];
+  });
+  const [newBarberInput, setNewBarberInput] = useState('');
+
+  const handleAddBarberOnboarding = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBarberInput.trim()) return;
+    const updated = [...barbersRoster, newBarberInput.trim()];
+    setBarbersRoster(updated);
+    setNewBarberInput('');
+    try {
+      localStorage.setItem('wcl_salon_barbers', JSON.stringify(updated));
+    } catch {}
+  };
+
+  const handleRemoveBarberOnboarding = (barberName: string) => {
+    const updated = barbersRoster.filter((b) => b !== barberName);
+    setBarbersRoster(updated);
+    try {
+      localStorage.setItem('wcl_salon_barbers', JSON.stringify(updated));
+    } catch {}
+  };
 
   // Step 3: Package & Setup Fee Settlement (Domestic PKR vs International USD)
   const [selectedOnboardingPackage, setSelectedOnboardingPackage] = useState<'STARTER' | 'GROWTH' | 'VIP' | 'CUSTOM'>('STARTER');
@@ -2159,28 +2359,16 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
 
 
 
-  // Query 1 & 4: Auto-open enrollment strictly once per Agent ID, never re-open once completed
+  // Query 1: Auto-open enrollment once for new agents, never for already enrolled agents
   React.useEffect(() => {
     if (initialAutoOpenEnrollment || initialEnrollAgentData) {
-      let enrolledIds: string[] = [];
-      let globalEnrolledFlag = false;
-      try {
-        globalEnrolledFlag = localStorage.getItem('wcl_agent_enrolled_v1') === 'true';
-        const rawIds = localStorage.getItem('wcl_enrolled_agent_ids');
-        if (rawIds) {
-          const parsed = JSON.parse(rawIds);
-          if (Array.isArray(parsed)) enrolledIds = parsed;
-        }
-      } catch {}
+      // Check if this agent terminal has already completed Day-1 enrollment
+      const isAlreadyEnrolled =
+        typeof window !== 'undefined' &&
+        localStorage.getItem('wcl_agent_enrolled_v1') === 'true';
 
-      const incomingId = initialEnrollAgentData?.id;
-      const isThisAgentAlreadyEnrolled =
-        (incomingId && enrolledIds.includes(incomingId)) ||
-        (globalEnrolledFlag && !incomingId);
-
-      // Once enrolled, never show enrollment again to that agent—open active Agent Hub directly
-      if (isThisAgentAlreadyEnrolled && userRole === 'FIELD_AGENT') {
-        setIsRemoteEnrollmentWizardOpen(false);
+      // If already enrolled and running in agent mode without new URL query parameters, keep wizard closed
+      if (isAlreadyEnrolled && userRole === 'FIELD_AGENT' && !initialEnrollAgentData?.id) {
         return;
       }
 
@@ -2203,44 +2391,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       if (initialEnrollAgentData?.id) setEnrollAgentId(initialEnrollAgentData.id);
       setIsRemoteEnrollmentWizardOpen(true);
       setEnrollmentStep(1);
-      setIsPwaInstalledConfirmed(false);
     }
   }, [initialAutoOpenEnrollment, initialEnrollAgentData, userRole]);
 
-  // PWA Home Screen Installation Prompt & Automatic Device Detection (Queries 1-3)
+  // PWA Home Screen Installation Prompt (Query 18)
   const [showPwaInstallModal, setShowPwaInstallModal] = useState(false);
   const [isPwaInstalledConfirmed, setIsPwaInstalledConfirmed] = useState(false);
-  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
-
-  const detectedDeviceType = React.useMemo<'ANDROID' | 'IOS' | 'DESKTOP'>(() => {
-    if (typeof navigator === 'undefined') return 'ANDROID';
-    const ua = navigator.userAgent || '';
-    if (/iPad|iPhone|iPod/i.test(ua)) return 'IOS';
-    if (/Android/i.test(ua)) return 'ANDROID';
-    return 'DESKTOP';
-  }, []);
-
-  React.useEffect(() => {
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredInstallPrompt(e);
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-  }, []);
-
-  const triggerAutoDetectedShortcutInstall = async () => {
-    if (deferredInstallPrompt && typeof deferredInstallPrompt.prompt === 'function') {
-      try {
-        await deferredInstallPrompt.prompt();
-        setDeferredInstallPrompt(null);
-      } catch {
-        // Proceed smoothly with shortcut state confirmation
-      }
-    }
-    setIsPwaInstalledConfirmed(true);
-    setShowPwaInstallModal(false);
-  };
 
   // Helper to scale base PKR service prices into local salon currency on country change
   const rescaleServicePricesForCountry = (country: CountryConfig) => {
@@ -2348,27 +2504,81 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     setCurrentStep(2);
   };
 
-  // Custom Service Add Handler
-  const handleAddCustomService = (e: React.FormEvent) => {
+  // Custom Service Add Handler (Auto-detects English & translates into selected onboarding language within seconds)
+  const handleAddCustomService = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newServiceName.trim()) return;
+    const rawName = newServiceName.trim();
+    if (!rawName) return;
+
+    const hasEnglishLetters = /[a-zA-Z]/.test(rawName);
+    const serviceId = `custom_${Date.now()}`;
+    const targetLang = clientOnboardingLanguage;
+
+    const initialTranslations: ServiceItem['translations'] = hasEnglishLetters
+      ? {
+          en: rawName,
+          ur: quickTranslateSalonText(rawName, 'ur'),
+          ar: quickTranslateSalonText(rawName, 'ar'),
+        }
+      : {
+          [targetLang]: rawName,
+        };
 
     const newItem: ServiceItem = {
-      id: `custom_${Date.now()}`,
-      name: newServiceName.trim(),
+      id: serviceId,
+      name: rawName,
       price: parseInt(newServicePrice, 10) || 1500,
       enabled: true,
+      translations: initialTranslations,
+      isAutoTranslating: hasEnglishLetters && targetLang !== 'en',
     };
 
-    if (serviceCategory === 'MENS') {
-      setMensServices((prev) => [...prev, newItem]);
-    } else {
-      setLadiesServices((prev) => [...prev, newItem]);
-    }
+    const setter = serviceCategory === 'MENS' ? setMensServices : setLadiesServices;
+    setter((prev) => [...prev, newItem]);
 
     setNewServiceName('');
     setNewServicePrice('2000');
     setIsAddingCustomService(false);
+
+    if (hasEnglishLetters) {
+      try {
+        const res = await fetch('/api/translate-service', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: rawName,
+            targetLang: targetLang === 'en' ? 'ur' : targetLang,
+          }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            translations?: { en?: string; ur?: string; ar?: string };
+          };
+          setter((prev) =>
+            prev.map((item) =>
+              item.id === serviceId
+                ? {
+                    ...item,
+                    translations: {
+                      ...item.translations,
+                      ...data.translations,
+                    },
+                    isAutoTranslating: false,
+                  }
+                : item
+            )
+          );
+          return;
+        }
+      } catch {
+        // Fallback local glossary translation already populated
+      }
+      setter((prev) =>
+        prev.map((item) =>
+          item.id === serviceId ? { ...item, isAutoTranslating: false } : item
+        )
+      );
+    }
   };
 
   const handleToggleService = (id: string) => {
@@ -2470,18 +2680,26 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     setTimeout(() => {
       setDrawerIsSubmitting(false);
 
-      const commission = activePackage.agentCommission;
+      const commission = isSelfServeOwner ? 0 : activePackage.agentCommission;
       let newRemainingDebt = cashLiabilityHeld;
       let commissionAdjusted = false;
 
-      // Option A Net-Adjustment
-      if (cashLiabilityHeld > 0 && detectedCountry.isDomestic) {
-        newRemainingDebt = Math.max(0, cashLiabilityHeld - commission);
-        setCashLiabilityHeld(newRemainingDebt);
-        commissionAdjusted = true;
+      // Track Pakistan physical cash collection + Option A Net-Adjustment (Agent/Founder only; never Self-Onboarding)
+      if (!isSelfServeOwner && detectedCountry.isDomestic) {
+        if (setupPaymentMethod === 'Cash Collection') {
+          newRemainingDebt = cashLiabilityHeld + activePackage.setupFee;
+          setCashLiabilityHeld(newRemainingDebt);
+          if (salonName.trim()) {
+            setCashLiabilitySalon(salonName.trim());
+          }
+        } else if (cashLiabilityHeld > 0) {
+          newRemainingDebt = Math.max(0, cashLiabilityHeld - commission);
+          setCashLiabilityHeld(newRemainingDebt);
+          commissionAdjusted = true;
+        }
       }
 
-      if (setupPaymentMethod === 'Cash Collection' && onCashCollected) {
+      if (!isSelfServeOwner && setupPaymentMethod === 'Cash Collection' && onCashCollected) {
         onCashCollected(activePackage.setupFee, salonName);
       }
 
@@ -2496,13 +2714,19 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
         currencyPrefix: activePackage.prefix,
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         sha256Proof: 'sha256:' + (thumbprintHash || Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)),
-        recipientRoute: isIntl
+        recipientRoute: isSelfServeOwner
+          ? clientOnboardingLanguage === 'ur'
+            ? `100% براہِ راست ورک کرافٹ اکاؤنٹ (${phone}) · صفر ایجنٹ کمیشن`
+            : clientOnboardingLanguage === 'ar'
+            ? `100% مباشرة لحساب WORKCRAFT الرسمي (${phone}) · بدون عمولة وكيل`
+            : `100% Direct to WORKCRAFT Official Account (${phone}) · Zero Agent Commission`
+          : isIntl
           ? `Same-Currency Direct Split: 20% (${activePackage.prefix}${commission.toLocaleString()}) ➔ Agent Local ${activePackage.currency} Account · 80% (${activePackage.prefix}${workcraftShare.toLocaleString()}) ➔ WORKCRAFT (Zero Double FX Loss)`
           : 'Central SIM Gateway Dual Dispatch (Salon Owner + Field Agent Kamran Tariq)',
         commissionAdjusted,
         commissionAmount: commission,
         remainingCashOwed: newRemainingDebt,
-        isSameCurrencySplit: isIntl,
+        isSameCurrencySplit: !isSelfServeOwner && isIntl,
         workcraftNetAmount: workcraftShare,
         status: 'paid' as const,
       };
@@ -2510,7 +2734,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       setVerifiedPaymentData(receiptPayload);
       setIsPaymentVerified(true); // Unlocks the state machine guard: status: paid!
       setIsPaymentDrawerOpen(false);
-      setCurrentStep(4); // Advance to Step 4 QR pairing!
+      setCurrentStep(4); // Advance to Step 4 WhatsApp pairing!
     }, 1100);
   };
 
@@ -2549,7 +2773,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const totalSalonsOnboarded = 19;
   const isHubRtl = agentLanguage === 'ur' || agentLanguage === 'ur_roman' || agentLanguage === 'ar';
 
-  if (!isAgentAuthenticated) {
+  if (!isAgentAuthenticated && !isSelfServeOwner) {
     return (
       <div className="max-w-md mx-auto my-8 mb-28 lg:mb-10 p-6 sm:p-7 rounded-3xl border border-[#30363D] bg-[#161B22] space-y-6 animate-in zoom-in-95">
         <div className="text-center space-y-2">
@@ -2634,268 +2858,325 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     );
   }
 
+  const effectiveHubView = isSelfServeOwner
+    ? 'ONBOARDING'
+    : userRole === 'FOUNDER' && activeHubView === 'PROFILE'
+    ? 'ONBOARDING'
+    : activeHubView;
+
   return (
     <div className="space-y-6 pb-28 lg:pb-10 min-w-0">
-      {/* 1. FIELD AGENT COMMAND HUB & OPERATIONAL ACTIONS (QUERIES 4 & 5) */}
-      <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-4 overflow-hidden">
-        {/* Top Header Row: Operational Hub Branding (Left) & Top-Right Language Switcher + Terminal Controls (Right) */}
+      {/* SELF-ONBOARDING HEADER (Shown ONLY for SALON_OWNER self-signup; Field Agent Hub buttons strictly hidden) */}
+      {isSelfServeOwner ? (
         <div
-          dir={isHubRtl ? 'rtl' : 'ltr'}
-          className={`flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#21262D] pb-3.5 ${
-            isHubRtl ? 'text-right' : 'text-left'
+          dir={clientOnboardingLanguage === 'en' ? 'ltr' : 'rtl'}
+          className={`rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            clientOnboardingLanguage === 'en' ? 'text-left' : 'text-right'
           }`}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-start gap-3 min-w-0">
             <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-[#21262D] border border-[#06B6D4]/40 text-[#06B6D4]">
-              <Smartphone className="size-5" />
+              <Scissors className="size-5" />
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-black text-[#F0F6FC] tracking-wide">
-                  {agentLanguage === 'ur' ? 'فیلڈ ایجنٹ پورٹل' : agentLanguage === 'ar' ? 'بوابة الوكيل الميداني' : 'Field Agent Hub'}
+                  {clientOnboardingLanguage === 'ur'
+                    ? 'سیلون آن لائن رجسٹریشن پورٹل'
+                    : clientOnboardingLanguage === 'ar'
+                    ? 'بوابة التسجيل الذاتي للصالون'
+                    : 'Salon Self-Onboarding Setup'}
                 </h2>
-                <span className="rounded-full bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[9px] font-mono font-bold text-[#3FB950]">
-                  {agentLanguage === 'ur' ? 'واٹس ایپ آٹو سنک فعال' : agentLanguage === 'ar' ? 'مزامنة واتساب التلقائية نشطة' : 'WhatsApp Auto-Sync Active'}
-                </span>
+                {socialCampaignSource && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[#0D3822] border border-[#116329] px-2.5 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
+                    <Sparkles className="size-3 shrink-0" />
+                    <span>Auto-Tagged Lead: {socialCampaignSource} · Bypassing Admin Screens ✓</span>
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-[#8B949E] font-mono mt-0.5">
-                {agentLanguage === 'ur'
-                  ? 'نیا سیلون شامل کریں، واٹس ایپ جوڑیں اور اپنی کمیشن دیکھیں'
-                  : agentLanguage === 'ar'
-                  ? 'إضافة صالون جديد، ربط واتساب، ومتابعة عمولتك'
-                  : 'Add Salons · Link WhatsApp · Track Commissions'}
+              <p className="text-xs text-[#8B949E] font-sans mt-1 leading-relaxed">
+                {clientOnboardingLanguage === 'ur'
+                  ? '4 آسان مراحل مکمل کریں (معلومات، سروسز و باربرز، پیکیج ادائیگی، اور واٹس ایپ لنک) تاکہ آپ کا ذاتی سیلون ڈیش بورڈ لائیو ہو سکے۔'
+                  : clientOnboardingLanguage === 'ar'
+                  ? 'أكمل 4 خطوات سريعة (البيانات، الخدمات والحلاقون، الباقة والدفع، وربط واتساب) لتفعيل لوحة تحكم صالونك فوراً.'
+                  : 'Complete the 4 guided setup steps below (Salon Info, Service Menu & Staff, Package Payment, and WhatsApp Link) to activate your private Salon Owner Dashboard.'}
               </p>
             </div>
           </div>
 
-          {/* Top-Right Language Switcher & App Actions */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {/* Language Switcher */}
-            <div className="flex items-center rounded-xl bg-[#0D1117] border border-[#30363D] p-1 text-xs font-mono">
-              <span className="px-1.5 text-[#6E7681] flex items-center gap-1">
-                <Globe className="size-3.5 text-[#06B6D4]" />
-              </span>
+            {onReturnToFounder && (
               <button
                 type="button"
-                onClick={() => {
-                  setAgentLanguage('en');
-                  setEnrollmentLang('en');
-                }}
-                className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'en' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                onClick={onReturnToFounder}
+                className="min-h-[40px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-3.5 py-2 text-xs font-mono font-bold transition"
               >
-                EN
+                ← Return to Founder
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAgentLanguage('ur');
-                  setEnrollmentLang('ur_roman');
-                }}
-                className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'ur' || agentLanguage === 'ur_roman' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
-              >
-                اردو
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAgentLanguage('ar');
-                  setEnrollmentLang('ar');
-                }}
-                className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'ar' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
-              >
-                العربية
-              </button>
-            </div>
-
-            {/* Query 5: Lock & Save App buttons shown strictly for Field Agent mobile terminals */}
-            {userRole === 'FIELD_AGENT' && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setIsAgentAuthenticated(false)}
-                  className="min-h-[40px] rounded-lg px-2.5 py-1.5 text-xs font-mono text-[#8B949E] hover:text-[#D29922] transition flex items-center gap-1 border border-[#30363D] bg-[#21262D] hover:border-[#D29922]"
-                  title="Lock App & Logout"
-                >
-                  <Lock className="size-3.5" />
-                  <span>{agentLanguage === 'ur' ? 'لاک' : agentLanguage === 'ar' ? 'قفل' : 'Lock'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowPwaInstallModal(true)}
-                  className="min-h-[40px] rounded-lg px-2.5 py-1.5 text-xs font-mono border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 text-[#3FB950] transition flex items-center gap-1"
-                  title="Save WorkCraft to Phone Home Screen"
-                >
-                  <Download className="size-3.5" />
-                  <span>{agentLanguage === 'ur' ? 'ایپ محفوظ کریں' : agentLanguage === 'ar' ? 'حفظ التطبيق' : 'Save App'}</span>
-                </button>
-              </>
             )}
-
             {onClose && (
               <button
+                type="button"
                 onClick={onClose}
                 className="min-h-[40px] rounded-lg p-1.5 text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#21262D] transition"
-                title="Close Hub"
+                title="Close"
               >
                 <X className="size-5" />
               </button>
             )}
           </div>
         </div>
-
-        {/* Standardized Operational Button Sequence (Query 3 & 5):
-            - When userRole === 'FOUNDER': Show all 6 operational buttons:
-              1. + Add New Field Agent
-              2. Agent Enrollment Link
-              3. Onboard a Salon & Pairing Terminal
-              4. Active Fleet Dossier
-              5. Node Repair & Diagnostics
-              6. Commission Ledger (Founder 3-way breakdown)
-            - When userRole === 'FIELD_AGENT': Strictly hide '+ Add New Field Agent' and 'Active Fleet Dossier'.
-              Shows:
-              1. Agent Enrollment Link
-              2. Onboard a Salon & Pairing Terminal
-              3. My Commission Ledger (Agent personal commission only)
-              4. Node Repair & Diagnostics
-        */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* 1. Add New Field Agent (Founder-Only Privilege) */}
-          {userRole === 'FOUNDER' && (
-            <button
-              type="button"
-              onClick={() => setIsAddAgentModalOpen(true)}
-              className="min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] shadow-md transition active:scale-95 flex items-center gap-1.5"
-              title="Founder: Add New Field Agent & Dispatch WhatsApp Invitation"
-            >
-              <UserPlus className="size-3.5 text-[#0D1117]" />
-              <span>+ Add New Field Agent</span>
-            </button>
-          )}
-
-          {/* 2. Agent Enrollment Link (Accessible to both Founder & Agent) */}
-          <button
-            type="button"
-            onClick={() => setIsRemoteEnrollmentWizardOpen(true)}
-            className="min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold border border-[#06B6D4]/50 bg-[#21262D] hover:border-[#06B6D4] text-[#06B6D4] shadow-md transition active:scale-95 flex items-center gap-1.5"
-            title="Launch Day-1 Remote Agent Enrollment Wizard"
-          >
-            <Sparkles className="size-3.5 text-[#06B6D4]" />
-            <span>Agent Enrollment Link</span>
-          </button>
-
-          {/* 3. Onboard a Salon & Pairing Terminal (Unified Single Flow - Query 3) */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveHubView('ONBOARDING');
-              setCurrentStep(1);
-            }}
-            className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-              activeHubView === 'ONBOARDING'
-                ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
-                : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
+      ) : (
+        /* 1. FIELD AGENT COMMAND HUB & OPERATIONAL ACTIONS (AGENT & FOUNDER ONLY) */
+        <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-4 overflow-hidden">
+          {/* Top Header Row: Operational Hub Branding (Left) & Top-Right Language Switcher + Terminal Controls (Right) */}
+          <div
+            dir={isHubRtl ? 'rtl' : 'ltr'}
+            className={`flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#21262D] pb-3.5 ${
+              isHubRtl ? 'text-right' : 'text-left'
             }`}
-            title="Launch 4-Step Salon Lead Onboarding & Instant QR Pairing Handshake"
           >
-            <Scissors className="size-3.5" />
-            <span>{agentLanguage === 'ur' ? 'سیلون آن بورڈنگ اور پیئرنگ' : agentLanguage === 'ar' ? 'تهيئة الصالون والربط' : 'Onboard a Salon & Pairing'}</span>
-          </button>
+            <div className="flex items-center gap-3">
+              <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-[#21262D] border border-[#06B6D4]/40 text-[#06B6D4]">
+                <Smartphone className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base font-black text-[#F0F6FC] tracking-wide">
+                    {agentLanguage === 'ur' ? 'فیلڈ ایجنٹ پورٹل' : agentLanguage === 'ar' ? 'بوابة الوكيل الميداني' : 'Field Agent Hub'}
+                  </h2>
+                  <span className="rounded-full bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[9px] font-mono font-bold text-[#3FB950]">
+                    {agentLanguage === 'ur' ? 'واٹس ایپ آٹو سنک فعال' : agentLanguage === 'ar' ? 'مزامنة واتساب التلقائية نشطة' : 'WhatsApp Auto-Sync Active'}
+                  </span>
+                </div>
+                <p className="text-xs text-[#8B949E] font-mono mt-0.5">
+                  {agentLanguage === 'ur'
+                    ? 'نیا سیلون شامل کریں، واٹس ایپ جوڑیں اور اپنی کمیشن دیکھیں'
+                    : agentLanguage === 'ar'
+                    ? 'إضافة صالون جديد، ربط واتساب، ومتابعة عمولتك'
+                    : 'Add Salons · Link WhatsApp · Track Commissions'}
+                </p>
+              </div>
+            </div>
 
-          {/* 4. Active Fleet Dossier (Founder-Only Privilege) */}
-          {userRole === 'FOUNDER' && (
+            {/* Top-Right Language Switcher & App Actions */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {/* Language Switcher */}
+              <div className="flex items-center rounded-xl bg-[#0D1117] border border-[#30363D] p-1 text-xs font-mono">
+                <span className="px-1.5 text-[#6E7681] flex items-center gap-1">
+                  <Globe className="size-3.5 text-[#06B6D4]" />
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAgentLanguage('en');
+                    setEnrollmentLang('en');
+                  }}
+                  className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'en' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                >
+                  EN
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAgentLanguage('ur');
+                    setEnrollmentLang('ur_roman');
+                  }}
+                  className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'ur' || agentLanguage === 'ur_roman' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                >
+                  اردو
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAgentLanguage('ar');
+                    setEnrollmentLang('ar');
+                  }}
+                  className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${agentLanguage === 'ar' ? 'bg-[#D29922] text-[#0D1117] font-bold' : 'text-[#8B949E] hover:text-[#F0F6FC]'}`}
+                >
+                  العربية
+                </button>
+              </div>
+
+              {/* Query 5: Lock & Save App buttons shown strictly for Field Agent mobile terminals */}
+              {userRole === 'FIELD_AGENT' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsAgentAuthenticated(false)}
+                    className="min-h-[40px] rounded-lg px-2.5 py-1.5 text-xs font-mono text-[#8B949E] hover:text-[#D29922] transition flex items-center gap-1 border border-[#30363D] bg-[#21262D] hover:border-[#D29922]"
+                    title="Lock App & Logout"
+                  >
+                    <Lock className="size-3.5" />
+                    <span>{agentLanguage === 'ur' ? 'لاک' : agentLanguage === 'ar' ? 'قفل' : 'Lock'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPwaInstallModal(true)}
+                    className="min-h-[40px] rounded-lg px-2.5 py-1.5 text-xs font-mono border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 text-[#3FB950] transition flex items-center gap-1"
+                    title="Save WorkCraft to Phone Home Screen"
+                  >
+                    <Download className="size-3.5" />
+                    <span>{agentLanguage === 'ur' ? 'ایپ محفوظ کریں' : agentLanguage === 'ar' ? 'حفظ التطبيق' : 'Save App'}</span>
+                  </button>
+                </>
+              )}
+
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  className="min-h-[40px] rounded-lg p-1.5 text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#21262D] transition"
+                  title="Close Hub"
+                >
+                  <X className="size-5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* 1. Add New Field Agent (Founder-Only Privilege) */}
+            {userRole === 'FOUNDER' && (
+              <button
+                type="button"
+                onClick={() => setIsAddAgentModalOpen(true)}
+                className="min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] shadow-md transition active:scale-95 flex items-center gap-1.5"
+                title="Founder: Add New Field Agent & Dispatch WhatsApp Invitation"
+              >
+                <UserPlus className="size-3.5 text-[#0D1117]" />
+                <span>+ Add New Field Agent</span>
+              </button>
+            )}
+
+            {/* 2. Agent Enrollment Link (Field Agent Day-1 Flow Only; Founder uses + Add New Field Agent) */}
+            {userRole === 'FIELD_AGENT' && (
+              <button
+                type="button"
+                onClick={() => setIsRemoteEnrollmentWizardOpen(true)}
+                className="min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold border border-[#06B6D4]/50 bg-[#21262D] hover:border-[#06B6D4] text-[#06B6D4] shadow-md transition active:scale-95 flex items-center gap-1.5"
+                title="Launch Day-1 Remote Agent Enrollment Wizard"
+              >
+                <Sparkles className="size-3.5 text-[#06B6D4]" />
+                <span>Agent Enrollment Link</span>
+              </button>
+            )}
+
+            {/* 3. Onboard a Salon & Pairing Terminal (Unified Single Flow - Query 3) */}
             <button
               type="button"
-              onClick={() => setActiveHubView('FLEET')}
+              onClick={() => {
+                setActiveHubView('ONBOARDING');
+                setCurrentStep(1);
+              }}
               className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                activeHubView === 'FLEET'
+                activeHubView === 'ONBOARDING'
+                  ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
+                  : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
+              }`}
+              title="Launch 4-Step Salon Lead Onboarding & Instant QR Pairing Handshake"
+            >
+              <Scissors className="size-3.5" />
+              <span>{agentLanguage === 'ur' ? 'سیلون آن بورڈنگ اور پیئرنگ' : agentLanguage === 'ar' ? 'تهيئة الصالون والربط' : 'Onboard a Salon & Pairing'}</span>
+            </button>
+
+            {/* 4. Active Fleet Dossier (Founder-Only Privilege) */}
+            {userRole === 'FOUNDER' && (
+              <button
+                type="button"
+                onClick={() => setActiveHubView('FLEET')}
+                className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                  activeHubView === 'FLEET'
+                    ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
+                    : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
+                }`}
+              >
+                <Smartphone className="size-3.5" />
+                <span>{agentLanguage === 'ur' ? 'ایکٹیو فلیٹ ڈوزیئر' : agentLanguage === 'ar' ? 'ملفات الوكلاء' : 'Active Fleet Dossier'}</span>
+              </button>
+            )}
+
+            {/* 5. Fix Salon Connection */}
+            <button
+              type="button"
+              onClick={() => setActiveHubView('RE_PAIR')}
+              className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                activeHubView === 'RE_PAIR'
                   ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
                   : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
               }`}
             >
-              <Smartphone className="size-3.5" />
-              <span>{agentLanguage === 'ur' ? 'ایکٹیو فلیٹ ڈوزیئر' : agentLanguage === 'ar' ? 'ملفات الوكلاء' : 'Active Fleet Dossier'}</span>
+              <ShieldAlert className={`size-3.5 ${activeHubView === 'RE_PAIR' ? 'text-[#0D1117]' : 'text-[#D29922]'}`} />
+              <span>{agentLanguage === 'ur' ? 'سیلون کنکشن درست کریں' : agentLanguage === 'ar' ? 'إصلاح اتصال الصالون' : 'Fix Salon Connection'}</span>
             </button>
-          )}
 
-          {/* 5. Fix Salon Connection */}
-          <button
-            type="button"
-            onClick={() => setActiveHubView('RE_PAIR')}
-            className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-              activeHubView === 'RE_PAIR'
-                ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
-                : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
-            }`}
-          >
-            <ShieldAlert className={`size-3.5 ${activeHubView === 'RE_PAIR' ? 'text-[#0D1117]' : 'text-[#D29922]'}`} />
-            <span>{agentLanguage === 'ur' ? 'سیلون کنکشن درست کریں' : agentLanguage === 'ar' ? 'إصلاح اتصال الصالون' : 'Fix Salon Connection'}</span>
-          </button>
+            {/* 6. My Profile & Payout Details (Pure Field Agent Only · Biometric-Locked Edits) */}
+            {userRole === 'FIELD_AGENT' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftAgentPhone(agentWhatsApp);
+                  setDraftAgentTerritory(agentTerritory);
+                  setDraftAgentRegion(agentOperatingRegion);
+                  setDraftAgentPayoutMethod(agentPayoutMethod);
+                  setDraftAgentBankName(agentBankName);
+                  setDraftAgentPayoutAccount(agentPayoutAccount);
+                  setDraftAgentPayoutTitle(agentPayoutTitle);
+                  setDraftAgentIban(agentIban);
+                  setPayoutSaveStatus(null);
+                  setActiveHubView('PROFILE');
+                }}
+                className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                  activeHubView === 'PROFILE'
+                    ? 'bg-[#D29922] text-[#0D1117] shadow-md'
+                    : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#D29922]'
+                }`}
+                title="Edit mobile, city, country & bank details (requires fresh biometric check)"
+              >
+                <Fingerprint className={`size-3.5 ${activeHubView === 'PROFILE' ? 'text-[#0D1117]' : 'text-[#D29922]'}`} />
+                <span>
+                  {agentLanguage === 'ur'
+                    ? 'میرا پروفائل اور بینک'
+                    : agentLanguage === 'ar'
+                    ? 'ملفي والبنك (بصمة)'
+                    : 'My Profile & Bank (Biometric)'}
+                </span>
+              </button>
+            )}
 
-          {/* 6. My Profile & Payout Details (Biometric-Locked Edits) */}
-          <button
-            type="button"
-            onClick={() => {
-              setDraftAgentPhone(agentWhatsApp);
-              setDraftAgentTerritory(agentTerritory);
-              setDraftAgentRegion(agentOperatingRegion);
-              setDraftAgentPayoutMethod(agentPayoutMethod);
-              setDraftAgentBankName(agentBankName);
-              setDraftAgentPayoutAccount(agentPayoutAccount);
-              setDraftAgentPayoutTitle(agentPayoutTitle);
-              setDraftAgentIban(agentIban);
-              setPayoutSaveStatus(null);
-              setActiveHubView('PROFILE');
-            }}
-            className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-              activeHubView === 'PROFILE'
-                ? 'bg-[#D29922] text-[#0D1117] shadow-md'
-                : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#D29922]'
-            }`}
-            title="Edit mobile, city, country & bank details (requires fresh biometric check)"
-          >
-            <Fingerprint className={`size-3.5 ${activeHubView === 'PROFILE' ? 'text-[#0D1117]' : 'text-[#D29922]'}`} />
-            <span>
-              {agentLanguage === 'ur'
-                ? 'میرا پروفائل اور بینک'
-                : agentLanguage === 'ar'
-                ? 'ملفي والبنك (بصمة)'
-                : 'My Profile & Bank (Biometric)'}
-            </span>
-          </button>
-
-          {/* 7. Commission Ledger (Contextual Label by Role - Query 4) */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveHubView('LEDGER');
-            }}
-            className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 sm:ml-auto ${
-              activeHubView === 'LEDGER'
-                ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
-                : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
-            }`}
-          >
-            <FileText className="size-3.5" />
-            <span>
-              {userRole === 'FIELD_AGENT'
-                ? agentLanguage === 'ur'
-                  ? 'میرا کمیشن لیجر'
+            {/* 7. Commission Ledger (Contextual Label by Role - Query 4) */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveHubView('LEDGER');
+              }}
+              className={`min-h-[40px] rounded-xl px-3.5 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 sm:ml-auto ${
+                activeHubView === 'LEDGER'
+                  ? 'bg-[#06B6D4] text-[#0D1117] shadow-md'
+                  : 'bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] border border-[#30363D] hover:border-[#484F58]'
+              }`}
+            >
+              <FileText className="size-3.5" />
+              <span>
+                {userRole === 'FIELD_AGENT'
+                  ? agentLanguage === 'ur'
+                    ? 'میرا کمیشن لیجر'
+                    : agentLanguage === 'ar'
+                    ? 'سجل عمولتي'
+                    : 'My Commission Ledger'
+                  : agentLanguage === 'ur'
+                  ? 'کمیشن لیجر'
                   : agentLanguage === 'ar'
-                  ? 'سجل عمولتي'
-                  : 'My Commission Ledger'
-                : agentLanguage === 'ur'
-                ? 'کمیشن لیجر'
-                : agentLanguage === 'ar'
-                ? 'سجل العمولات'
-                : 'Commission Ledger'}
-            </span>
-          </button>
+                  ? 'سجل العمولات'
+                  : 'Commission Ledger'}
+              </span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Query 9: Founder Root Kill-Switch Suspended Overlay Screen */}
-      {isAgentSuspendedByFounder && (
+      {/* Query 9: Founder Root Kill-Switch Suspended Overlay Screen (Agent/Founder only) */}
+      {!isSelfServeOwner && isAgentSuspendedByFounder && (
         <div className="rounded-2xl border-2 border-[#da3633] bg-[#4C1C1D] p-5 sm:p-6 text-center space-y-3.5 shadow-2xl backdrop-blur-md animate-in zoom-in-95">
           <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-[#0D1117] border border-[#da3633] text-[#F85149]">
             <AlertOctagon className="size-7" />
@@ -2925,7 +3206,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       {/* ========================================================================= */}
       {/* VIEW A: ONBOARDING SEQUENTIAL WIZARD (STEPS 1 - 4) */}
       {/* ========================================================================= */}
-      {activeHubView === 'ONBOARDING' && (
+      {effectiveHubView === 'ONBOARDING' && (
         <div
           dir={clientOnboardingLanguage === 'en' ? 'ltr' : 'rtl'}
           className={`space-y-6 min-w-0 ${clientOnboardingLanguage === 'en' ? 'text-left' : 'text-right'}`}
@@ -3025,15 +3306,35 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div>
                       <span className="text-[10px] font-mono uppercase tracking-wider text-[#D29922] font-bold">
-                        {t.routingLabel}
+                        {isSelfServeOwner
+                          ? clientOnboardingLanguage === 'ur'
+                            ? 'براہِ راست سیلون مالک سیلف آن بورڈنگ'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'التسجيل الذاتي المباشر لمالك الصالون'
+                            : 'Direct Self-Onboarding Active'
+                          : t.routingLabel}
                       </span>
                       <p className="text-xs text-[#8B949E] font-sans mt-0.5">
-                        {t.routingDesc}
+                        {isSelfServeOwner
+                          ? clientOnboardingLanguage === 'ur'
+                            ? 'تمام واٹس ایپ تصدیقی پیغامات، بکنگ الرٹس اور ڈیش بورڈ لنک براہِ راست آپ کے سیلون نمبر پر بھیجے جائیں گے۔'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'يتم إرسال جميع رسائل التفعيل وتأكيدات الحجز ورابط لوحة التحكم مباشرة إلى رقم واتساب صالونك.'
+                            : 'All booking confirmations, payment receipts, and your private dashboard link are sent directly to your WhatsApp number.'
+                          : t.routingDesc}
                       </p>
                     </div>
                     <div className="px-3 py-1.5 rounded-lg bg-[#0D3822] border border-[#116329] text-[#3FB950] text-xs font-mono font-bold flex items-center gap-1.5 shrink-0">
                       <Radio className="size-3.5 text-[#3FB950] animate-pulse" />
-                      <span>{t.routingBadge}</span>
+                      <span>
+                        {isSelfServeOwner
+                          ? clientOnboardingLanguage === 'ur'
+                            ? '⚡ براہِ راست سیلون مالک کنکشن'
+                            : clientOnboardingLanguage === 'ar'
+                            ? '⚡ تفعيل مباشر لمالك الصالون'
+                            : '⚡ Direct Salon Owner Verification'
+                          : t.routingBadge}
+                      </span>
                     </div>
                   </div>
 
@@ -3370,7 +3671,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <div className="flex items-center rounded-xl bg-[#0D1117] border border-[#30363D] p-1">
                     <button
                       type="button"
-                      onClick={() => setServiceCategory('MENS')}
+                      onClick={() => handleSelectCategory('MENS')}
                       className={`min-h-[36px] rounded-lg px-3 py-1.5 text-xs font-mono font-bold transition ${
                         serviceCategory === 'MENS'
                           ? 'bg-[#06B6D4] text-[#0D1117]'
@@ -3381,7 +3682,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setServiceCategory('LADIES')}
+                      onClick={() => handleSelectCategory('LADIES')}
                       className={`min-h-[36px] rounded-lg px-3 py-1.5 text-xs font-mono font-bold transition ${
                         serviceCategory === 'LADIES'
                           ? 'bg-[#06B6D4] text-[#0D1117]'
@@ -3430,9 +3731,21 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           <Check className="size-3.5 stroke-[3]" />
                         </button>
                         <div>
-                          <p className={`text-xs font-bold ${service.enabled ? 'text-[#F0F6FC]' : 'text-[#6E7681]'}`}>
-                            {getLocalizedServiceName(service.name, clientOnboardingLanguage)}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className={`text-xs font-bold ${service.enabled ? 'text-[#F0F6FC]' : 'text-[#6E7681]'}`}>
+                              {getLocalizedServiceName(service.name, clientOnboardingLanguage, service.translations)}
+                            </p>
+                            {service.isAutoTranslating && clientOnboardingLanguage !== 'en' && (
+                              <span className="text-[10px] font-mono text-[#06B6D4] animate-pulse">
+                                {clientOnboardingLanguage === 'ur' ? 'ترجمہ ہو رہا ہے...' : 'جاري الترجمة...'}
+                              </span>
+                            )}
+                            {!service.isAutoTranslating && service.translations && clientOnboardingLanguage !== 'en' && /[a-zA-Z]/.test(service.name) && (
+                              <span dir="ltr" className="text-[10px] font-mono text-[#8B949E]">
+                                ({service.name})
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -3501,6 +3814,91 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     <span>{t.addCustomService}</span>
                   </button>
                 )}
+
+                {/* Barbers & Stylists Staff Roster (Synced to Live Salon Dashboard) */}
+                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-3">
+                  <div className="flex items-center justify-between border-b border-[#21262D] pb-2">
+                    <span className="text-xs font-mono font-bold text-[#D29922] flex items-center gap-1.5">
+                      <Scissors className="size-3.5 text-[#D29922]" />
+                      <span>
+                        {clientOnboardingLanguage === 'ur'
+                          ? 'سیلون باربرز / عملے کی فہرست'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'قائمة الحلاقين / فريق العمل'
+                          : 'Barbers & Stylists Staff Roster'}
+                      </span>
+                    </span>
+                    <span className="text-[10px] font-mono text-[#06B6D4] bg-[#21262D] px-2 py-0.5 rounded border border-[#30363D]">
+                      {barbersRoster.length}{' '}
+                      {clientOnboardingLanguage === 'ur'
+                        ? 'باربرز'
+                        : clientOnboardingLanguage === 'ar'
+                        ? 'حلاقين'
+                        : 'Barbers'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
+                    {clientOnboardingLanguage === 'ur'
+                      ? 'اپنے سیلون کے باربرز یا ہیئر ڈریسرز کے نام شامل کریں۔ واٹس ایپ بوٹ گاہکوں کو بکنگ کے وقت انھی کے نام دکھائے گا اور آواز سے اناؤنس کرے گا۔'
+                      : clientOnboardingLanguage === 'ar'
+                      ? 'أضف أسماء الحلاقين أو مصففي الشعر في صالونك. سيتم اقتراحهم للعملاء عند الحجز عبر واتساب والإعلان الصوتي عند وصولهم.'
+                      : 'Add your salon barbers or stylists. WhatsApp bot will suggest them to clients during booking and announce their chair bookings aloud.'}
+                  </p>
+
+                  <div className="flex flex-wrap gap-2">
+                    {barbersRoster.map((barber, bIdx) => (
+                      <div
+                        key={`${barber}-${bIdx}`}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1 text-xs font-mono font-bold text-[#F0F6FC]"
+                      >
+                        <span>
+                          {clientOnboardingLanguage === 'ur'
+                            ? `چیئر #${bIdx + 1}: ${barber}`
+                            : clientOnboardingLanguage === 'ar'
+                            ? `كرسي #${bIdx + 1}: ${barber}`
+                            : `Chair #${bIdx + 1}: ${barber}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveBarberOnboarding(barber)}
+                          className="size-4 grid place-items-center rounded text-[#8B949E] hover:text-[#F85149] hover:bg-[#21262D] transition ml-1"
+                          title="Remove"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <form onSubmit={handleAddBarberOnboarding} className="flex gap-2 pt-1">
+                    <input
+                      type="text"
+                      value={newBarberInput}
+                      onChange={(e) => setNewBarberInput(e.target.value)}
+                      placeholder={
+                        clientOnboardingLanguage === 'ur'
+                          ? 'نیا باربر شامل کریں (مثلاً: اویس رضا)'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'اسم الحلاق الجديد (مثال: طارق علي)'
+                          : 'Add new barber (e.g. Tariq Ali)'
+                      }
+                      className="flex-1 min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-3 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                    />
+                    <button
+                      type="submit"
+                      className="min-h-[44px] rounded-lg bg-[#21262D] border border-[#30363D] hover:border-[#06B6D4] text-[#06B6D4] px-3 py-1.5 text-xs font-mono font-bold uppercase transition flex items-center gap-1 shrink-0"
+                    >
+                      <Plus className="size-3.5" />
+                      <span>
+                        {clientOnboardingLanguage === 'ur'
+                          ? 'شامل کریں'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'إضافة'
+                          : 'Add'}
+                      </span>
+                    </button>
+                  </form>
+                </div>
 
                 {/* Step 2 Actions */}
                 <div className="flex items-center justify-between pt-3 border-t border-[#21262D]">
@@ -3600,7 +3998,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                             </div>
                           </div>
 
-                          {/* Mobile Inline Package Slide — Appears Directly Beneath Tapped Card */}
+                          {/* Mobile Inline Package Slide — Shows ONLY Included Features & Services */}
                           {isExpanded && (
                             <div className="lg:hidden rounded-2xl border border-[#06B6D4]/40 bg-[#0D1117] p-3.5 space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-200">
                               <div className="flex items-center justify-between gap-2 border-b border-[#21262D] pb-2">
@@ -3620,33 +4018,23 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                                 </button>
                               </div>
                               <div className="space-y-1.5 text-xs">
-                                {cardFeatures.map((feat, idx) => (
+                                {cardFeatures.filter((f) => f.included).map((feat, idx) => (
                                   <div
                                     key={idx}
                                     className={`p-2 rounded-xl border flex items-center justify-between gap-2 ${
-                                      feat.included
-                                        ? feat.highlight
-                                          ? 'border-[#06B6D4]/40 bg-[#21262D] text-[#F0F6FC]'
-                                          : 'border-[#30363D] bg-[#161B22] text-[#F0F6FC]'
-                                        : 'border-[#21262D] bg-[#0D1117] text-[#484F58] line-through'
+                                      feat.highlight
+                                        ? 'border-[#06B6D4]/40 bg-[#21262D] text-[#F0F6FC]'
+                                        : 'border-[#30363D] bg-[#161B22] text-[#F0F6FC]'
                                     }`}
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
-                                      {feat.included ? (
-                                        <CheckCircle2 className="size-3.5 text-[#3FB950] shrink-0" />
-                                      ) : (
-                                        <X className="size-3.5 text-[#F85149]/70 shrink-0" />
-                                      )}
-                                      <span className={`font-sans truncate ${feat.highlight ? 'font-bold text-[#06B6D4]' : ''}`}>
+                                      <CheckCircle2 className="size-3.5 text-[#3FB950] shrink-0" />
+                                      <span className={`font-sans ${feat.highlight ? 'font-bold text-[#06B6D4]' : ''}`}>
                                         {feat.title}
                                       </span>
                                     </div>
-                                    <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
-                                      feat.included
-                                        ? 'bg-[#0D3822] text-[#3FB950] border border-[#116329]'
-                                        : 'bg-[#21262D] text-[#6E7681]'
-                                    }`}>
-                                      {feat.included ? t.includedLabel : t.notIncludedLabel}
+                                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 bg-[#0D3822] text-[#3FB950] border border-[#116329]">
+                                      {t.includedLabel}
                                     </span>
                                   </div>
                                 ))}
@@ -3659,10 +4047,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   </div>
                 </div>
 
-                {/* Desktop Package Feature Breakdown Accordion (Full 2-Column Layout on Desktop) */}
+                {/* Desktop Package Feature Breakdown Accordion (Full 2-Column Layout — Included Features Only) */}
                 {expandedPackageId && (() => {
                   const targetPkg = currentPackageList.find((p) => p.id === expandedPackageId) || activePackage;
-                  const features = getLocalizedPackageFeatures(targetPkg.id, clientOnboardingLanguage);
+                  const features = getLocalizedPackageFeatures(targetPkg.id, clientOnboardingLanguage).filter((f) => f.included);
 
                   return (
                     <div className="hidden lg:block rounded-2xl border border-[#06B6D4]/40 bg-[#0D1117] p-4 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -3672,7 +4060,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                             {t.featuresTitle}
                           </span>
                           <span className="text-xs font-bold text-[#F0F6FC]">
-                            {getLocalizedPackageName(targetPkg.name, clientOnboardingLanguage)} ({targetPkg.prefix}{targetPkg.setupFee.toLocaleString()} + {targetPkg.prefix}{targetPkg.monthlyMaint.toLocaleString()}/mo)
+                            {getLocalizedPackageName(targetPkg.name, clientOnboardingLanguage)} ({targetPkg.prefix}{targetPkg.setupFee.toLocaleString()})
                           </span>
                         </div>
 
@@ -3691,37 +4079,22 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           <div
                             key={idx}
                             className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition ${
-                              feat.included
-                                ? feat.highlight
-                                  ? 'border-[#06B6D4]/40 bg-[#21262D] text-[#F0F6FC]'
-                                  : 'border-[#30363D] bg-[#161B22] text-[#F0F6FC]'
-                                : 'border-[#21262D] bg-[#0D1117] text-[#484F58] line-through'
+                              feat.highlight
+                                ? 'border-[#06B6D4]/40 bg-[#21262D] text-[#F0F6FC]'
+                                : 'border-[#30363D] bg-[#161B22] text-[#F0F6FC]'
                             }`}
                           >
-                            <div className="flex items-center gap-2">
-                              {feat.included ? (
-                                <CheckCircle2 className="size-4 text-[#3FB950] shrink-0" />
-                              ) : (
-                                <X className="size-4 text-[#F85149]/70 shrink-0" />
-                              )}
+                            <div className="flex items-center gap-2 min-w-0">
+                              <CheckCircle2 className="size-4 text-[#3FB950] shrink-0" />
                               <span className={`font-sans ${feat.highlight ? 'font-bold text-[#06B6D4]' : ''}`}>
                                 {feat.title}
                               </span>
                             </div>
-                            <span className={`text-[9px] font-mono px-2 py-0.5 rounded shrink-0 ${
-                              feat.included
-                                ? 'bg-[#0D3822] text-[#3FB950] border border-[#116329]'
-                                : 'bg-[#21262D] text-[#6E7681]'
-                            }`}>
-                              {feat.included ? t.includedLabel : t.notIncludedLabel}
+                            <span className="text-[9px] font-mono px-2 py-0.5 rounded shrink-0 bg-[#0D3822] text-[#3FB950] border border-[#116329]">
+                              {t.includedLabel}
                             </span>
                           </div>
                         ))}
-                      </div>
-
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#21262D] text-[10px] font-mono text-[#8B949E]">
-                        <span>{t.slaAccordionLeft}</span>
-                        <span className="text-[#D29922]">{t.slaAccordionRight}</span>
                       </div>
                     </div>
                   );
@@ -3843,17 +4216,30 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       </div>
                     </div>
 
-                    {/* Option A Commission Auto Net-Adjustment Feedback (Pakistan Domestic) */}
-                    {verifiedPaymentData.commissionAdjusted && (
+                    {/* Option A Commission Auto Net-Adjustment Feedback (Agent / Founder Pakistan Domestic Only) */}
+                    {!isSelfServeOwner && verifiedPaymentData.commissionAdjusted && (
                       <div className="mt-2 rounded-lg bg-[#0D1117] border border-[#116329] p-2 text-[11px] font-sans text-[#3FB950] leading-relaxed">
                         <strong>{t.optionAOffsetApplied}</strong> PKR {verifiedPaymentData.commissionAmount.toLocaleString()} {t.optionAOffsetDesc} {cashLiabilitySalon}. {t.remainingCashDueLabel} <strong>PKR {verifiedPaymentData.remainingCashOwed.toLocaleString()}</strong>.
                       </div>
                     )}
 
-                    {/* Query 3: Outside-Pakistan Same-Currency Direct Split Receipt Feedback */}
-                    {verifiedPaymentData.isSameCurrencySplit && (
+                    {/* Query 3: Outside-Pakistan Same-Currency Direct Split Receipt Feedback (Agent / Founder Only) */}
+                    {!isSelfServeOwner && verifiedPaymentData.isSameCurrencySplit && (
                       <div className="mt-2 rounded-lg bg-[#0D1117] border border-[#06B6D4]/40 p-2.5 text-[11px] font-sans text-[#06B6D4] leading-relaxed">
                         <strong>Overseas Same-Currency Direct Split (Zero Double FX Loss):</strong> 20% (<strong>{verifiedPaymentData.currencyPrefix}{verifiedPaymentData.commissionAmount.toLocaleString()} {verifiedPaymentData.currency}</strong>) routed straight to Agent local payout account · 80% (<strong>{verifiedPaymentData.currencyPrefix}{(verifiedPaymentData.workcraftNetAmount ?? 0).toLocaleString()} {verifiedPaymentData.currency}</strong>) settled directly to WorkCraft.
+                      </div>
+                    )}
+
+                    {/* Self-Onboarding Zero Commission Confirmation */}
+                    {isSelfServeOwner && (
+                      <div className="mt-2 rounded-lg bg-[#0D1117] border border-[#116329] p-2.5 text-[11px] font-sans text-[#3FB950] leading-relaxed">
+                        {clientOnboardingLanguage === 'ur' ? (
+                          <><strong>براہِ راست سیلون مالک ادائیگی:</strong> مکمل رقم ({verifiedPaymentData.currencyPrefix}{verifiedPaymentData.amount.toLocaleString()}) 100% ورک کرافٹ اکاؤنٹ میں موصول ہوئی (صفر ایجنٹ کمیشن)۔</>
+                        ) : clientOnboardingLanguage === 'ar' ? (
+                          <><strong>دفع مباشر من مالك الصالون:</strong> تم إيداع 100% من المبلغ ({verifiedPaymentData.currencyPrefix}{verifiedPaymentData.amount.toLocaleString()}) مباشرة في حساب WORKCRAFT الرسمي (بدون عمولة وكيل).</>
+                        ) : (
+                          <><strong>Direct Self-Onboarding Settlement:</strong> 100% of your package payment (<strong>{verifiedPaymentData.currencyPrefix}{verifiedPaymentData.amount.toLocaleString()}</strong>) settles straight to WORKCRAFT accounts with <strong>zero agent commission deducted</strong>.</>
+                        )}
                       </div>
                     )}
                   </div>
@@ -3948,12 +4334,30 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <span className="text-[#06B6D4] font-bold">{salonName}</span>
                 </div>
 
-                {/* Handshake Mode Switcher: On-Site QR vs Remote Link & PWA */}
+                {/* Handshake Mode Switcher: Single-Phone 8-Digit Code, On-Site QR, or App Link */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-[#30363D] bg-[#0D1117] p-2.5">
                   <span className="text-[11px] font-mono font-bold text-[#8B949E]">
                     {t.modeLabel}
                   </span>
-                  <div className="flex items-center gap-1 bg-[#161B22] p-1 rounded-lg border border-[#30363D] shrink-0">
+                  <div className="flex flex-wrap items-center gap-1 bg-[#161B22] p-1 rounded-lg border border-[#30363D] shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setStep4ViewMode('SINGLE_PHONE')}
+                      className={`min-h-[36px] px-3 py-1.5 rounded-md text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                        step4ViewMode === 'SINGLE_PHONE'
+                          ? 'bg-[#06B6D4] text-[#0D1117]'
+                          : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                      }`}
+                    >
+                      <Key className="size-3.5" />
+                      <span>
+                        {clientOnboardingLanguage === 'ur'
+                          ? '8 ہندسوں کا کوڈ (سنگل فون)'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'رمز 8 أرقام (هاتف واحد)'
+                          : '8-Digit Code (Single Phone)'}
+                      </span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => setStep4ViewMode('QR_SCAN')}
@@ -3981,8 +4385,142 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   </div>
                 </div>
 
-                {/* Mode A: On-Site QR Scanner */}
-                {step4ViewMode === 'QR_SCAN' ? (
+                {/* Mode 0: Single-Phone 8-Digit Pairing Code (Ideal for Self-Onboarding on 1 Phone) */}
+                {step4ViewMode === 'SINGLE_PHONE' ? (
+                  <div className="space-y-4 animate-in fade-in duration-200">
+                    <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-2 overflow-hidden">
+                      <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#06B6D4]">
+                        <Sparkles className="size-4 shrink-0" />
+                        <span>
+                          {clientOnboardingLanguage === 'ur'
+                            ? 'واٹس ایپ 8 ہندسوں کا پیئرنگ کوڈ تیار ہو گیا'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'تم إنشاء رمز ربط واتساب المكون من 8 أرقام'
+                            : 'WhatsApp 8-Digit Pairing Code Generated'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#8B949E] font-sans leading-relaxed break-words [overflow-wrap:break-word]">
+                        {clientOnboardingLanguage === 'ur'
+                          ? 'اگر آپ ایک ہی موبائل فون سے سیلون آن بورڈ کر رہے ہیں تو آپ کو دوسری اسکرین کی ضرورت نہیں۔ بس اپنے واٹس ایپ کے Linked Devices میں یہ 8 ہندسوں کا کوڈ درج کریں۔'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'لأنك تقوم بالتسجيل من نفس هاتفك المحمول، لا تحتاج لشاشة ثانية. أدخل هذا الرمز المكون من 8 أرقام في الأجهزة المرتبطة بواتساب لتفعيل المساعد التلقائي.'
+                          : 'Onboarding directly from a single mobile phone? You do not need a second screen. Enter this 8-digit code in WhatsApp Linked Devices to authorize the WORKCRAFT cloud concierge.'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-5 text-center space-y-3 overflow-hidden">
+                      <span className="text-[10px] font-mono uppercase tracking-[.2em] text-[#6E7681] block">
+                        {clientOnboardingLanguage === 'ur'
+                          ? 'آپ کا ون ٹائم پیئرنگ کوڈ'
+                          : clientOnboardingLanguage === 'ar'
+                          ? 'رمز الاقتران الخاص بالصالون'
+                          : 'YOUR SINGLE-USE PAIRING CODE'}
+                      </span>
+                      <div
+                        dir="ltr"
+                        className="text-3xl sm:text-4xl font-black font-mono tracking-widest text-[#06B6D4] break-all [overflow-wrap:break-word]"
+                      >
+                        {pairingKey}
+                      </div>
+
+                      <div className="flex items-center justify-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                              navigator.clipboard.writeText(pairingKey);
+                            }
+                            setIsCopiedPairingKey(true);
+                            setTimeout(() => setIsCopiedPairingKey(false), 2500);
+                          }}
+                          className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#21262D] hover:border-[#06B6D4] px-4 py-2 text-xs font-mono font-bold text-[#F0F6FC] transition"
+                        >
+                          {isCopiedPairingKey ? <Check className="size-3.5 text-[#3FB950]" /> : <Copy className="size-3.5 text-[#06B6D4]" />}
+                          <span>
+                            {isCopiedPairingKey
+                              ? clientOnboardingLanguage === 'ur'
+                                ? 'کوڈ کاپی ہو گیا! ✓'
+                                : clientOnboardingLanguage === 'ar'
+                                ? 'تم نسخ الرمز! ✓'
+                                : 'Copied to Clipboard! ✓'
+                              : clientOnboardingLanguage === 'ur'
+                              ? '8 ہندسوں کا کوڈ کاپی کریں'
+                              : clientOnboardingLanguage === 'ar'
+                              ? 'نسخ رمز 8 أرقام'
+                              : 'Copy 8-Digit Code'}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div
+                        className={`pt-2 border-t border-[#21262D] flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono ${
+                          clientOnboardingLanguage === 'en' ? 'text-left' : 'text-right'
+                        }`}
+                      >
+                        <span className="text-[#06B6D4] flex items-center gap-1 font-bold">
+                          <ShieldCheck className="size-3 text-[#06B6D4] shrink-0" />
+                          <span>{t.tokenBoundBadge}</span>
+                        </span>
+                        <span className="text-[#3FB950] font-bold">
+                          {isQrBurned ? t.tokenBurned : t.tokenActive}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 text-xs font-mono space-y-2 overflow-hidden">
+                      <span className="text-[10px] font-bold text-[#D29922] uppercase block">
+                        {clientOnboardingLanguage === 'ur'
+                          ? 'جوڑنے کے 3 آسان مراحل:'
+                          : clientOnboardingLanguage === 'ar'
+                          ? '3 خطوات سهلة للربط:'
+                          : '3 Easy Steps to Connect:'}
+                      </span>
+                      <ol className="list-decimal list-inside space-y-1.5 text-[#8B949E] font-sans">
+                        <li>
+                          {clientOnboardingLanguage === 'ur'
+                            ? 'اس موبائل فون پر واٹس ایپ کھولیں۔'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'افتح تطبيق واتساب على هذا الهاتف.'
+                            : 'Open WhatsApp on this mobile phone.'}
+                        </li>
+                        <li>
+                          {clientOnboardingLanguage === 'ur' ? (
+                            <>
+                              <strong className="text-[#F0F6FC]">Settings ➔ Linked Devices ➔ Link a Device</strong> پر ٹیپ کریں۔
+                            </>
+                          ) : clientOnboardingLanguage === 'ar' ? (
+                            <>
+                              اضغط على <strong className="text-[#F0F6FC]">الإعدادات ➔ الأجهزة المرتبطة ➔ ربط جهاز</strong>.
+                            </>
+                          ) : (
+                            <>
+                              Tap <strong className="text-[#F0F6FC]">Settings ➔ Linked Devices ➔ Link a Device</strong>.
+                            </>
+                          )}
+                        </li>
+                        <li>
+                          {clientOnboardingLanguage === 'ur' ? (
+                            <>
+                              نیچے <strong className="text-[#F0F6FC]">&quot;Link with phone number instead&quot;</strong> پر کلک کر کے کوڈ{' '}
+                              <strong dir="ltr" className="text-[#06B6D4]">{pairingKey}</strong> درج کریں۔
+                            </>
+                          ) : clientOnboardingLanguage === 'ar' ? (
+                            <>
+                              اضغط على <strong className="text-[#F0F6FC]">&quot;الربط برقم الهاتف بدلاً من ذلك&quot;</strong> وأدخل الرمز{' '}
+                              <strong dir="ltr" className="text-[#06B6D4]">{pairingKey}</strong>.
+                            </>
+                          ) : (
+                            <>
+                              Tap <strong className="text-[#F0F6FC]">&quot;Link with phone number instead&quot;</strong> and enter{' '}
+                              <strong dir="ltr" className="text-[#06B6D4] break-all [overflow-wrap:break-word]">{pairingKey}</strong>.
+                            </>
+                          )}
+                        </li>
+                      </ol>
+                    </div>
+                  </div>
+                ) : step4ViewMode === 'QR_SCAN' ? (
+                  /* Mode A: On-Site QR Scanner */
                   <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-5 text-center space-y-4">
                     <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-5 text-slate-900 border-2 border-[#06B6D4]">
                       <svg viewBox="0 0 100 100" className="w-full h-full text-slate-950">
@@ -4098,12 +4636,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   </div>
                 </div>
 
-                {/* Handshake Simulation */}
+                {/* Handshake Confirmation & Onboarding Assets (2 WhatsApp Previews + Window Poster PDF + 1-Tap Shortcut) */}
                 {isPairingSimulated ? (
-                  <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-4 space-y-2 animate-in zoom-in-95">
-                    <div className="flex items-center justify-between text-[#3FB950] text-xs font-mono font-bold">
+                  <div className="rounded-2xl border border-[#116329] bg-[#0D3822] p-4 sm:p-5 space-y-4 animate-in zoom-in-95">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[#3FB950] text-xs font-mono font-bold">
                       <div className="flex items-center gap-2">
-                        <CheckCircle2 className="size-4 text-[#3FB950]" />
+                        <CheckCircle2 className="size-5 text-[#3FB950]" />
                         <span>{t.handshakeSuccess}</span>
                       </div>
                       <span className="text-[10px] text-[#D29922] font-bold bg-[#0D1117] px-2 py-0.5 rounded border border-[#9E6A03]">
@@ -4113,20 +4651,169 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     <p className="text-xs text-[#F0F6FC] font-sans leading-relaxed">
                       {t.handshakeDesc}
                     </p>
-                    <div className="pt-2 flex items-center justify-end">
+
+                    {/* Automated WhatsApp Dispatch 1: Welcome Note & Package Paid */}
+                    <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2 font-mono text-xs overflow-hidden">
+                      <div className="flex items-center justify-between text-[10px] text-[#3FB950] border-b border-[#21262D] pb-1.5">
+                        <span className="font-bold flex items-center gap-1.5">
+                          <MessageSquare className="size-3.5" />
+                          <span>WhatsApp Message 1 · Welcome &amp; Package Paid</span>
+                        </span>
+                        <span className="text-[#8B949E]">Delivered ✓✓</span>
+                      </div>
+                      <div className="rounded-lg bg-[#161B22] p-2.5 border-l-2 border-[#3FB950]">
+                        <p className="text-[#F0F6FC] text-xs font-sans leading-relaxed">
+                          {clientOnboardingLanguage === 'ur' ? (
+                            <>
+                              السلام علیکم! <strong>{salonName}</strong> کو ورک کرافٹ میں خوش آمدید۔ آپ کا{' '}
+                              <strong>{getLocalizedPackageName(activePackage.name, clientOnboardingLanguage)}</strong> پیکیج اور سیٹ اپ فیس (
+                              <strong>{activePackage.prefix}{activePackage.setupFee.toLocaleString()}</strong>) کی تصدیق ہو گئی ہے۔ واٹس ایپ خودکار بکنگ اب 24 گھنٹے لائیو ہے۔
+                            </>
+                          ) : clientOnboardingLanguage === 'ar' ? (
+                            <>
+                              مرحباً بك في وورك كرافت! تم تأكيد دفع باقة{' '}
+                              <strong>{getLocalizedPackageName(activePackage.name, clientOnboardingLanguage)}</strong> ورسوم التأسيس (
+                              <strong>{activePackage.prefix}{activePackage.setupFee.toLocaleString()}</strong>) لصالون <strong>{salonName}</strong>. الحجز عبر واتساب مفعل الآن 24/7.
+                            </>
+                          ) : (
+                            <>
+                              Welcome to WORKCRAFT Local! Your <strong>{activePackage.name}</strong> package setup fee of{' '}
+                              <strong>{activePackage.prefix}{activePackage.setupFee.toLocaleString()}</strong> is verified. 24/7 WhatsApp auto-booking is now live for <strong>{salonName}</strong>.
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Automated WhatsApp Dispatch 2: Private Dashboard Installation Link */}
+                    <div className="rounded-xl border border-[#06B6D4]/40 bg-[#0D1117] p-3.5 space-y-2 font-mono text-xs overflow-hidden">
+                      <div className="flex items-center justify-between text-[10px] text-[#06B6D4] border-b border-[#21262D] pb-1.5">
+                        <span className="font-bold flex items-center gap-1.5">
+                          <Smartphone className="size-3.5" />
+                          <span>WhatsApp Message 2 · Dashboard Installation Link</span>
+                        </span>
+                        <span className="text-[#8B949E]">Delivered ✓✓</span>
+                      </div>
+                      <div className="rounded-lg bg-[#161B22] p-2.5 border-l-2 border-[#06B6D4] space-y-1.5">
+                        <p className="text-xs text-[#F0F6FC] font-sans">
+                          {clientOnboardingLanguage === 'ur'
+                            ? 'اپنا ذاتی سیلون اونر ڈیش بورڈ انسٹال کرنے کے لیے نیچے دیے گئے لنک پر کلک کریں اور ہوم اسکرین پر شارٹ کٹ آئیکن شامل کریں:'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'لتثبيت لوحة تحكم مالك الصالون وإضافة اختصار إلى الشاشة الرئيسية، اضغط على الرابط التالي:'
+                            : 'Tap your secure link to install the Salon Owner Dashboard and add the shortcut icon to your phone home screen:'}
+                        </p>
+                        <div
+                          dir="ltr"
+                          className="p-2 rounded bg-[#0D1117] border border-[#30363D] text-[11px] text-[#06B6D4] break-all font-mono text-left"
+                        >
+                          https://portal.workcraft.local/?role=salon_owner&amp;paired=true
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 1-Click Printable Branded Window Poster & Cabin Pamphlet PDF */}
+                    <SalonWindowPosterPdf
+                      salonName={salonName}
+                      salonCategory={serviceCategory}
+                      whatsappNumber={phone}
+                      location={address}
+                      initialLanguage={clientOnboardingLanguage as PosterLang}
+                    />
+
+                    {/* 1-Tap Mobile Home Screen Shortcut */}
+                    <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img
+                          src="/icon.svg"
+                          alt="WorkCraft Mobile App Icon"
+                          className="size-10 rounded-xl border border-[#9E6A03] shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-[#F0F6FC] leading-snug">
+                            {clientOnboardingLanguage === 'ur' ? (
+                              <>فون کی ہوم اسکرین پر <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> آئیکن شامل کریں</>
+                            ) : clientOnboardingLanguage === 'ar' ? (
+                              <>أضف أيقونة <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> إلى الشاشة الرئيسية للهاتف</>
+                            ) : (
+                              <>Add <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> icon to phone home screen</>
+                            )}
+                          </p>
+                          <p className="text-[10px] text-[#8B949E] font-sans truncate">
+                            {isHomeShortcutInstalled
+                              ? clientOnboardingLanguage === 'ur'
+                                ? 'ہوم اسکرین پر محفوظ ہو گیا ✓'
+                                : clientOnboardingLanguage === 'ar'
+                                ? 'تم الحفظ على الشاشة الرئيسية ✓'
+                                : 'Saved to phone home screen ✓'
+                              : clientOnboardingLanguage === 'ur'
+                              ? 'فون کی ہوم اسکرین پر ایک ٹچ شارٹ کٹ'
+                              : clientOnboardingLanguage === 'ar'
+                              ? 'اختصار بلمسة واحدة على الشاشة الرئيسية'
+                              : '1-Tap launcher shortcut · Instant open'}
+                          </p>
+                        </div>
+                      </div>
+
                       <button
                         type="button"
-                        onClick={() => {
-                          setCurrentStep(1);
-                          setIsPairingSimulated(false);
-                          setIsQrBurned(false);
-                          setIsPaymentVerified(false);
-                          if (onClose) onClose();
-                        }}
-                        className="min-h-[44px] rounded-lg bg-[#D29922] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase hover:bg-[#e0b252]"
+                        onClick={() => setIsHomeShortcutInstalled(true)}
+                        className={`min-h-[44px] px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition shrink-0 border ${
+                          isHomeShortcutInstalled
+                            ? 'bg-[#0D3822] text-[#3FB950] border-[#116329]'
+                            : 'bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] border-[#06B6D4]'
+                        }`}
                       >
-                        {t.completeBtn}
+                        {isHomeShortcutInstalled ? 'Saved ✓' : 'Install Shortcut'}
                       </button>
+                    </div>
+
+                    {/* Final Role-Aware Completion Button */}
+                    <div className="pt-2 flex items-center justify-end">
+                      {isSelfServeOwner && onSalonOnboardingComplete ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSalonOnboardingComplete({
+                              salonName: salonName.trim() || 'Seven Cuts Studio',
+                              ownerName: ownerName.trim() || 'Hamza Tariq',
+                              phone,
+                              location: address.trim() || detectedCountry.defaultAddress,
+                              coords,
+                              salonCategory: serviceCategory,
+                              language: clientOnboardingLanguage,
+                              planId: selectedOnboardingPackage,
+                              planName: activePackage.name,
+                              setupFee: activePackage.setupFee,
+                              monthlyMaint: activePackage.monthlyMaint,
+                              services: activeServices,
+                              barbers: barbersRoster,
+                            });
+                          }}
+                          className="w-full sm:w-auto min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-5 py-3 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center justify-center gap-2"
+                        >
+                          <span>
+                            {clientOnboardingLanguage === 'ur'
+                              ? 'سیٹ اپ مکمل کریں اور لائیو ڈیش بورڈ کھولیں ←'
+                              : clientOnboardingLanguage === 'ar'
+                              ? 'إكمال الإعداد وفتح لوحة التحكم المباشرة ←'
+                              : 'Complete Setup & Open Live Dashboard →'}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCurrentStep(1);
+                            setIsPairingSimulated(false);
+                            setIsQrBurned(false);
+                            setIsPaymentVerified(false);
+                            if (onClose) onClose();
+                          }}
+                          className="min-h-[44px] rounded-lg bg-[#D29922] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase hover:bg-[#e0b252]"
+                        >
+                          {t.completeBtn}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -4161,7 +4848,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       {/* ========================================================================= */}
       {/* VIEW FLEET: COUNTRY-GROUPED AGENT ROSTER & SEARCH (QUERY 1)              */}
       {/* ========================================================================= */}
-      {activeHubView === 'FLEET' && (() => {
+      {effectiveHubView === 'FLEET' && (() => {
         const q = fleetSearchQuery.trim().toLowerCase();
         const filteredAgents = enrolledAgentsList.filter((agent) => {
           const detected = detectCountryFromPhone(agent.phone);
@@ -4413,7 +5100,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       {/* ========================================================================= */}
       {/* VIEW B: FIX SALON CONNECTION + 24/7 AUTO-FIX WATCHDOG (LOCALIZED)          */}
       {/* ========================================================================= */}
-      {activeHubView === 'RE_PAIR' && (() => {
+      {effectiveHubView === 'RE_PAIR' && (() => {
         const isUrdu = agentLanguage === 'ur' || agentLanguage === 'ur_roman';
         const isArabic = agentLanguage === 'ar';
         const repairDir = isUrdu || isArabic ? 'rtl' : 'ltr';
@@ -4856,7 +5543,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       {/* ========================================================================= */}
       {/* VIEW D: BIOMETRIC-LOCKED AGENT PROFILE & PAYOUT EDITOR (LOCALIZED EN/UR/AR) */}
       {/* ========================================================================= */}
-      {activeHubView === 'PROFILE' && (() => {
+      {effectiveHubView === 'PROFILE' && (() => {
         const isUrdu = agentLanguage === 'ur' || agentLanguage === 'ur_roman';
         const isArabic = agentLanguage === 'ar';
         const profileDir = isUrdu || isArabic ? 'rtl' : 'ltr';
@@ -5109,7 +5796,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       {/* ========================================================================= */}
       {/* VIEW C: ROLE-ISOLATED & LOCALIZED COMMISSION LEDGER (QUERY 4)            */}
       {/* ========================================================================= */}
-      {activeHubView === 'LEDGER' && (() => {
+      {effectiveHubView === 'LEDGER' && (() => {
         const isUrdu = agentLanguage === 'ur' || agentLanguage === 'ur_roman';
         const isArabic = agentLanguage === 'ar';
         const ledgerDir = userRole === 'FIELD_AGENT' && (isUrdu || isArabic) ? 'rtl' : 'ltr';
@@ -5717,20 +6404,41 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       ? 'عالمی و یورپی Stripe 3D-Secure کارڈ پروسیسنگ · Apple Pay'
                       : 'Stripe 3D-Secure UK/EU & Global Card Processing · Apple Pay'}
                   </p>
-                  <p className="text-[#3FB950] text-[11px]">
-                    {clientOnboardingLanguage === 'ar'
-                      ? 'تقسيم مباشر بنفس العملة (20% لحساب الوكيل المحلي · 80% لحساب WORKCRAFT بدون خسائر صرف)'
-                      : clientOnboardingLanguage === 'ur'
-                      ? 'اسی کرنسی میں براہ راست تقسیم (20% ایجنٹ کے مقامی اکاؤنٹ میں · 80% WORKCRAFT کو — بغیر FX نقصان)'
-                      : `Same-Currency Direct Split (${activePackage.currency}): 20% to Agent Local Payout · 80% to WORKCRAFT`}
-                  </p>
-                  <p className="text-[10px] text-[#8B949E]">
-                    {clientOnboardingLanguage === 'ar'
-                      ? 'تفعيل فوري للصالون الآن · بدون تحويل عملات مزدوج للوكلاء الدوليين'
-                      : clientOnboardingLanguage === 'ur'
-                      ? 'ٹرمینل فوراً فعال · غیر ملکی ایجنٹس کو ڈبل کرنسی کنورژن سے مکمل تحفظ'
-                      : 'Instant terminal activation granted immediately · Zero double FX conversion loss'}
-                  </p>
+                  {isSelfServeOwner ? (
+                    <>
+                      <p className="text-[#3FB950] text-[11px]">
+                        {clientOnboardingLanguage === 'ar'
+                          ? 'تحويل مباشر 100% إلى حساب WORKCRAFT الرسمي (بدون أي عمولة وكيل)'
+                          : clientOnboardingLanguage === 'ur'
+                          ? '100% براہ راست ادائیگی WORKCRAFT آفیشل اکاؤنٹ میں (صفر ایجنٹ کمیشن)'
+                          : `100% Direct Settlement (${activePackage.currency}) to WORKCRAFT Official Account · Zero Agent Commission`}
+                      </p>
+                      <p className="text-[10px] text-[#8B949E]">
+                        {clientOnboardingLanguage === 'ar'
+                          ? 'تفعيل فوري للصالون الآن · كامل قيمة الباقة تذهب لحساب WORKCRAFT'
+                          : clientOnboardingLanguage === 'ur'
+                          ? 'ٹرمینل فوراً فعال · پیکیج کی مکمل رقم براہ راست WORKCRAFT کو موصول ہوتی ہے'
+                          : 'Instant terminal activation granted immediately · Full package fee settles 100% to WORKCRAFT'}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[#3FB950] text-[11px]">
+                        {clientOnboardingLanguage === 'ar'
+                          ? 'تقسيم مباشر بنفس العملة (20% لحساب الوكيل المحلي · 80% لحساب WORKCRAFT بدون خسائر صرف)'
+                          : clientOnboardingLanguage === 'ur'
+                          ? 'اسی کرنسی میں براہ راست تقسیم (20% ایجنٹ کے مقامی اکاؤنٹ میں · 80% WORKCRAFT کو — بغیر FX نقصان)'
+                          : `Same-Currency Direct Split (${activePackage.currency}): 20% to Agent Local Payout · 80% to WORKCRAFT`}
+                      </p>
+                      <p className="text-[10px] text-[#8B949E]">
+                        {clientOnboardingLanguage === 'ar'
+                          ? 'تفعيل فوري للصالون الآن · بدون تحويل عملات مزدوج للوكلاء الدوليين'
+                          : clientOnboardingLanguage === 'ur'
+                          ? 'ٹرمینل فوراً فعال · غیر ملکی ایجنٹس کو ڈبل کرنسی کنورژن سے مکمل تحفظ'
+                          : 'Instant terminal activation granted immediately · Zero double FX conversion loss'}
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
               {setupPaymentMethod === 'Cash Collection' && (
@@ -5760,14 +6468,30 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               )}
             </div>
 
-            {/* Auto-Detected Dual Alert Recipient Routing Mode */}
-            <div className="mt-3 rounded-xl border border-[#06B6D4]/30 bg-[#0D1117] p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
-              <span className="text-[#06B6D4] font-bold flex items-center gap-1.5">
-                <Radio className="size-3.5 text-[#06B6D4] animate-pulse" />
-                <span>{t.routingAssisted}</span>
-              </span>
-              <span className="text-[#8B949E] text-[10px]">{t.ownerAgentPush}</span>
-            </div>
+            {/* Auto-Detected Recipient Routing Mode (Direct Owner vs Agent+Owner Dual Alert) */}
+            {!isSelfServeOwner ? (
+              <div className="mt-3 rounded-xl border border-[#06B6D4]/30 bg-[#0D1117] p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                <span className="text-[#06B6D4] font-bold flex items-center gap-1.5">
+                  <Radio className="size-3.5 text-[#06B6D4] animate-pulse" />
+                  <span>{t.routingAssisted}</span>
+                </span>
+                <span className="text-[#8B949E] text-[10px]">{t.ownerAgentPush}</span>
+              </div>
+            ) : (
+              <div className="mt-3 rounded-xl border border-[#06B6D4]/30 bg-[#0D1117] p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                <span className="text-[#06B6D4] font-bold flex items-center gap-1.5">
+                  <Radio className="size-3.5 text-[#06B6D4] animate-pulse" />
+                  <span>
+                    {clientOnboardingLanguage === 'ur'
+                      ? 'براہِ راست مالک واٹس ایپ تصدیق فعال'
+                      : clientOnboardingLanguage === 'ar'
+                      ? 'تأكيد مباشر لمالك الصالون عبر واتساب'
+                      : 'Direct Owner WhatsApp Confirmation Active'}
+                  </span>
+                </span>
+                <span className="text-[#8B949E] text-[10px]">{phone}</span>
+              </div>
+            )}
 
             {/* Payer Input Form with Layer 1 Registered Phone Binding */}
             <form onSubmit={handleVerifyDrawerPayment} className="mt-3.5 space-y-3.5">
@@ -5927,98 +6651,159 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 />
               </div>
 
-              {/* Dual Cash Risk Guard & Biometric Hardware Thumbprint */}
-              {setupPaymentMethod === 'Cash Collection' && (
-                <div className="space-y-3">
-                  <div className={`rounded-xl border p-3 font-mono text-xs space-y-1.5 ${
-                    cashLiabilityHeld + activePackage.setupFee > MAX_CASH_CEILING
-                      ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149]'
-                      : 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
-                  }`}>
-                    <div className="flex items-center justify-between font-bold">
-                      <span className="flex items-center gap-1.5">
-                        <AlertTriangle className="size-4 text-[#D29922]" />
-                        <span>{t.cashGuardTitle}</span>
-                      </span>
-                      <span dir="ltr">
-                        PKR {(cashLiabilityHeld + activePackage.setupFee).toLocaleString()} / {MAX_CASH_CEILING.toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-[#0D1117] overflow-hidden">
-                      <div
-                        className={`h-full transition-all ${
-                          cashLiabilityHeld + activePackage.setupFee > MAX_CASH_CEILING
-                            ? 'bg-[#F85149]'
-                            : 'bg-[#D29922]'
-                        }`}
-                        style={{ width: `${Math.min(100, ((cashLiabilityHeld + activePackage.setupFee) / MAX_CASH_CEILING) * 100)}%` }}
-                      />
-                    </div>
-                    <p className="text-[10px] text-[#F0F6FC] font-sans">
-                      {cashLiabilityHeld + activePackage.setupFee > MAX_CASH_CEILING
-                        ? t.cashLimitExceeded
-                        : `${t.cashHeldPrefix} PKR ${cashLiabilityHeld.toLocaleString()}`}
-                    </p>
-                  </div>
+              {/* Dual Cash Risk Guard & Biometric Hardware Thumbprint (Agent / Founder Pakistan Only; never Self-Onboarding) */}
+              {!isSelfServeOwner && setupPaymentMethod === 'Cash Collection' && (() => {
+                const remainingBefore = Math.max(0, MAX_CASH_CEILING - cashLiabilityHeld);
+                const newTotalAfter = cashLiabilityHeld + activePackage.setupFee;
+                const remainingAfter = Math.max(0, MAX_CASH_CEILING - newTotalAfter);
+                const exceedsCeiling = newTotalAfter > MAX_CASH_CEILING;
 
-                  {/* Strict Biometric Hardware Thumbprint Verification */}
-                  <div className={`p-4 rounded-2xl border text-center space-y-2.5 transition ${
-                    isThumbprintVerified
-                      ? 'border-[#116329] bg-[#0D3822]'
-                      : 'border-[#06B6D4]/40 bg-[#0D1117]'
-                  }`}>
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-                      <span className="text-[#F0F6FC] font-bold uppercase flex items-center gap-1.5">
-                        <Fingerprint className="size-4 text-[#06B6D4]" />
-                        <span>{t.biometricTitle}</span>
-                      </span>
-                      <span className="text-[9px] font-bold text-[#D29922] bg-[#3B2E0B] px-2 py-0.5 rounded border border-[#9E6A03]">
-                        {t.zeroPinBadge}
-                      </span>
-                    </div>
+                return (
+                  <div className="space-y-3">
+                    <div className={`rounded-xl border p-3.5 font-mono text-xs space-y-2.5 ${
+                      exceedsCeiling
+                        ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149]'
+                        : 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
+                    }`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2 font-bold">
+                        <span className="flex items-center gap-1.5">
+                          <AlertTriangle className="size-4 text-[#D29922]" />
+                          <span>{t.cashGuardTitle}</span>
+                        </span>
+                        <span dir="ltr" className="text-[#F0F6FC]">
+                          PKR {newTotalAfter.toLocaleString()} / {MAX_CASH_CEILING.toLocaleString()}
+                        </span>
+                      </div>
 
-                    <div className="flex justify-center py-1">
-                      <button
-                        type="button"
-                        disabled={isScanningThumb || isThumbprintVerified || (cashLiabilityHeld + activePackage.setupFee > MAX_CASH_CEILING)}
-                        onClick={() => {
-                          setIsScanningThumb(true);
-                          setTimeout(() => {
-                            setIsScanningThumb(false);
-                            setIsThumbprintVerified(true);
-                            setThumbprintHash('SHA256: 9b8c-02e1-48af-9102-thumb-verified');
-                          }, 900);
-                        }}
-                        className={`relative grid size-16 place-items-center rounded-2xl border-2 transition active:scale-95 ${
-                          isThumbprintVerified
-                            ? 'border-[#3FB950] bg-[#0D3822] text-[#3FB950]'
-                            : isScanningThumb
-                            ? 'border-[#06B6D4] bg-[#21262D] text-[#06B6D4] animate-pulse'
-                            : 'border-[#30363D] bg-[#21262D] text-[#8B949E] hover:border-[#06B6D4] hover:text-[#06B6D4]'
-                        }`}
-                        title={t.pressThumbText}
-                      >
-                        <Fingerprint className={`size-8 ${isScanningThumb ? 'animate-bounce' : ''}`} />
-                        {isThumbprintVerified && (
-                          <span className="absolute -top-1 -right-1 grid size-5 place-items-center rounded-full bg-[#3FB950] text-[#0D1117]">
-                            <Check className="size-3 stroke-[3]" />
+                      <div className="h-2 w-full rounded-full bg-[#0D1117] overflow-hidden">
+                        <div
+                          className={`h-full transition-all ${exceedsCeiling ? 'bg-[#F85149]' : 'bg-[#D29922]'}`}
+                          style={{ width: `${Math.min(100, (newTotalAfter / MAX_CASH_CEILING) * 100)}%` }}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px] bg-[#0D1117]/75 rounded-lg p-2.5 border border-[#9E6A03]/40">
+                        <div>
+                          <span className="text-[#8B949E] block text-[9px] font-sans">
+                            {clientOnboardingLanguage === 'ur'
+                              ? 'پہلے سے آپ کے پاس نقد'
+                              : clientOnboardingLanguage === 'ar'
+                              ? 'النقد المحصل مسبقاً بعهدتك'
+                              : 'Cash in Hand (Before Deal)'}
                           </span>
-                        )}
-                      </button>
+                          <span className="font-bold text-[#F0F6FC]" dir="ltr">
+                            PKR {cashLiabilityHeld.toLocaleString()}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[#8B949E] block text-[9px] font-sans">
+                            {clientOnboardingLanguage === 'ur'
+                              ? 'موجودہ بقایا حد (Limit Remaining)'
+                              : clientOnboardingLanguage === 'ar'
+                              ? 'الحد المتبقي قبل التحصيل'
+                              : 'Remaining Limit (Before Deal)'}
+                          </span>
+                          <span className="font-bold text-[#3FB950]" dir="ltr">
+                            PKR {remainingBefore.toLocaleString()}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[#8B949E] block text-[9px] font-sans">
+                            {clientOnboardingLanguage === 'ur'
+                              ? `اس پیکیج کا کیش (${getLocalizedPackageName(activePackage.name, 'ur')})`
+                              : clientOnboardingLanguage === 'ar'
+                              ? `نقد هذه الباقة (${getLocalizedPackageName(activePackage.name, 'ar')})`
+                              : `This Deal (${activePackage.name})`}
+                          </span>
+                          <span className="font-bold text-[#D29922]" dir="ltr">
+                            + PKR {activePackage.setupFee.toLocaleString()}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[#8B949E] block text-[9px] font-sans">
+                            {clientOnboardingLanguage === 'ur'
+                              ? 'اس ڈیل کے بعد بقایا حد'
+                              : clientOnboardingLanguage === 'ar'
+                              ? 'الحد المتبقي بعد هذه العملية'
+                              : 'Remaining Limit After Collection'}
+                          </span>
+                          <span className={`font-bold ${exceedsCeiling ? 'text-[#F85149]' : 'text-[#06B6D4]'}`} dir="ltr">
+                            {exceedsCeiling ? 'LIMIT EXCEEDED' : `PKR ${remainingAfter.toLocaleString()} left`}
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-[10px] text-[#F0F6FC] font-sans leading-relaxed">
+                        {exceedsCeiling
+                          ? t.cashLimitExceeded
+                          : clientOnboardingLanguage === 'ur'
+                          ? `آپ کے پاس پہلے سے PKR ${cashLiabilityHeld.toLocaleString()} موجود ہیں (PKR ${remainingBefore.toLocaleString()} حد باقی ہے)۔ یہ PKR ${activePackage.setupFee.toLocaleString()} وصول کرنے کے بعد کل کیش PKR ${newTotalAfter.toLocaleString()} ہو جائے گا اور PKR ${remainingAfter.toLocaleString()} حد باقی رہے گی۔`
+                          : clientOnboardingLanguage === 'ar'
+                          ? `لديك حالياً PKR ${cashLiabilityHeld.toLocaleString()} نقداً (متبقي PKR ${remainingBefore.toLocaleString()} من السقف). بعد تحصيل PKR ${activePackage.setupFee.toLocaleString()} سيصبح الإجمالي PKR ${newTotalAfter.toLocaleString()} ويتبقى PKR ${remainingAfter.toLocaleString()}.`
+                          : `You hold PKR ${cashLiabilityHeld.toLocaleString()} in hand (PKR ${remainingBefore.toLocaleString()} remaining out of PKR 50,000). Collecting PKR ${activePackage.setupFee.toLocaleString()} brings total held cash to PKR ${newTotalAfter.toLocaleString()} with PKR ${remainingAfter.toLocaleString()} limit remaining.`}
+                      </p>
                     </div>
 
-                    <p className="text-[11px] font-mono text-center break-all [overflow-wrap:break-word]">
-                      {isScanningThumb ? (
-                        <span className="text-[#06B6D4]">{t.scanningThumbText}</span>
-                      ) : isThumbprintVerified ? (
-                        <span className="text-[#3FB950] font-bold">{t.thumbVerifiedText} (<span dir="ltr">{thumbprintHash}</span>)</span>
-                      ) : (
-                        <span className="text-[#8B949E]">{t.pressThumbText}</span>
-                      )}
-                    </p>
+                    {/* Strict Biometric Hardware Thumbprint Verification */}
+                    <div className={`p-4 rounded-2xl border text-center space-y-2.5 transition ${
+                      isThumbprintVerified
+                        ? 'border-[#116329] bg-[#0D3822]'
+                        : 'border-[#06B6D4]/40 bg-[#0D1117]'
+                    }`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                        <span className="text-[#F0F6FC] font-bold uppercase flex items-center gap-1.5">
+                          <Fingerprint className="size-4 text-[#06B6D4]" />
+                          <span>{t.biometricTitle}</span>
+                        </span>
+                        <span className="text-[9px] font-bold text-[#D29922] bg-[#3B2E0B] px-2 py-0.5 rounded border border-[#9E6A03]">
+                          {t.zeroPinBadge}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-center py-1">
+                        <button
+                          type="button"
+                          disabled={isScanningThumb || isThumbprintVerified || exceedsCeiling}
+                          onClick={() => {
+                            setIsScanningThumb(true);
+                            setDrawerError(null);
+                            setTimeout(() => {
+                              setIsScanningThumb(false);
+                              setIsThumbprintVerified(true);
+                              setThumbprintHash('SHA256: 9b8c-02e1-48af-9102-thumb-verified');
+                            }, 900);
+                          }}
+                          className={`relative grid size-16 place-items-center rounded-2xl border-2 transition active:scale-95 ${
+                            isThumbprintVerified
+                              ? 'border-[#3FB950] bg-[#0D3822] text-[#3FB950]'
+                              : isScanningThumb
+                              ? 'border-[#06B6D4] bg-[#21262D] text-[#06B6D4] animate-pulse'
+                              : 'border-[#30363D] bg-[#21262D] text-[#8B949E] hover:border-[#06B6D4] hover:text-[#06B6D4]'
+                          }`}
+                          title={t.pressThumbText}
+                        >
+                          <Fingerprint className={`size-8 ${isScanningThumb ? 'animate-bounce' : ''}`} />
+                          {isThumbprintVerified && (
+                            <span className="absolute -top-1 -right-1 grid size-5 place-items-center rounded-full bg-[#3FB950] text-[#0D1117]">
+                              <Check className="size-3 stroke-[3]" />
+                            </span>
+                          )}
+                        </button>
+                      </div>
+
+                      <p className="text-[11px] font-mono text-center break-all [overflow-wrap:break-word]">
+                        {isScanningThumb ? (
+                          <span className="text-[#06B6D4]">{t.scanningThumbText}</span>
+                        ) : isThumbprintVerified ? (
+                          <span className="text-[#3FB950] font-bold">{t.thumbVerifiedText} (<span dir="ltr">{thumbprintHash}</span>)</span>
+                        ) : (
+                          <span className="text-[#D29922] font-bold">{t.pressThumbText}</span>
+                        )}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* 4-Layer Anti-Fraud Notice */}
               <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-3 text-[10px] font-mono text-[#3FB950] space-y-1">
@@ -6037,6 +6822,19 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 </div>
               )}
 
+              {!isSelfServeOwner && setupPaymentMethod === 'Cash Collection' && !isThumbprintVerified && (
+                <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B] p-2.5 text-[11px] font-mono text-[#D29922] flex items-center gap-2">
+                  <Fingerprint className="size-4 shrink-0" />
+                  <span>
+                    {clientOnboardingLanguage === 'ur'
+                      ? 'آگے بڑھنے سے پہلے اوپر انگوٹھے کے نشان سے بائیومیٹرک تصدیق مکمل کریں۔'
+                      : clientOnboardingLanguage === 'ar'
+                      ? 'يرجى إتمام مسح بصمة الإبهام أعلاه أولاً لتفعيل زر التأكيد.'
+                      : 'Complete the hardware biometric thumbprint scan above to enable confirmation.'}
+                  </span>
+                </div>
+              )}
+
               {/* Proceed Button */}
               <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <button
@@ -6048,8 +6846,13 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={drawerIsSubmitting || (setupPaymentMethod === 'Cash Collection' && cashLiabilityHeld + activePackage.setupFee > MAX_CASH_CEILING)}
-                  className="sm:flex-[2] min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] py-3 px-4 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                  disabled={
+                    drawerIsSubmitting ||
+                    (!isSelfServeOwner &&
+                      setupPaymentMethod === 'Cash Collection' &&
+                      (!isThumbprintVerified || cashLiabilityHeld + activePackage.setupFee > MAX_CASH_CEILING))
+                  }
+                  className="sm:flex-[2] min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] py-3 px-4 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-45 disabled:cursor-not-allowed"
                 >
                   {drawerIsSubmitting ? (
                     <>
@@ -7622,15 +8425,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       ]);
                       if (typeof window !== 'undefined') {
                         localStorage.setItem('wcl_agent_enrolled_v1', 'true');
-                        try {
-                          const rawIds = localStorage.getItem('wcl_enrolled_agent_ids');
-                          const existing: string[] = rawIds ? JSON.parse(rawIds) : [];
-                          if (!existing.includes(enrollAgentId)) {
-                            localStorage.setItem('wcl_enrolled_agent_ids', JSON.stringify([...existing, enrollAgentId]));
-                          }
-                        } catch {}
                       }
-                      setIsPwaInstalledConfirmed(false);
                       setEnrollmentStep(5);
                     }}
                     className={`min-h-[48px] rounded-xl px-5 py-2.5 text-xs font-mono font-bold uppercase transition flex items-center gap-1.5 ${
@@ -7645,7 +8440,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               </div>
             )}
 
-            {/* STEP 5: ENROLLMENT CONFIRMED & MANDATORY HOME SCREEN INSTALL GATE */}
+            {/* STEP 5: ENROLLMENT CONFIRMED & HOME SCREEN PWA INSTALL (QUERIES 11 & 12) */}
             {enrollmentStep === 5 && (
               <div className="space-y-4 text-center animate-in zoom-in-95">
                 <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-[#0D3822] border border-[#116329] text-[#3FB950]">
@@ -7672,113 +8467,83 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   </p>
                 </div>
 
-                {/* Mandatory 1-Tap Save to Home Screen Prompt */}
+                {/* 1-Tap Save to Home Screen Prompt */}
                 <div
                   dir={enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'rtl' : 'ltr'}
-                  className={`rounded-2xl border p-4 font-mono space-y-2.5 overflow-hidden ${
-                    isPwaInstalledConfirmed
-                      ? 'border-[#116329] bg-[#0D3822]/40'
-                      : 'border-[#06B6D4] bg-[#0D1117]'
-                  } ${enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'text-right' : 'text-left'}`}
+                  className={`rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 font-mono space-y-2.5 overflow-hidden ${
+                    enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'text-right' : 'text-left'
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#06B6D4] flex items-center gap-2">
-                      <Smartphone className="size-4" />
-                      <span>{enrollmentLang === 'ur_roman' ? 'موبائل ہوم اسکرین پر محفوظ کریں' : enrollmentLang === 'ar' ? 'حفظ على الشاشة الرئيسية' : 'Save Agent Hub to Home Screen'}</span>
+                    <span className="text-xs font-semibold text-[#F0F6FC] flex items-center gap-2">
+                      <Smartphone className="size-4 text-[#06B6D4] shrink-0" />
+                      <span>
+                        {enrollmentLang === 'ur_roman' ? (
+                          <>فون کی ہوم اسکرین پر <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> آئیکن شامل کریں</>
+                        ) : enrollmentLang === 'ar' ? (
+                          <>أضف أيقونة <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> إلى الشاشة الرئيسية للهاتف</>
+                        ) : (
+                          <>Add <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> icon to phone home screen</>
+                        )}
+                      </span>
                     </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                      isPwaInstalledConfirmed
-                        ? 'text-[#3FB950] bg-[#0D3822] border-[#116329]'
-                        : 'text-[#D29922] bg-[#3B2E0B] border-[#9E6A03]'
-                    }`}>
-                      {isPwaInstalledConfirmed
-                        ? (enrollmentLang === 'ur_roman' ? '✓ محفوظ ہو گیا' : enrollmentLang === 'ar' ? '✓ تم التثبيت' : '✓ SHORTCUT SAVED')
-                        : (enrollmentLang === 'ur_roman' ? 'لازمی مرحلہ' : enrollmentLang === 'ar' ? 'خطوة إلزامية' : 'REQUIRED FIRST')}
+                    <span className="text-[10px] text-[#3FB950] font-bold bg-[#0D3822] border border-[#116329] px-2 py-0.5 rounded">
+                      APP SHORTCUT READY
                     </span>
                   </div>
                   <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
                     {enrollmentLang === 'ur_roman'
-                      ? 'ایجنٹ پورٹل کھولنے اور پہلا سیلون شامل کرنے سے پہلے نیچے کلک کر کے اپنے فون کی ہوم اسکرین پر ایپ محفوظ کریں۔'
+                      ? 'اپنے موبائل کی ہوم اسکرین پر WorkCraft کا آئیکن شامل کریں تاکہ روزانہ فیلڈ کام اور سیلون شامل کرنے کے لیے ایک ٹچ سے کھول سکیں۔'
                       : enrollmentLang === 'ar'
-                      ? 'قبل فتح البوابة وإضافة أول صالون، احفظ أيقونة التطبيق على الشاشة الرئيسية لهاتفك للوصول السريع.'
-                      : 'Before opening your hub to add your first salon, tap below to install the shortcut icon directly onto your phone home screen.'}
+                      ? 'أضف أيقونة WorkCraft إلى شاشة هاتفك الرئيسية لفتح بوابتك بلمسة واحدة دون الحاجة إلى متصفح.'
+                      : 'Add the WorkCraft icon directly to your mobile home screen so you can open your field hub in 1 tap every day.'}
                   </p>
 
                   <div className="flex items-center gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => setShowPwaInstallModal(true)}
-                      className={`min-h-[48px] rounded-xl px-4 py-2 text-xs font-mono font-bold uppercase transition flex items-center gap-1.5 ${
-                        isPwaInstalledConfirmed
-                          ? 'bg-[#0D3822] border border-[#116329] text-[#3FB950]'
-                          : 'bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117]'
-                      }`}
+                      onClick={() => {
+                        setIsPwaInstalledConfirmed(true);
+                        setShowPwaInstallModal(true);
+                      }}
+                      className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase transition flex items-center gap-1.5"
                     >
                       <Download className="size-3.5" />
                       <span>
                         {isPwaInstalledConfirmed
-                          ? (enrollmentLang === 'ur_roman' ? '✓ ہوم اسکرین پر محفوظ ہو گیا' : enrollmentLang === 'ar' ? '✓ تم الحفظ على الشاشة الرئيسية' : '✓ Saved to Home Screen')
-                          : (enrollmentLang === 'ur_roman' ? 'ہوم اسکرین پر محفوظ کریں' : enrollmentLang === 'ar' ? 'حفظ على الشاشة الرئيسية' : 'Save to Home Screen')}
+                          ? (enrollmentLang === 'ur_roman' ? '✓ ہوم اسکرین آئیکن شامل ہو گیا' : enrollmentLang === 'ar' ? '✓ تم الحفظ على الشاشة الرئيسية' : '✓ Added to Home Screen')
+                          : (enrollmentLang === 'ur_roman' ? 'ہوم اسکرین پر محفوظ کریں' : enrollmentLang === 'ar' ? 'حفظ على الشاشة الرئيسية' : 'Add WorkCraft to Home Screen')}
                       </span>
                     </button>
                   </div>
                 </div>
 
-                {/* Locked Until Home Screen Shortcut Installed */}
-                {!isPwaInstalledConfirmed && (
-                  <p className="text-[11px] font-mono text-[#D29922]">
-                    {enrollmentLang === 'ur_roman'
-                      ? '🔒 براہ کرم پہلے اوپر "ہوم اسکرین پر محفوظ کریں" بٹن دبائیں، پھر آپ آگے پورٹل کھول سکیں گے۔'
-                      : enrollmentLang === 'ar'
-                      ? '🔒 يرجى النقر على "حفظ على الشاشة الرئيسية" أعلاه أولاً لفتح البوابة.'
-                      : '🔒 Tap "Save to Home Screen" above first to unlock opening your Agent Hub.'}
-                  </p>
-                )}
-
+                {/* Auto-Launch Button into Agent Hub Step 1 Onboarding */}
                 <div className="pt-2 flex flex-col sm:flex-row gap-2.5 justify-center">
                   <button
                     type="button"
-                    disabled={!isPwaInstalledConfirmed}
                     onClick={() => {
-                      if (!isPwaInstalledConfirmed) return;
                       if (typeof window !== 'undefined') {
                         localStorage.setItem('wcl_agent_enrolled_v1', 'true');
-                        try {
-                          const rawIds = localStorage.getItem('wcl_enrolled_agent_ids');
-                          const existing: string[] = rawIds ? JSON.parse(rawIds) : [];
-                          if (!existing.includes(enrollAgentId)) {
-                            localStorage.setItem('wcl_enrolled_agent_ids', JSON.stringify([...existing, enrollAgentId]));
-                          }
-                        } catch {}
                       }
                       setIsRemoteEnrollmentWizardOpen(false);
                       setActiveHubView('ONBOARDING');
                       setCurrentStep(1);
                     }}
-                    className={`min-h-[48px] rounded-xl px-6 py-3 text-xs font-mono font-black uppercase transition flex items-center justify-center gap-2 ${
-                      isPwaInstalledConfirmed
-                        ? 'bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] active:scale-95'
-                        : 'bg-[#21262D] text-[#6E7681] border border-[#30363D] cursor-not-allowed opacity-60'
-                    }`}
+                    className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-6 py-3 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center justify-center gap-2"
                   >
-                    {isPwaInstalledConfirmed ? <Scissors className="size-4" /> : <Lock className="size-4" />}
+                    <Scissors className="size-4" />
                     <span>{enrollmentLang === 'ur_roman' ? 'پورٹل کھولیں (پہلا سیلون شامل کریں) ←' : enrollmentLang === 'ar' ? 'فتح البوابة وبدء تسجيل الصالونات ←' : 'Open Hub & Add First Salon →'}</span>
                   </button>
                   <button
                     type="button"
-                    disabled={!isPwaInstalledConfirmed}
                     onClick={() => {
-                      if (!isPwaInstalledConfirmed) return;
                       if (typeof window !== 'undefined') {
                         localStorage.setItem('wcl_agent_enrolled_v1', 'true');
                       }
                       setIsRemoteEnrollmentWizardOpen(false);
                     }}
-                    className={`min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 py-3 text-xs font-mono transition ${
-                      isPwaInstalledConfirmed
-                        ? 'text-[#8B949E] hover:text-[#F0F6FC] hover:border-[#484F58]'
-                        : 'text-[#484F58] cursor-not-allowed opacity-50'
-                    }`}
+                    className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 py-3 text-xs font-mono text-[#8B949E] hover:text-[#F0F6FC] hover:border-[#484F58]"
                   >
                     {enrollmentLang === 'ur_roman' ? 'بند کریں اور واپس جائیں' : enrollmentLang === 'ar' ? 'إغلاق والعودة' : 'Close & Return'}
                   </button>
@@ -7790,7 +8555,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 5. HOME SCREEN APP SHORTCUT MODAL (AUTO-DETECTED DEVICE, CLEAN UI)        */}
+      {/* 5. HOME SCREEN APP SHORTCUT MODAL (UNIFIED WORKCRAFT LABEL - LOCALIZED) */}
       {/* ========================================================================= */}
       {showPwaInstallModal && (
         <div
@@ -7800,7 +8565,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
           <div
             onClick={(e) => e.stopPropagation()}
             dir={enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'rtl' : 'ltr'}
-            className={`w-full max-w-[440px] rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 space-y-4 ${
+            className={`w-full max-w-[480px] rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 space-y-4 ${
               enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'text-right' : 'text-left'
             }`}
           >
@@ -7808,8 +8573,8 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               <div className="flex items-center gap-3">
                 <img
                   src="/icon.svg"
-                  alt="App Shortcut Icon"
-                  className="size-[56px] rounded-2xl border border-[#9E6A03] shrink-0"
+                  alt="WorkCraft Mobile Shortcut Icon"
+                  className="size-[60px] rounded-2xl border border-[#9E6A03] shrink-0"
                 />
                 <div>
                   <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#3FB950] block">
@@ -7819,13 +8584,22 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       ? 'اختصار الشاشة الرئيسية للهاتف'
                       : 'PHONE HOME SCREEN SHORTCUT'}
                   </span>
-                  <h3 className="text-lg font-black text-[#F0F6FC]">
-                    {enrollmentLang === 'ur_roman'
-                      ? 'اپنے فون کی ہوم اسکرین پر شامل کریں'
-                      : enrollmentLang === 'ar'
-                      ? 'إضافة الاختصار إلى الشاشة الرئيسية'
-                      : 'Add App Icon to Phone Home Screen'}
+                  <h3 className="text-base sm:text-lg font-semibold text-[#F0F6FC]">
+                    {enrollmentLang === 'ur_roman' ? (
+                      <>فون کی ہوم اسکرین پر <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> آئیکن شامل کریں</>
+                    ) : enrollmentLang === 'ar' ? (
+                      <>أضف أيقونة <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> إلى الشاشة الرئيسية للهاتف</>
+                    ) : (
+                      <>Add <strong className="font-bold text-[#00FFFF]">WorkCraft</strong> icon to phone home screen</>
+                    )}
                   </h3>
+                  <span className="text-[10px] font-mono text-[#06B6D4] block">
+                    {enrollmentLang === 'ur_roman'
+                      ? 'گولڈ ڈبلیو + نیلا ورک کرافٹ · یونیفائیڈ لیبل: WorkCraft'
+                      : enrollmentLang === 'ar'
+                      ? 'شعار ذهبي W + أزرق سماوي · الاسم الموحد: WorkCraft'
+                      : 'Gold W + Cyan-Blue WORKCRAFT · Unified Label: WorkCraft'}
+                  </span>
                 </div>
               </div>
               <button
@@ -7836,53 +8610,81 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               </button>
             </div>
 
-            <div className="rounded-xl bg-[#0D1117] border border-[#30363D] p-3.5 space-y-2">
-              <div className="flex items-center justify-between text-[11px] font-mono">
-                <span className="text-[#06B6D4] font-bold flex items-center gap-1.5">
-                  <Smartphone className="size-3.5" />
-                  <span>
-                    {detectedDeviceType === 'IOS'
-                      ? enrollmentLang === 'ur_roman'
-                        ? 'آئی فون (iOS) خودکار شناخت'
-                        : enrollmentLang === 'ar'
-                        ? 'تم التعرف تلقائياً: آيفون (iOS)'
-                        : 'Auto-Detected: iPhone / iOS'
-                      : detectedDeviceType === 'ANDROID'
-                      ? enrollmentLang === 'ur_roman'
-                        ? 'اینڈرائیڈ موبائل خودکار شناخت'
-                        : enrollmentLang === 'ar'
-                        ? 'تم التعرف تلقائياً: أندرويد'
-                        : 'Auto-Detected: Android Mobile'
-                      : enrollmentLang === 'ur_roman'
-                      ? 'ڈیوائس خودکار شناخت مکمل'
-                      : enrollmentLang === 'ar'
-                      ? 'تم التعرف على الجهاز تلقائياً'
-                      : 'Auto-Detected: Active Terminal'}
-                  </span>
+            <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
+              {enrollmentLang === 'ur_roman'
+                ? 'آپ کا فون ہوم اسکرین پر ورک کرافٹ کا آئیکن لگانے سے پہلے ایک فوری تصدیقی ٹیپ مانگتا ہے:'
+                : enrollmentLang === 'ar'
+                ? 'يتطلب هاتفك نقرة تأكيد سريعة لإضافة أيقونة وورك كرافت إلى الشاشة الرئيسية:'
+                : 'Your phone asks for one quick confirmation tap before placing the WorkCraft icon on your home screen:'}
+            </p>
+
+            <div className="space-y-2.5 font-mono text-xs">
+              <div className="rounded-xl bg-[#0D1117] p-3 border border-[#30363D] space-y-1">
+                <span className="text-[#06B6D4] font-bold block">
+                  {enrollmentLang === 'ur_roman'
+                    ? '📱 اینڈرائیڈ (Chrome / Samsung Internet):'
+                    : enrollmentLang === 'ar'
+                    ? '📱 أندرويد (Chrome / Samsung Internet):'
+                    : '📱 Android (Chrome / Samsung Internet):'}
                 </span>
-                <span className="text-[#3FB950] font-bold">READY ✓</span>
+                <p className="text-[#8B949E] font-sans text-[11px]">
+                  {enrollmentLang === 'ur_roman' ? (
+                    <>
+                      نیچے دیا گیا بٹن دبائیں یا کروم مینو (⋮) کھول کر <strong className="text-[#F0F6FC]">&quot;Install app&quot;</strong> یا <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong> منتخب کریں۔
+                    </>
+                  ) : enrollmentLang === 'ar' ? (
+                    <>
+                      اضغط على الزر أدناه أو من قائمة Chrome (⋮) اختر <strong className="text-[#F0F6FC]">&quot;تثبيت التطبيق&quot;</strong> أو <strong className="text-[#F0F6FC]">&quot;إضافة إلى الشاشة الرئيسية&quot;</strong>.
+                    </>
+                  ) : (
+                    <>
+                      Tap the button below or tap Chrome menu (⋮) ➔ select <strong className="text-[#F0F6FC]">&quot;Install app&quot;</strong> or <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong>.
+                    </>
+                  )}
+                </p>
               </div>
-              <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
-                {enrollmentLang === 'ur_roman'
-                  ? 'آپ کی ڈیوائس خودکار طور پر شناخت ہو چکی ہے۔ نیچے دیے گئے بٹن کو دبائیں تاکہ ہوم اسکرین پر ایپ آئیکن محفوظ ہو جائے اور آپ اپنا ایجنٹ پورٹل کھول سکیں۔'
-                  : enrollmentLang === 'ar'
-                  ? 'تم التعرف على جهازك تلقائياً. اضغط على الزر أدناه لتثبيت أيقونة البوابة على شاشتك الرئيسية مباشرة.'
-                  : 'Your device has been automatically configured. Tap below to place the shortcut icon onto your home screen and unlock your Agent Hub.'}
-              </p>
+
+              <div className="rounded-xl bg-[#0D1117] p-3 border border-[#30363D] space-y-1">
+                <span className="text-[#D29922] font-bold block">
+                  {enrollmentLang === 'ur_roman'
+                    ? '🍎 آئی فون / آئی پیڈ (Safari):'
+                    : enrollmentLang === 'ar'
+                    ? '🍎 آيفون / آيباد (Safari):'
+                    : '🍎 iPhone / iPad (Safari):'}
+                </span>
+                <p className="text-[#8B949E] font-sans text-[11px]">
+                  {enrollmentLang === 'ur_roman' ? (
+                    <>
+                      سفاری میں نیچے شیئر کا بٹن (<Share2 className="size-3 inline mx-1" />) دبائیں اور اسکرول کر کے <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong> منتخب کریں۔
+                    </>
+                  ) : enrollmentLang === 'ar' ? (
+                    <>
+                      في Safari اضغط على أيقونة المشاركة (<Share2 className="size-3 inline mx-1" />) بالأسفل ثم اختر <strong className="text-[#F0F6FC]">&quot;إضافة إلى الصفحة الرئيسية&quot;</strong>.
+                    </>
+                  ) : (
+                    <>
+                      Tap the Safari <strong className="text-[#F0F6FC]">Share icon (<Share2 className="size-3 inline" />)</strong> at the bottom bar ➔ scroll and tap <strong className="text-[#F0F6FC]">&quot;Add to Home Screen&quot;</strong>.
+                    </>
+                  )}
+                </p>
+              </div>
             </div>
 
             <button
               type="button"
-              onClick={triggerAutoDetectedShortcutInstall}
+              onClick={() => {
+                setIsPwaInstalledConfirmed(true);
+                setShowPwaInstallModal(false);
+              }}
               className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] py-3 text-xs font-mono font-black uppercase transition flex items-center justify-center gap-2"
             >
               <Download className="size-4" />
               <span>
                 {enrollmentLang === 'ur_roman'
-                  ? 'ابھی ہوم اسکرین پر محفوظ کریں'
+                  ? 'ابھی "WorkCraft" آئیکن محفوظ کریں'
                   : enrollmentLang === 'ar'
-                  ? 'حفظ على الشاشة الرئيسية الآن'
-                  : 'Install Shortcut to Home Screen'}
+                  ? 'حفظ أيقونة "WorkCraft" الآن'
+                  : 'Add WorkCraft Icon Now'}
               </span>
             </button>
           </div>
