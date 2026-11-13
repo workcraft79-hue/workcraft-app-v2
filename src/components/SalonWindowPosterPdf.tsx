@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Download, FileText, QrCode, Printer, CheckCircle2, Sparkles } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
-import { LOGO_URL } from '../data/portalData';
+import { LOGO_URL, WATERMARK_URL } from '../data/portalData';
 
 export type PosterLang = 'en' | 'ur' | 'ar';
 export type PosterFormat = 'WINDOW_A4' | 'CABIN_PAMPHLET';
@@ -38,9 +38,9 @@ const POSTER_PHRASES: Record<
     whatsappLabel: 'Salon WhatsApp Booking Number',
     badgeMens: "Men's Grooming & Salon · WhatsApp Enabled",
     badgeLadies: 'Ladies Beauty Parlor · WhatsApp Enabled',
-    headline: 'Valued Customers — Instant 24/7 WhatsApp Booking!',
+    headline: 'Respected Customer — Book 24/7 on WhatsApp!',
     phrase:
-      'From today, we are using the WorkCraft WhatsApp Concierge Service. Simply scan the QR code above or send "Hi" to our WhatsApp number to book your appointment, choose your barber or stylist, check service prices, and receive VIP deals anytime.',
+      'Respected Customer, we are using the WorkCraft WhatsApp Concierge Service. Simply scan the QR code above or send "Hi" to our WhatsApp number to book your appointment, choose your barber or stylist, check service prices, and receive VIP deals anytime.',
     steps: [
       '1. Scan QR or message our WhatsApp',
       '2. Pick services, stylist & time slot',
@@ -54,9 +54,9 @@ const POSTER_PHRASES: Record<
     whatsappLabel: 'سیلون واٹس ایپ بکنگ نمبر',
     badgeMens: 'مینس سیلون · واٹس ایپ خودکار بکنگ',
     badgeLadies: 'لیڈیز بیوٹی پارلر · واٹس ایپ خودکار بکنگ',
-    headline: 'معزز کسٹمرز — اب 24 گھنٹے واٹس ایپ پر فوری بکنگ!',
+    headline: 'معزز کسٹمر — اب 24 گھنٹے واٹس ایپ پر فوری بکنگ!',
     phrase:
-      'آج سے ہم جدید واٹس ایپ آٹومیٹک بکنگ سروس استعمال کر رہے ہیں۔ اوپر دیا گیا کیو آر کوڈ اسکین کریں یا ہمارے واٹس ایپ نمبر پر میسج کریں اور آسانی سے اپنی اپائنٹمنٹ بک کریں، اپنا اسٹائلسٹ منتخب کریں، تمام سروسز کے ریٹ چیک کریں اور خصوصی ڈیلز حاصل کریں۔',
+      'معزز کسٹمر، ہم جدید WorkCraft واٹس ایپ آٹومیٹک بکنگ سروس استعمال کر رہے ہیں۔ اوپر دیا گیا کیو آر کوڈ اسکین کریں یا ہمارے واٹس ایپ نمبر پر میسج کریں اور آسانی سے اپنی اپائنٹمنٹ بک کریں، اپنا اسٹائلسٹ منتخب کریں، تمام سروسز کے ریٹ چیک کریں اور خصوصی ڈیلز حاصل کریں۔',
     steps: [
       '1۔ کیو آر اسکین کریں یا واٹس ایپ پر میسج کریں',
       '2۔ سروسز، اسٹائلسٹ اور وقت منتخب کریں',
@@ -70,9 +70,9 @@ const POSTER_PHRASES: Record<
     whatsappLabel: 'رقم واتساب الصالون للحجز',
     badgeMens: 'صالون رجالي · الحجز الذكي عبر واتساب',
     badgeLadies: 'صالون تجميل نسائي · الحجز الذكي عبر واتساب',
-    headline: 'عملاءنا الكرام — احجز موعدك فوراً عبر واتساب ٢٤/٧!',
+    headline: 'عميلنا العزيز — احجز موعدك فوراً عبر واتساب ٢٤/٧!',
     phrase:
-      'اعتباراً من اليوم، نستخدم خدمة الحجز التلقائي عبر واتساب. امسح رمز الاستجابة السريعة (QR) أعلاه أو أرسل رسالة إلى رقم الواتساب الخاص بنا لحجز موعدك بسهولة، واختيار المصفف المفضل، ومعرفة الأسعار، والحصول على عروض VIP الحصرية.',
+      'عميلنا العزيز، نحن نستخدم خدمة الحجز التلقائي من WorkCraft عبر واتساب. ما عليك سوى مسح رمز الاستجابة السريعة (QR) أعلاه أو إرسال رسالة إلى رقم الواتساب الخاص بنا لحجز موعدك بسهولة، واختيار المصفف المفضل، ومعرفة الأسعار، والحصول على عروض VIP الحصرية في أي وقت.',
     steps: [
       '١. امسح رمز QR أو راسلنا على واتساب',
       '٢. اختر الخدمات والمصفف والوقت المناسب',
@@ -237,36 +237,34 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
           color: { dark: '#0E1E17', light: '#FFFFFF' },
         }));
 
-      const [logoImg, qrImg] = await Promise.all([
+      const [logoImg, watermarkImg, qrImg] = await Promise.all([
         loadExternalSafe(LOGO_URL),
+        loadExternalSafe(WATERMARK_URL),
         loadDataUrlImage(resolvedQrUrl),
       ]);
 
-      // Top-Left Logo Rendering
-      drawRoundedRect(ctx, 84, 84, 340, 128, 20);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(217, 164, 65, 0.45)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
+      // Top-Left Bold WorkCraft Logo + WorkCraft Wordmark Underneath (No Box, No Official Booking Text)
       if (logoImg) {
-        ctx.drawImage(logoImg, 98, 96, 102, 102);
+        ctx.drawImage(logoImg, 88, 84, 114, 114);
       } else {
         ctx.fillStyle = '#D9A441';
         ctx.beginPath();
-        ctx.arc(148, 148, 42, 0, Math.PI * 2);
+        ctx.arc(145, 141, 46, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#12241C';
-        ctx.font = 'bold 34px sans-serif';
+        ctx.font = '900 38px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('WC', 148, 160);
+        ctx.fillText('WC', 145, 154);
       }
 
-      ctx.textAlign = 'left';
-      ctx.fillStyle = '#00FFFF';
-      ctx.font = 'bold 20px monospace';
-      ctx.fillText('OFFICIAL BOOKING', 214, 155);
+      if (watermarkImg) {
+        ctx.drawImage(watermarkImg, 78, 202, 142, 27);
+      } else {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#00FFFF';
+        ctx.font = '900 22px sans-serif';
+        ctx.fillText('WorkCraft', 88, 224);
+      }
 
       // Top-Right QR Code Card + Salon Owner WhatsApp Number Directly Under QR Code
       const qrBoxX = canvas.width - 390;
@@ -547,20 +545,20 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
         <div className="min-w-0 max-w-full overflow-hidden rounded-3xl border-2 border-[#D9A441]/70 bg-gradient-to-b from-[#102019] via-[#12241C] to-[#0B1712] p-5 sm:p-7 shadow-2xl space-y-6">
           {/* TOP SECTION: TOP-LEFT WORKCRAFT LOCAL LOGO + TOP-RIGHT QR WITH WHATSAPP NUMBER UNDERNEATH */}
           <div className="flex flex-col sm:flex-row items-start justify-between gap-5">
-            {/* LEFT COLUMN: Top-Left WorkCraft Local Logo + Salon/Parlor Name */}
+            {/* LEFT COLUMN: Top-Left Bold WorkCraft Logo & Wordmark Underneath + Salon/Parlor Name */}
             <div className="space-y-4 flex-1 min-w-0">
-              {/* Strict Top-Left WorkCraft Local Logo */}
-              <div className="inline-flex items-center gap-3 rounded-2xl border border-[#D9A441]/40 bg-white/[0.04] px-3.5 py-2.5">
+              {/* Clean Top-Left Bold WorkCraft Logo + WorkCraft Wordmark Underneath (No Box, No Extra Text) */}
+              <div className="inline-flex flex-col items-start gap-1">
                 <img
                   src={LOGO_URL}
-                  alt="WorkCraft Local"
-                  className="size-11 object-contain"
+                  alt="WorkCraft"
+                  className="size-16 object-contain drop-shadow-[0_2px_10px_rgba(217,164,65,0.45)]"
                 />
-                <div className="leading-tight">
-                  <span className="block text-[11px] font-mono font-bold tracking-[0.2em] text-[#00FFFF]">
-                    OFFICIAL BOOKING
-                  </span>
-                </div>
+                <img
+                  src={WATERMARK_URL}
+                  alt="WorkCraft"
+                  className="h-5 w-auto object-contain"
+                />
               </div>
 
               {/* Category Badge & Salon / Ladies Parlor Name */}

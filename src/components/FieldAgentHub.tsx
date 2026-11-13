@@ -155,16 +155,16 @@ const CANADIAN_AREA_CODES = new Set([
 const CANADIAN_CITY_KEYWORDS = ['canada', 'toronto', 'vancouver', 'montreal', 'calgary', 'ottawa', 'edmonton', 'winnipeg', 'quebec'];
 
 const GLOBAL_DIAL_COUNTRIES: CountryConfig[] = [
-  { code: 'AE', name: 'UAE', currency: 'USD', prefix: '$', localCurrency: 'AED', localPrefix: 'AED ', localArabicPrefix: 'د.إ ', localRateMultiplier: 0.075, flag: '🇦🇪', isDomestic: false, region: 'MENA', dialCode: '+971', defaultCity: 'Dubai', defaultAddress: 'Al Rigga Road, Deira, Dubai', defaultCoords: '25.2631° N, 55.3264° E' },
-  { code: 'SA', name: 'Saudi Arabia', currency: 'USD', prefix: '$', localCurrency: 'SAR', localPrefix: 'SAR ', localArabicPrefix: 'ر.س ', localRateMultiplier: 0.075, flag: '🇸🇦', isDomestic: false, region: 'MENA', dialCode: '+966', defaultCity: 'Riyadh', defaultAddress: 'Olaya Street, Al Olaya, Riyadh', defaultCoords: '24.6972° N, 46.6838° E' },
-  { code: 'KW', name: 'Kuwait', currency: 'USD', prefix: '$', localCurrency: 'KWD', localPrefix: 'KWD ', localArabicPrefix: 'د.ك ', localRateMultiplier: 0.0065, flag: '🇰🇼', isDomestic: false, region: 'MENA', dialCode: '+965', defaultCity: 'Kuwait City', defaultAddress: 'Salmiya Block 4, Kuwait City', defaultCoords: '29.3375° N, 48.0758° E' },
-  { code: 'QA', name: 'Qatar', currency: 'USD', prefix: '$', localCurrency: 'QAR', localPrefix: 'QAR ', localArabicPrefix: 'ر.ق ', localRateMultiplier: 0.075, flag: '🇶🇦', isDomestic: false, region: 'MENA', dialCode: '+974', defaultCity: 'Doha', defaultAddress: 'Al Sadd Street, Doha', defaultCoords: '25.2854° N, 51.5310° E' },
-  { code: 'OM', name: 'Oman', currency: 'USD', prefix: '$', localCurrency: 'OMR', localPrefix: 'OMR ', localArabicPrefix: 'ر.ع ', localRateMultiplier: 0.008, flag: '🇴🇲', isDomestic: false, region: 'MENA', dialCode: '+968', defaultCity: 'Muscat', defaultAddress: 'Al Qurum Commercial, Muscat', defaultCoords: '23.5880° N, 58.3829° E' },
-  { code: 'BH', name: 'Bahrain', currency: 'USD', prefix: '$', localCurrency: 'BHD', localPrefix: 'BHD ', localArabicPrefix: 'د.ب ', localRateMultiplier: 0.008, flag: '🇧🇭', isDomestic: false, region: 'MENA', dialCode: '+973', defaultCity: 'Manama', defaultAddress: 'Seef District, Manama', defaultCoords: '26.2285° N, 50.5860° E' },
-  { code: 'JO', name: 'Jordan', currency: 'USD', prefix: '$', localCurrency: 'JOD', localPrefix: 'JOD ', localArabicPrefix: 'د.أ ', localRateMultiplier: 0.015, flag: '🇯🇴', isDomestic: false, region: 'MENA', dialCode: '+962', defaultCity: 'Amman', defaultAddress: 'Abdali Boulevard, Amman', defaultCoords: '31.9539° N, 35.9106° E' },
+  { code: 'AE', name: 'UAE', currency: 'USD', prefix: '$', localCurrency: 'AED', localPrefix: 'AED ', localArabicPrefix: 'AED ', localRateMultiplier: 0.075, flag: '🇦🇪', isDomestic: false, region: 'MENA', dialCode: '+971', defaultCity: 'Dubai', defaultAddress: 'Al Rigga Road, Deira, Dubai', defaultCoords: '25.2631° N, 55.3264° E' },
+  { code: 'SA', name: 'Saudi Arabia', currency: 'USD', prefix: '$', localCurrency: 'SAR', localPrefix: 'SAR ', localArabicPrefix: 'SAR ', localRateMultiplier: 0.075, flag: '🇸🇦', isDomestic: false, region: 'MENA', dialCode: '+966', defaultCity: 'Riyadh', defaultAddress: 'Olaya Street, Al Olaya, Riyadh', defaultCoords: '24.6972° N, 46.6838° E' },
+  { code: 'KW', name: 'Kuwait', currency: 'USD', prefix: '$', localCurrency: 'KWD', localPrefix: 'KWD ', localArabicPrefix: 'KWD ', localRateMultiplier: 0.0065, flag: '🇰🇼', isDomestic: false, region: 'MENA', dialCode: '+965', defaultCity: 'Kuwait City', defaultAddress: 'Salmiya Block 4, Kuwait City', defaultCoords: '29.3375° N, 48.0758° E' },
+  { code: 'QA', name: 'Qatar', currency: 'USD', prefix: '$', localCurrency: 'QAR', localPrefix: 'QAR ', localArabicPrefix: 'QAR ', localRateMultiplier: 0.075, flag: '🇶🇦', isDomestic: false, region: 'MENA', dialCode: '+974', defaultCity: 'Doha', defaultAddress: 'Al Sadd Street, Doha', defaultCoords: '25.2854° N, 51.5310° E' },
+  { code: 'OM', name: 'Oman', currency: 'USD', prefix: '$', localCurrency: 'OMR', localPrefix: 'OMR ', localArabicPrefix: 'OMR ', localRateMultiplier: 0.008, flag: '🇴🇲', isDomestic: false, region: 'MENA', dialCode: '+968', defaultCity: 'Muscat', defaultAddress: 'Al Qurum Commercial, Muscat', defaultCoords: '23.5880° N, 58.3829° E' },
+  { code: 'BH', name: 'Bahrain', currency: 'USD', prefix: '$', localCurrency: 'BHD', localPrefix: 'BHD ', localArabicPrefix: 'BHD ', localRateMultiplier: 0.008, flag: '🇧🇭', isDomestic: false, region: 'MENA', dialCode: '+973', defaultCity: 'Manama', defaultAddress: 'Seef District, Manama', defaultCoords: '26.2285° N, 50.5860° E' },
+  { code: 'JO', name: 'Jordan', currency: 'USD', prefix: '$', localCurrency: 'JOD', localPrefix: 'JOD ', localArabicPrefix: 'JOD ', localRateMultiplier: 0.015, flag: '🇯🇴', isDomestic: false, region: 'MENA', dialCode: '+962', defaultCity: 'Amman', defaultAddress: 'Abdali Boulevard, Amman', defaultCoords: '31.9539° N, 35.9106° E' },
   { code: 'LB', name: 'Lebanon', currency: 'USD', prefix: '$', localCurrency: 'USD', localPrefix: '$', localArabicPrefix: '$', localRateMultiplier: 0.04, flag: '🇱🇧', isDomestic: false, region: 'MENA', dialCode: '+961', defaultCity: 'Beirut', defaultAddress: 'Hamra Street, Beirut', defaultCoords: '33.8938° N, 35.5018° E' },
-  { code: 'MA', name: 'Morocco', currency: 'USD', prefix: '$', localCurrency: 'MAD', localPrefix: 'MAD ', localArabicPrefix: 'د.م ', localRateMultiplier: 0.2, flag: '🇲🇦', isDomestic: false, region: 'MENA', dialCode: '+212', defaultCity: 'Casablanca', defaultAddress: 'Boulevard Anfa, Casablanca', defaultCoords: '33.5731° N, 7.5898° W' },
-  { code: 'EG', name: 'Egypt', currency: 'USD', prefix: '$', localCurrency: 'EGP', localPrefix: 'EGP ', localArabicPrefix: 'ج.م ', localRateMultiplier: 0.95, flag: '🇪🇬', isDomestic: false, region: 'MENA', dialCode: '+20', defaultCity: 'Cairo', defaultAddress: 'Zamalek District, Cairo', defaultCoords: '30.0444° N, 31.2357° E' },
+  { code: 'MA', name: 'Morocco', currency: 'USD', prefix: '$', localCurrency: 'MAD', localPrefix: 'MAD ', localArabicPrefix: 'MAD ', localRateMultiplier: 0.2, flag: '🇲🇦', isDomestic: false, region: 'MENA', dialCode: '+212', defaultCity: 'Casablanca', defaultAddress: 'Boulevard Anfa, Casablanca', defaultCoords: '33.5731° N, 7.5898° W' },
+  { code: 'EG', name: 'Egypt', currency: 'USD', prefix: '$', localCurrency: 'EGP', localPrefix: 'EGP ', localArabicPrefix: 'EGP ', localRateMultiplier: 0.95, flag: '🇪🇬', isDomestic: false, region: 'MENA', dialCode: '+20', defaultCity: 'Cairo', defaultAddress: 'Zamalek District, Cairo', defaultCoords: '30.0444° N, 31.2357° E' },
   { code: 'GB', name: 'United Kingdom', currency: 'USD', prefix: '$', localCurrency: 'GBP', localPrefix: '£', localRateMultiplier: 0.03, flag: '🇬🇧', isDomestic: false, region: 'EUROPE', dialCode: '+44', defaultCity: 'London', defaultAddress: '48 Oxford Street, Soho, London', defaultCoords: '51.5154° N, 0.1419° W' },
   { code: 'DE', name: 'Germany', currency: 'USD', prefix: '$', localCurrency: 'EUR', localPrefix: '€', localRateMultiplier: 0.035, flag: '🇩🇪', isDomestic: false, region: 'EUROPE', dialCode: '+49', defaultCity: 'Berlin', defaultAddress: 'Friedrichstrasse 112, Berlin', defaultCoords: '52.5200° N, 13.4050° E' },
   { code: 'FR', name: 'France', currency: 'USD', prefix: '$', localCurrency: 'EUR', localPrefix: '€', localRateMultiplier: 0.035, flag: '🇫🇷', isDomestic: false, region: 'EUROPE', dialCode: '+33', defaultCity: 'Paris', defaultAddress: 'Rue de Rivoli 84, Paris', defaultCoords: '48.8566° N, 2.3522° E' },
@@ -1569,7 +1569,105 @@ export interface PackageFeatureDetail {
   highlight?: boolean;
 }
 
-export const getLocalizedPackageFeatures = (pkgId: string, lang: ClientOnboardingLanguage): PackageFeatureDetail[] => {
+export const getLocalizedPackageCardCopy = (
+  pkgId: string,
+  lang: ClientOnboardingLanguage,
+  isDomestic: boolean = true
+): { bookings: string; scope: string } => {
+  const videoRates = isDomestic
+    ? lang === 'ur'
+      ? '1 ویڈیو PKR 1,500 یا 4 ویڈیوز PKR 4,000'
+      : lang === 'ar'
+      ? 'فيديو واحد PKR 1,500 أو 4 فيديوهات PKR 4,000'
+      : '1 video @ PKR 1,500 or 4 videos @ PKR 4,000'
+    : lang === 'ur'
+    ? '1 ویڈیو $15 یا 4 ویڈیوز $40'
+    : lang === 'ar'
+    ? 'فيديو واحد $15 أو 4 فيديوهات $40'
+    : '1 video @ $15 or 4 videos @ $40';
+
+  if (lang === 'ur') {
+    switch (pkgId) {
+      case 'STARTER':
+        return {
+          bookings: 'ماہانہ 500 بکنگز',
+          scope: 'صرف 24/7 واٹس ایپ آٹو بکنگ بوٹ اور سروس ریٹ لسٹ',
+        };
+      case 'GROWTH':
+        return {
+          bookings: 'ماہانہ 1,500 بکنگز',
+          scope: 'واٹس ایپ آٹو بکنگ + گوگل 5-اسٹار ریویو بوسٹر',
+        };
+      case 'VIP':
+        return {
+          bookings: 'ماہانہ 3,000 بکنگز',
+          scope: `آٹو بکنگ + گوگل ریویوز + ویڈیو ڈیلز (${videoRates} · 7 تا 10 دن)`,
+        };
+      case 'CUSTOM':
+      default:
+        return {
+          bookings: 'ماہانہ 3,000 سے زائد بکنگز',
+          scope: 'ہائی والیوم سنگل سیلون + لامحدود چیئرز + کسٹم ویڈیو مہمات',
+        };
+    }
+  }
+
+  if (lang === 'ar') {
+    switch (pkgId) {
+      case 'STARTER':
+        return {
+          bookings: '500 حجز شهرياً',
+          scope: 'رد وحجز واتساب تلقائي 24/7 وقائمة الأسعار فقط',
+        };
+      case 'GROWTH':
+        return {
+          bookings: '1,500 حجز شهرياً',
+          scope: 'حجز واتساب تلقائي + معزز تقييمات جوجل 5 نجوم',
+        };
+      case 'VIP':
+        return {
+          bookings: '3,000 حجز شهرياً',
+          scope: `حجز آلي + تقييمات جوجل + عروض الفيديو (${videoRates} · 7–10 أيام)`,
+        };
+      case 'CUSTOM':
+      default:
+        return {
+          bookings: 'أكثر من 3,000 حجز شهرياً',
+          scope: 'باقة مخصصة للصالون المزدحم + كراسي غير محدودة + حملات فيديو مخصصة',
+        };
+    }
+  }
+
+  switch (pkgId) {
+    case 'STARTER':
+      return {
+        bookings: '500 bookings/mo',
+        scope: 'WhatsApp Auto-Reply Concierge Only (No Google Reviews, No Video Deals)',
+      };
+    case 'GROWTH':
+      return {
+        bookings: '1,500 bookings/mo',
+        scope: 'WhatsApp Auto-Reply + Google 5-Star Review Booster',
+      };
+    case 'VIP':
+      return {
+        bookings: '3,000 bookings/mo',
+        scope: `WhatsApp Auto-Reply + Google 5-Star Reviews + Video Deals Unlocked (${videoRates} · 7–10 day validity)`,
+      };
+    case 'CUSTOM':
+    default:
+      return {
+        bookings: '> 3,000 bookings/mo',
+        scope: 'High-Volume Single Salon · Unlimited Staff Chairs + Custom Video Promo & Priority SLA',
+      };
+  }
+};
+
+export const getLocalizedPackageFeatures = (
+  pkgId: string,
+  lang: ClientOnboardingLanguage,
+  isDomestic: boolean = true
+): PackageFeatureDetail[] => {
   if (lang === 'ur') {
     switch (pkgId) {
       case 'STARTER':
@@ -1589,14 +1687,19 @@ export const getLocalizedPackageFeatures = (pkgId: string, lang: ClientOnboardin
           { title: 'اسمارٹ ریٹنگ فلٹر (5★ گوگل میپس پر اور کم ریٹنگ پرائیویٹ)', included: true },
           { title: 'ملٹی باربر وقت تصادم چیک اور متبادل خالی باربر کی تجویز', included: true },
           { title: 'ریگولر گاہکوں کو 21 تا 30 دن بعد واپسی کا پرائیویٹ واٹس ایپ میسج', included: true },
-          { title: 'بیک اپ سم اور خودکار کنکشن بحالی (60 منٹ سے کم ریکوری)', included: true },
+          { title: '24/7 خودکار کنکشن بحالی اور 60 منٹ سے کم ریکوری', included: true },
         ];
       case 'VIP':
         return [
           { title: 'گروتھ آٹومیشن پیکیج کے تمام فیچرز اور سروسز شامل ہیں', included: true },
           { title: 'ماہانہ 3,000 گاہک بکنگز کی گنجائش اور VIP ترجیح', included: true },
           { title: 'ویڈیو ڈیلز اور وائرل ریلز فیچر مکمل انلاکڈ (ویک اینڈ و ہفتہ وار ڈیلز)', included: true, highlight: true },
-          { title: 'لچکدار ویڈیو مہمات: 1 ویڈیو ڈیل (1,500 روپے) یا 4 ویڈیو ڈیلز (4,000 روپے)', included: true },
+          {
+            title: isDomestic
+              ? 'لچکدار ویڈیو مہمات: 1 ویڈیو ڈیل (PKR 1,500) یا 4 ویڈیو ڈیلز (PKR 4,000)'
+              : 'لچکدار ویڈیو مہمات: 1 ویڈیو ڈیل ($15) یا 4 ویڈیو ڈیلز ($40)',
+            included: true,
+          },
           { title: '7 تا 10 دن کا ویڈیو کنورژن آڈٹ اور بکنگ رزلٹ ٹریکنگ', included: true },
           { title: 'واٹس ایپ براڈکاسٹ اور گاہک واپسی (Win-Back) مہم ٹولز', included: true },
           { title: 'ڈیڈیکیٹڈ ترجیحی اکاؤنٹ سپورٹ', included: true },
@@ -1604,10 +1707,10 @@ export const getLocalizedPackageFeatures = (pkgId: string, lang: ClientOnboardin
       case 'CUSTOM':
       default:
         return [
-          { title: 'وی آئی پی ایگزیکٹو کے تمام فیچرز اور ملٹی برانچ کنٹرول', included: true },
-          { title: 'ملٹی سم گیٹ وے کلسٹر اور تمام برانچز کی مرکزی راؤٹنگ', included: true, highlight: true },
-          { title: 'لامحدود گاہک بکنگز اور لامحدود برانچ نیٹ ورک کوریج', included: true },
-          { title: 'تمام برانچز کے لیے لامحدود گوگل 5-اسٹار ریویو مہمات', included: true },
+          { title: 'وی آئی پی ایگزیکٹو کے تمام فیچرز اور اعلیٰ رفتار کارکردگی', included: true },
+          { title: 'ماہانہ 3,000 سے زائد گاہک بکنگز کی گنجائش', included: true, highlight: true },
+          { title: 'سیلون کے لیے لامحدود باربرز، چیئرز اور رش آور کیو کنٹرول', included: true },
+          { title: 'لامحدود گوگل 5-اسٹار ریویو اور گاہک واپسی مہمات', included: true },
           { title: 'کسٹم ویڈیو ڈیلز پروڈکشن، وائرل پرومو براڈکاسٹ اور کریئیٹر کوآرڈینیشن', included: true },
           { title: '24/7 ترجیحی انجینئرنگ سپورٹ اور فوری خودکار ریکوری', included: true },
         ];
@@ -1633,14 +1736,19 @@ export const getLocalizedPackageFeatures = (pkgId: string, lang: ClientOnboardin
           { title: 'فلتر ذكي للتقييمات (5★ لخرائط جوجل والتقييمات الأقل للمالك فقط)', included: true },
           { title: 'فحص تعارض مواعيد الحلاقين واقتراح الحلاق المتاح تلقائياً', included: true },
           { title: 'تذكير تلقائي للعملاء المعتادين كل 21–30 يوماً للعودة بالسعر الكامل', included: true },
-          { title: 'شريحة SIM احتياطية وإصلاح تلقائي للاتصال في أقل من 60 دقيقة', included: true },
+          { title: 'إصلاح تلقائي للاتصال 24/7 واستعادة فورية في أقل من 60 دقيقة', included: true },
         ];
       case 'VIP':
         return [
           { title: 'يشمل جميع مميزات وخدمات باقة النمو الآلي', included: true },
           { title: 'سعة استيعاب 3,000 حجز شهرياً بأولوية قصوى', included: true },
           { title: 'فتح ميزة عروض الفيديو والريلز التسويقية (عروض نهاية الأسبوع والأيام العادية)', included: true, highlight: true },
-          { title: 'حملات مرنة: عرض فيديو واحد ($15) أو 4 عروض فيديو ($40)', included: true },
+          {
+            title: isDomestic
+              ? 'حملات مرنة: عرض فيديو واحد (PKR 1,500) أو 4 عروض فيديو (PKR 4,000)'
+              : 'حملات مرنة: عرض فيديو واحد ($15) أو 4 عروض فيديو ($40)',
+            included: true,
+          },
           { title: 'تدقيق ومتابعة تفاعل الفيديو وتحويل الحجوزات لمدة 7–10 أيام', included: true },
           { title: 'أدوات البث الجماعي وحملات استعادة العملاء عبر واتساب', included: true },
           { title: 'مدير حساب ودعم فني مخصص بأولوية عالية', included: true },
@@ -1648,10 +1756,10 @@ export const getLocalizedPackageFeatures = (pkgId: string, lang: ClientOnboardin
       case 'CUSTOM':
       default:
         return [
-          { title: 'يشمل جميع مميزات باقة VIP مع إدارة الفروع المتعددة', included: true },
-          { title: 'بوابات SIM متعددة وتوزيع مركزي للرسائل عبر الفروع', included: true, highlight: true },
-          { title: 'حجوزات غير محدودة وتغطية كاملة لشبكة الفروع', included: true },
-          { title: 'حملات تقييمات جوجل 5 نجوم غير محدودة لجميع الفروع', included: true },
+          { title: 'يشمل جميع مميزات باقة VIP بأقصى أداء وأولوية للصالون', included: true },
+          { title: 'سعة عالية جداً أكثر من 3,000 حجز شهرياً لصالون واحد', included: true, highlight: true },
+          { title: 'عدد غير محدود من الحلاقين والكراسي والتحكم بأوقات الذروة', included: true },
+          { title: 'حملات تقييمات جوجل 5 نجوم واستعادة عملاء غير محدودة', included: true },
           { title: 'إدارة حملات الفيديو المخصصة وبث العروض التسويقية الفيروسية', included: true },
           { title: 'دعم هندسي مباشر 24/7 واستعادة فورية تلقائية', included: true },
         ];
@@ -1677,14 +1785,19 @@ export const getLocalizedPackageFeatures = (pkgId: string, lang: ClientOnboardin
         { title: 'Smart rating router (5★ goes to Google Maps, lower stays private)', included: true },
         { title: 'Multi-barber conflict check & automatic free barber suggestion', included: true },
         { title: 'Private 21–30 day regular client return reminders at full rates', included: true },
-        { title: 'Backup SIM failover & 24/7 auto-healing (<60m recovery)', included: true },
+        { title: '24/7 automatic connection repair & <60m recovery', included: true },
       ];
     case 'VIP':
       return [
         { title: 'Includes all Growth Automation features & services', included: true },
         { title: '3,000 salon bookings / month capacity with priority routing', included: true },
         { title: 'Viral Video Deals & Reels feature unlocked (weekend & weekday deals)', included: true, highlight: true },
-        { title: 'Flexible promo runs: 1 video deal ($15 / PKR 1.5k) or 4 video deals ($40 / PKR 4k)', included: true },
+        {
+          title: isDomestic
+            ? 'Flexible promo runs: 1 video deal (PKR 1,500) or 4 video deals (PKR 4,000)'
+            : 'Flexible promo runs: 1 video deal ($15) or 4 video deals ($40)',
+          included: true,
+        },
         { title: '7 to 10 day video conversion tracking & booking audit', included: true },
         { title: 'WhatsApp broadcast & client win-back promotional tools', included: true },
         { title: 'Dedicated priority account support', included: true },
@@ -1692,10 +1805,10 @@ export const getLocalizedPackageFeatures = (pkgId: string, lang: ClientOnboardin
     case 'CUSTOM':
     default:
       return [
-        { title: 'Includes all VIP Executive features across multi-branch chains', included: true },
-        { title: 'Multi-SIM WhatsApp Gateway Cluster & centralized branch routing', included: true, highlight: true },
-        { title: 'Unlimited salon bookings across your entire branch network', included: true },
-        { title: 'Unlimited Google 5-Star review & feedback campaigns per branch', included: true },
+        { title: 'Includes all VIP Executive features with maximum performance', included: true },
+        { title: 'High-volume capacity (> 3,000 bookings / month for your salon)', included: true, highlight: true },
+        { title: 'Unlimited barber / stylist chairs & peak-hour queue control', included: true },
+        { title: 'Unlimited Google 5-Star review & client win-back campaigns', included: true },
         { title: 'Custom video marketing production & viral promo broadcast campaigns', included: true },
         { title: 'Dedicated 24/7 engineering support & instant auto-recovery', included: true },
       ];
@@ -1788,11 +1901,11 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   // Step 4: Pairing Key & Mode (Single-Phone 8-Digit Code, QR Scan, or App Link)
   const [pairingKey, setPairingKey] = useState('8429-1753');
   const [step4ViewMode, setStep4ViewMode] = useState<'QR_SCAN' | 'DIRECT_LINK' | 'SINGLE_PHONE'>(
-    isSelfServeOwner ? 'SINGLE_PHONE' : 'QR_SCAN'
+    isSelfServeOwner ? 'DIRECT_LINK' : 'QR_SCAN'
   );
   useEffect(() => {
     if (isSelfServeOwner) {
-      setStep4ViewMode('SINGLE_PHONE');
+      setStep4ViewMode('DIRECT_LINK');
     }
   }, [isSelfServeOwner]);
   const [isCopiedPairingKey, setIsCopiedPairingKey] = useState(false);
@@ -1882,7 +1995,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       currency: 'PKR',
       prefix: 'PKR ',
       bookings: '3,000 bookings/mo',
-      scope: 'WhatsApp Auto-Reply + Google 5-Star Reviews + Video Upload Feature Unlocked (1 video @ 1,500 or 4 videos @ 4,000/mo · 7-10 day validation)',
+      scope: 'WhatsApp Auto-Reply + Google 5-Star Reviews + Video Upload Feature Unlocked (1 video @ PKR 1,500 or 4 videos @ PKR 4,000 · 7–10 day validation)',
       agentCommission: 5000,
     },
     {
@@ -1892,8 +2005,8 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       monthlyMaint: 3500, // 10%
       currency: 'PKR',
       prefix: 'PKR ',
-      bookings: '> 3,000 bookings / Multi-Branch',
-      scope: 'Enterprise Multi-Branch & Priority Support (Video Feature Unlocked: 1 to 4 videos/mo · 10% monthly)',
+      bookings: '> 3,000 bookings/mo',
+      scope: 'High-Volume Single Salon · Unlimited Staff Chairs + Custom Video Promo & Priority SLA',
       agentCommission: 7000,
     },
   ];
@@ -1929,7 +2042,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       currency: 'USD',
       prefix: '$',
       bookings: '3,000 bookings/mo',
-      scope: 'WhatsApp Auto-Reply + Google 5-Star Reviews + Video Upload Feature Unlocked (1 video @ $15 or 4 videos @ $40/mo · 7-10 day validation)',
+      scope: 'WhatsApp Auto-Reply + Google 5-Star Reviews + Video Upload Feature Unlocked (1 video @ $15 or 4 videos @ $40 · 7–10 day validation)',
       agentCommission: 32,
     },
     {
@@ -1939,8 +2052,8 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       monthlyMaint: 25, // 10%
       currency: 'USD',
       prefix: '$',
-      bookings: '> 3,000 bookings / Multi-Branch',
-      scope: 'Enterprise Multi-Branch & Priority Support (Video Feature Unlocked: 1 to 4 videos/mo · 10% monthly)',
+      bookings: '> 3,000 bookings/mo',
+      scope: 'High-Volume Single Salon · Unlimited Staff Chairs + Custom Video Promo & Priority SLA',
       agentCommission: 50,
     },
   ];
@@ -2680,11 +2793,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     setTimeout(() => {
       setDrawerIsSubmitting(false);
 
-      const commission = isSelfServeOwner ? 0 : activePackage.agentCommission;
+      const isPureAgent = userRole === 'FIELD_AGENT';
+      const commission = isPureAgent ? activePackage.agentCommission : 0;
       let newRemainingDebt = cashLiabilityHeld;
       let commissionAdjusted = false;
 
-      // Track Pakistan physical cash collection + Option A Net-Adjustment (Agent/Founder only; never Self-Onboarding)
+      // Track Pakistan physical cash collection + Option A Net-Adjustment (Agent/Founder cash; commission adjustment Pure Agent only)
       if (!isSelfServeOwner && detectedCountry.isDomestic) {
         if (setupPaymentMethod === 'Cash Collection') {
           newRemainingDebt = cashLiabilityHeld + activePackage.setupFee;
@@ -2692,7 +2806,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
           if (salonName.trim()) {
             setCashLiabilitySalon(salonName.trim());
           }
-        } else if (cashLiabilityHeld > 0) {
+        } else if (isPureAgent && cashLiabilityHeld > 0) {
           newRemainingDebt = Math.max(0, cashLiabilityHeld - commission);
           setCashLiabilityHeld(newRemainingDebt);
           commissionAdjusted = true;
@@ -2714,19 +2828,19 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
         currencyPrefix: activePackage.prefix,
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         sha256Proof: 'sha256:' + (thumbprintHash || Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)),
-        recipientRoute: isSelfServeOwner
+        recipientRoute: !isPureAgent
           ? clientOnboardingLanguage === 'ur'
             ? `100% براہِ راست ورک کرافٹ اکاؤنٹ (${phone}) · صفر ایجنٹ کمیشن`
             : clientOnboardingLanguage === 'ar'
             ? `100% مباشرة لحساب WORKCRAFT الرسمي (${phone}) · بدون عمولة وكيل`
-            : `100% Direct to WORKCRAFT Official Account (${phone}) · Zero Agent Commission`
+            : `100% Direct to WORKCRAFT Official Account (${phone})`
           : isIntl
           ? `Same-Currency Direct Split: 20% (${activePackage.prefix}${commission.toLocaleString()}) ➔ Agent Local ${activePackage.currency} Account · 80% (${activePackage.prefix}${workcraftShare.toLocaleString()}) ➔ WORKCRAFT (Zero Double FX Loss)`
           : 'Central SIM Gateway Dual Dispatch (Salon Owner + Field Agent Kamran Tariq)',
         commissionAdjusted,
         commissionAmount: commission,
         remainingCashOwed: newRemainingDebt,
-        isSameCurrencySplit: !isSelfServeOwner && isIntl,
+        isSameCurrencySplit: isPureAgent && isIntl,
         workcraftNetAmount: workcraftShare,
         status: 'paid' as const,
       };
@@ -3750,7 +3864,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-xs font-mono font-bold text-[#D29922]">
+                        <span dir="ltr" className="text-xs font-mono font-bold text-[#D29922]">
                           {getLocalizedLocalCurrencyPrefix(detectedCountry, clientOnboardingLanguage)}
                         </span>
                         <input
@@ -3942,7 +4056,8 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     {currentPackageList.map((pkg) => {
                       const isSelected = selectedOnboardingPackage === pkg.id;
                       const isExpanded = expandedPackageId === pkg.id;
-                      const cardFeatures = getLocalizedPackageFeatures(pkg.id, clientOnboardingLanguage);
+                      const cardFeatures = getLocalizedPackageFeatures(pkg.id, clientOnboardingLanguage, detectedCountry.isDomestic);
+                      const cardCopy = getLocalizedPackageCardCopy(pkg.id, clientOnboardingLanguage, detectedCountry.isDomestic);
                       return (
                         <div key={pkg.id} className="flex flex-col gap-2">
                           <div
@@ -3951,7 +4066,9 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                               setExpandedPackageId(pkg.id);
                               setIsPaymentVerified(false); // reset verification if package changes
                             }}
-                            className={`rounded-xl border p-3 text-left transition flex flex-col justify-between cursor-pointer ${
+                            className={`rounded-xl border p-3 transition flex flex-col justify-between cursor-pointer ${
+                              clientOnboardingLanguage === 'en' ? 'text-left' : 'text-right'
+                            } ${
                               isSelected
                                 ? 'border-[#06B6D4] bg-[#21262D] ring-1 ring-[#06B6D4]'
                                 : 'border-[#30363D] bg-[#0D1117] hover:border-[#484F58]'
@@ -3965,10 +4082,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                                 {isSelected && <Check className="size-3.5 text-[#06B6D4]" />}
                               </div>
                               <p className="text-[10px] font-mono font-bold text-[#06B6D4] mt-1">
-                                ⚡ {pkg.bookings}
+                                ⚡ {cardCopy.bookings}
                               </p>
-                              <p className="text-[9px] text-[#8B949E] font-sans mt-1">
-                                {pkg.scope}
+                              <p className="text-[9px] text-[#8B949E] font-sans mt-1 leading-relaxed">
+                                {cardCopy.scope}
                               </p>
                             </div>
                             <div className="mt-2.5 pt-2 border-t border-[#21262D] flex items-center justify-between">
@@ -4050,7 +4167,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 {/* Desktop Package Feature Breakdown Accordion (Full 2-Column Layout — Included Features Only) */}
                 {expandedPackageId && (() => {
                   const targetPkg = currentPackageList.find((p) => p.id === expandedPackageId) || activePackage;
-                  const features = getLocalizedPackageFeatures(targetPkg.id, clientOnboardingLanguage).filter((f) => f.included);
+                  const features = getLocalizedPackageFeatures(targetPkg.id, clientOnboardingLanguage, detectedCountry.isDomestic).filter((f) => f.included);
 
                   return (
                     <div className="hidden lg:block rounded-2xl border border-[#06B6D4]/40 bg-[#0D1117] p-4 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -4216,29 +4333,29 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       </div>
                     </div>
 
-                    {/* Option A Commission Auto Net-Adjustment Feedback (Agent / Founder Pakistan Domestic Only) */}
-                    {!isSelfServeOwner && verifiedPaymentData.commissionAdjusted && (
+                    {/* Option A Commission Auto Net-Adjustment Feedback (Pure Agent Hub Only) */}
+                    {userRole === 'FIELD_AGENT' && verifiedPaymentData.commissionAdjusted && (
                       <div className="mt-2 rounded-lg bg-[#0D1117] border border-[#116329] p-2 text-[11px] font-sans text-[#3FB950] leading-relaxed">
                         <strong>{t.optionAOffsetApplied}</strong> PKR {verifiedPaymentData.commissionAmount.toLocaleString()} {t.optionAOffsetDesc} {cashLiabilitySalon}. {t.remainingCashDueLabel} <strong>PKR {verifiedPaymentData.remainingCashOwed.toLocaleString()}</strong>.
                       </div>
                     )}
 
-                    {/* Query 3: Outside-Pakistan Same-Currency Direct Split Receipt Feedback (Agent / Founder Only) */}
-                    {!isSelfServeOwner && verifiedPaymentData.isSameCurrencySplit && (
+                    {/* Outside-Pakistan Same-Currency Direct Split Receipt Feedback (Pure Agent Hub Only) */}
+                    {userRole === 'FIELD_AGENT' && verifiedPaymentData.isSameCurrencySplit && (
                       <div className="mt-2 rounded-lg bg-[#0D1117] border border-[#06B6D4]/40 p-2.5 text-[11px] font-sans text-[#06B6D4] leading-relaxed">
                         <strong>Overseas Same-Currency Direct Split (Zero Double FX Loss):</strong> 20% (<strong>{verifiedPaymentData.currencyPrefix}{verifiedPaymentData.commissionAmount.toLocaleString()} {verifiedPaymentData.currency}</strong>) routed straight to Agent local payout account · 80% (<strong>{verifiedPaymentData.currencyPrefix}{(verifiedPaymentData.workcraftNetAmount ?? 0).toLocaleString()} {verifiedPaymentData.currency}</strong>) settled directly to WorkCraft.
                       </div>
                     )}
 
-                    {/* Self-Onboarding Zero Commission Confirmation */}
-                    {isSelfServeOwner && (
+                    {/* Clean Direct Settlement Confirmation (Salon Owner Self-Onboarding & Founder) */}
+                    {userRole !== 'FIELD_AGENT' && (
                       <div className="mt-2 rounded-lg bg-[#0D1117] border border-[#116329] p-2.5 text-[11px] font-sans text-[#3FB950] leading-relaxed">
                         {clientOnboardingLanguage === 'ur' ? (
-                          <><strong>براہِ راست سیلون مالک ادائیگی:</strong> مکمل رقم ({verifiedPaymentData.currencyPrefix}{verifiedPaymentData.amount.toLocaleString()}) 100% ورک کرافٹ اکاؤنٹ میں موصول ہوئی (صفر ایجنٹ کمیشن)۔</>
+                          <><strong>مکمل براہِ راست ورک کرافٹ ادائیگی:</strong> رقم ({verifiedPaymentData.currencyPrefix}{verifiedPaymentData.amount.toLocaleString()}) 100% ورک کرافٹ اکاؤنٹ میں موصول ہوئی۔</>
                         ) : clientOnboardingLanguage === 'ar' ? (
-                          <><strong>دفع مباشر من مالك الصالون:</strong> تم إيداع 100% من المبلغ ({verifiedPaymentData.currencyPrefix}{verifiedPaymentData.amount.toLocaleString()}) مباشرة في حساب WORKCRAFT الرسمي (بدون عمولة وكيل).</>
+                          <><strong>دفع مباشر كامل لحساب WORKCRAFT:</strong> تم استلام 100% من المبلغ ({verifiedPaymentData.currencyPrefix}{verifiedPaymentData.amount.toLocaleString()}) في حساب WORKCRAFT الرسمي.</>
                         ) : (
-                          <><strong>Direct Self-Onboarding Settlement:</strong> 100% of your package payment (<strong>{verifiedPaymentData.currencyPrefix}{verifiedPaymentData.amount.toLocaleString()}</strong>) settles straight to WORKCRAFT accounts with <strong>zero agent commission deducted</strong>.</>
+                          <><strong>Direct Full Settlement:</strong> 100% of the package payment (<strong>{verifiedPaymentData.currencyPrefix}{verifiedPaymentData.amount.toLocaleString()}</strong>) is confirmed and settled directly to WORKCRAFT accounts.</>
                         )}
                       </div>
                     )}
@@ -4334,12 +4451,32 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <span className="text-[#06B6D4] font-bold">{salonName}</span>
                 </div>
 
-                {/* Handshake Mode Switcher: Single-Phone 8-Digit Code, On-Site QR, or App Link */}
+                {/* Handshake Mode Switcher: Best 2 Easiest Self-Onboarding Ways (Link + 8-Digit Code) vs Agent/Founder (QR + Link + 8-Digit Code) */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-[#30363D] bg-[#0D1117] p-2.5">
                   <span className="text-[11px] font-mono font-bold text-[#8B949E]">
                     {t.modeLabel}
                   </span>
                   <div className="flex flex-wrap items-center gap-1 bg-[#161B22] p-1 rounded-lg border border-[#30363D] shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setStep4ViewMode('DIRECT_LINK')}
+                      className={`min-h-[36px] px-3 py-1.5 rounded-md text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                        step4ViewMode === 'DIRECT_LINK'
+                          ? 'bg-[#D29922] text-[#0D1117]'
+                          : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                      }`}
+                    >
+                      <Smartphone className="size-3.5" />
+                      <span>
+                        {isSelfServeOwner
+                          ? clientOnboardingLanguage === 'ur'
+                            ? 'ون ٹیپ ایپ لنک (سب سے آسان)'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'رابط مباشر بنقرة واحدة (الأسهل)'
+                            : '1-Tap App Link (Easiest)'
+                          : t.modeLink}
+                      </span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => setStep4ViewMode('SINGLE_PHONE')}
@@ -4358,30 +4495,20 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           : '8-Digit Code (Single Phone)'}
                       </span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setStep4ViewMode('QR_SCAN')}
-                      className={`min-h-[36px] px-3 py-1.5 rounded-md text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                        step4ViewMode === 'QR_SCAN'
-                          ? 'bg-[#06B6D4] text-[#0D1117]'
-                          : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                      }`}
-                    >
-                      <QrCode className="size-3.5" />
-                      <span>{t.modeQr}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setStep4ViewMode('DIRECT_LINK')}
-                      className={`min-h-[36px] px-3 py-1.5 rounded-md text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                        step4ViewMode === 'DIRECT_LINK'
-                          ? 'bg-[#D29922] text-[#0D1117]'
-                          : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                      }`}
-                    >
-                      <Smartphone className="size-3.5" />
-                      <span>{t.modeLink}</span>
-                    </button>
+                    {!isSelfServeOwner && (
+                      <button
+                        type="button"
+                        onClick={() => setStep4ViewMode('QR_SCAN')}
+                        className={`min-h-[36px] px-3 py-1.5 rounded-md text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                          step4ViewMode === 'QR_SCAN'
+                            ? 'bg-[#06B6D4] text-[#0D1117]'
+                            : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                        }`}
+                      >
+                        <QrCode className="size-3.5" />
+                        <span>{t.modeQr}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -4519,8 +4646,8 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       </ol>
                     </div>
                   </div>
-                ) : step4ViewMode === 'QR_SCAN' ? (
-                  /* Mode A: On-Site QR Scanner */
+                ) : !isSelfServeOwner && step4ViewMode === 'QR_SCAN' ? (
+                  /* Mode A: On-Site QR Scanner (Agent & Founder Only) */
                   <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-5 text-center space-y-4">
                     <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-5 text-slate-900 border-2 border-[#06B6D4]">
                       <svg viewBox="0 0 100 100" className="w-full h-full text-slate-950">
@@ -4580,14 +4707,26 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     </div>
                   </div>
                 ) : (
-                  /* Mode B: Remote App Link */
+                  /* Mode B: Direct One-Tap Pairing & App Link (Primary for Self-Onboarding + Agent/Founder Remote) */
                   <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-5 space-y-4 overflow-hidden">
-                    <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B] p-4 space-y-2 overflow-hidden">
+                    <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B] p-4 space-y-2.5 overflow-hidden">
                       <span className="text-[10px] font-mono font-bold uppercase text-[#D29922] tracking-wider block">
-                        {t.remoteLinkTitle}
+                        {isSelfServeOwner
+                          ? clientOnboardingLanguage === 'ur'
+                            ? 'ون ٹیپ سیلون واٹس ایپ اور ایپ لنک'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'رابط الربط المباشر بنقرة واحدة للصالون'
+                            : 'One-Tap Direct WhatsApp & App Pairing Link'
+                          : t.remoteLinkTitle}
                       </span>
                       <p className="text-xs text-[#F0F6FC] font-sans leading-relaxed break-words [overflow-wrap:break-word]">
-                        {t.remoteLinkDesc}
+                        {isSelfServeOwner
+                          ? clientOnboardingLanguage === 'ur'
+                            ? 'اپنے موبائل فون سے براہِ راست واٹس ایپ جوڑنے کے لیے نیچے دیا گیا محفوظ لنک کھولیں یا کاپی کریں — کسی دوسری اسکرین یا کیو آر اسکین کی ضرورت نہیں:'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'افتح أو انسخ الرابط الآمن أدناه لربط واتساب صالونك مباشرة من نفس الهاتف بدون الحاجة لشاشة ثانية أو مسح QR:'
+                            : 'Open or copy your private pairing link below to connect your salon WhatsApp directly from this phone — no second screen or QR scan needed:'
+                          : t.remoteLinkDesc}
                       </p>
                       <div
                         dir="ltr"
@@ -4595,23 +4734,81 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       >
                         https://portal.workcraft.local/onboard/{salonName.toLowerCase().replace(/[^a-z0-9]/g, '-') || 'salon'}?key={pairingKey}
                       </div>
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const slug = salonName.toLowerCase().replace(/[^a-z0-9]/g, '-') || 'salon';
+                            const url = `https://portal.workcraft.local/onboard/${slug}?key=${pairingKey}`;
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                              navigator.clipboard.writeText(url);
+                            }
+                            setIsCopiedPairingKey(true);
+                            setTimeout(() => setIsCopiedPairingKey(false), 2500);
+                          }}
+                          className="min-h-[40px] inline-flex items-center gap-1.5 rounded-lg bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-3.5 py-1.5 text-xs font-mono font-bold transition active:scale-95"
+                        >
+                          {isCopiedPairingKey ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                          <span>{isCopiedPairingKey ? t.copiedLink : t.copyLink}</span>
+                        </button>
+                      </div>
                     </div>
 
                     <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-4 space-y-2 font-mono text-xs overflow-hidden">
                       <span className="text-[#F0F6FC] font-bold block text-[11px]">
-                        📱 How Salon Owner Saves &quot;WorkCraft&quot; to Phone:
+                        {clientOnboardingLanguage === 'ur'
+                          ? '📱 فون کی ہوم اسکرین پر WorkCraft آئیکن اور لنک محفوظ کرنے کا طریقہ:'
+                          : clientOnboardingLanguage === 'ar'
+                          ? '📱 طريقة ربط واتساب وحفظ أيقونة WorkCraft على الشاشة الرئيسية:'
+                          : '📱 How to Link & Save "WorkCraft" to Your Phone:'}
                       </span>
                       <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-[#8B949E] font-sans">
-                        <li>Open the link in Chrome (Android) or Safari (iPhone).</li>
-                        <li>Tap the browser menu (⋮ or Share) ➔ <strong className="text-[#F0F6FC]">&ldquo;Add to Home Screen&rdquo;</strong>.</li>
                         <li>
-                          Enter salon link code:{' '}
-                          <strong dir="ltr" className="text-[#06B6D4] font-mono break-all [overflow-wrap:break-word]">
-                            {pairingKey}
-                          </strong>
-                          .
+                          {clientOnboardingLanguage === 'ur'
+                            ? 'اوپر دیا گیا لنک کروم (Android) یا سفاری (iPhone) میں کھولیں۔'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'افتح الرابط أعلاه في متصفح Chrome (أندرويد) أو Safari (آيفون).'
+                            : 'Open the link in Chrome (Android) or Safari (iPhone).'}
                         </li>
-                        <li>Opens with 1 tap like an installed app—no app store download needed.</li>
+                        <li>
+                          {clientOnboardingLanguage === 'ur'
+                            ? 'براؤزر مینو (⋮ یا Share) سے "Add WorkCraft icon to phone home screen" منتخب کریں۔'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'اضغط على قائمة المتصفح (⋮ أو مشاركة) واختر "إضافة WorkCraft إلى الشاشة الرئيسية".'
+                            : 'Tap the browser menu (⋮ or Share) ➔ "Add WorkCraft icon to phone home screen".'}
+                        </li>
+                        <li>
+                          {clientOnboardingLanguage === 'ur' ? (
+                            <>
+                              سیلون لنک کوڈ درج کریں:{' '}
+                              <strong dir="ltr" className="text-[#06B6D4] font-mono break-all [overflow-wrap:break-word]">
+                                {pairingKey}
+                              </strong>
+                            </>
+                          ) : clientOnboardingLanguage === 'ar' ? (
+                            <>
+                              أدخل رمز ربط الصالون:{' '}
+                              <strong dir="ltr" className="text-[#06B6D4] font-mono break-all [overflow-wrap:break-word]">
+                                {pairingKey}
+                              </strong>
+                            </>
+                          ) : (
+                            <>
+                              Enter salon link code:{' '}
+                              <strong dir="ltr" className="text-[#06B6D4] font-mono break-all [overflow-wrap:break-word]">
+                                {pairingKey}
+                              </strong>
+                              .
+                            </>
+                          )}
+                        </li>
+                        <li>
+                          {clientOnboardingLanguage === 'ur'
+                            ? 'اب بغیر ایپ اسٹور کے صرف ایک کلک سے لائیو سیلون ڈیش بورڈ کھل جائے گا۔'
+                            : clientOnboardingLanguage === 'ar'
+                            ? 'يفتح بلمسة واحدة كتطبيق مثبت على هاتفك بدون الحاجة لمتجر التطبيقات.'
+                            : 'Opens with 1 tap like an installed app—no app store download needed.'}
+                        </li>
                       </ol>
                     </div>
                   </div>
@@ -6404,14 +6601,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       ? 'عالمی و یورپی Stripe 3D-Secure کارڈ پروسیسنگ · Apple Pay'
                       : 'Stripe 3D-Secure UK/EU & Global Card Processing · Apple Pay'}
                   </p>
-                  {isSelfServeOwner ? (
+                  {userRole !== 'FIELD_AGENT' ? (
                     <>
                       <p className="text-[#3FB950] text-[11px]">
                         {clientOnboardingLanguage === 'ar'
                           ? 'تحويل مباشر 100% إلى حساب WORKCRAFT الرسمي (بدون أي عمولة وكيل)'
                           : clientOnboardingLanguage === 'ur'
                           ? '100% براہ راست ادائیگی WORKCRAFT آفیشل اکاؤنٹ میں (صفر ایجنٹ کمیشن)'
-                          : `100% Direct Settlement (${activePackage.currency}) to WORKCRAFT Official Account · Zero Agent Commission`}
+                          : `100% Direct Settlement (${activePackage.currency}) to WORKCRAFT Official Account`}
                       </p>
                       <p className="text-[10px] text-[#8B949E]">
                         {clientOnboardingLanguage === 'ar'
@@ -6569,8 +6766,8 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 </div>
               )}
 
-              {/* Query 3: Outside-Pakistan Same-Currency Direct 20% / 80% Split Checkout */}
-              {!detectedCountry.isDomestic && (userRole as string) !== 'SALON_OWNER' && (
+              {/* Query 6: Outside-Pakistan Same-Currency Direct 20% / 80% Split Checkout (Pure Agent Hub Only) */}
+              {!detectedCountry.isDomestic && userRole === 'FIELD_AGENT' && (
                 <div className="p-3.5 rounded-xl border border-[#06B6D4]/40 bg-[#0D1117] space-y-2 font-mono text-xs">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[#06B6D4] font-bold">
                     <span className="flex items-center gap-1.5">

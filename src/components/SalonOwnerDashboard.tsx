@@ -419,7 +419,7 @@ const REGION_CONFIGS: Record<
         id: 'STARTER',
         name: 'Starter Setup',
         setupFee: 75,
-        monthlyMaint: 8,
+        monthlyMaint: 7.5,
         bookingsLimit: '500 bookings/mo',
         badge: 'Entry',
         features: [
@@ -705,7 +705,7 @@ export const INITIAL_CLIENT_SALONS: ClientSalon[] = [
     location: 'Soho, London, UK',
     planId: 'STARTER',
     plan: 'Starter Setup',
-    maint: 8,
+    maint: 7.5,
     language: 'en',
     onboardingLanguage: 'en',
   },
