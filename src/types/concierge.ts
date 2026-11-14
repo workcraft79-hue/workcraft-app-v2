@@ -99,6 +99,16 @@ export interface WhatsAppMessageLog {
   dir: 'ltr' | 'rtl';
   body: string;
   timestamp: string;
+  eventMetadata?: {
+    eventType:
+      | 'APPOINTMENT_CONFIRMED'
+      | 'REMINDER_REPLY_CONFIRMED'
+      | 'REMINDER_REPLY_LATE'
+      | 'REMINDER_REPLY_RESCHEDULE';
+    barberName?: string;
+    services?: string;
+    timeSlot?: string;
+  };
 }
 
 export interface SalonConciergeStateResponse {

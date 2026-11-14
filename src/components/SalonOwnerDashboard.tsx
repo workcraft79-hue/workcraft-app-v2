@@ -44,6 +44,7 @@ import {
   Banknote,
   PhoneCall,
   Save,
+  Zap,
 } from 'lucide-react';
 import { PortalCard } from './PortalCard';
 import { BroadcastTab } from './Tabs/BroadcastTab';
@@ -943,6 +944,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     };
   });
   const [conciergeState, setConciergeState] = useState<SalonConciergeStateResponse | null>(null);
+  const seenLogIdsRef = useRef<Set<string>>(new Set());
+  const seenApptIdsRef = useRef<Set<string>>(new Set());
+  const hasHydratedConciergeRef = useRef<boolean>(false);
 
   // Query 1: Top-Right Upgrade Modal & Payment Details Input
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
@@ -990,18 +994,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [reLoginError, setReLoginError] = useState<string | null>(null);
   const [reLoginMatchedSalonId, setReLoginMatchedSalonId] = useState<string>(currentSalon.id);
 
-  // Query 3 & 5: Interactive WhatsApp Chat Prompts (Barber Conflict & Ambiguous Time Disambiguation)
-  const [barberConflictPrompt, setBarberConflictPrompt] = useState<{
-    slot: string;
-    requestedBarber: string;
-    suggestedBarber: string;
-  } | null>(null);
-  const [timeDisambiguationPrompt, setTimeDisambiguationPrompt] = useState<{
-    rawHour: string;
-  } | null>(null);
-  const [selectedCartBarber, setSelectedCartBarber] = useState<string>('Master Aslam');
-
-  // Query 1 & 4 (New): Owner Onboarding / Voice Language vs End-User Chat Language
+  // Owner Onboarding / Voice Language & Shop-Floor Loudspeaker Controls
   const [ownerLang, setOwnerLang] = useState<VoiceLang>(currentSalon.onboardingLanguage);
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
   const [voiceFilter, setVoiceFilter] = useState<'ALL' | 'URGENT_ONLY'>('ALL');
@@ -1010,19 +1003,21 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [currentlySpeakingText, setCurrentlySpeakingText] = useState<string | null>(null);
   const wakeLockRef = useRef<{ release?: () => Promise<void> } | null>(null);
 
-  // Rush-Hour Loudspeaker / Bluetooth Speaker Boost & Auto-Chair Advance
-  const [isLoudspeakerBoostActive, setIsLoudspeakerBoostActive] = useState(false);
-  const [autoAdvanceChairs, setAutoAdvanceChairs] = useState(false);
+  // Rush-Hour Loudspeaker / Bluetooth Speaker Boost (ON by default so floor alerts cut through noise)
+  const [isLoudspeakerBoostActive, setIsLoudspeakerBoostActive] = useState(true);
+  const [showVoiceLogsDrawer, setShowVoiceLogsDrawer] = useState(false);
+  const [showProofLedgerDrawer, setShowProofLedgerDrawer] = useState(false);
+  const [isTestingLoudAlert, setIsTestingLoudAlert] = useState(false);
 
   // Stylist / Barber Top Services Breakdown Selection
   const [selectedBarberForServices, setSelectedBarberForServices] = useState<string>('ALL');
 
-  // Interactive Walk-In Quick Modal
+  // Interactive Walk-In Quick Modal (Multi-Service Support)
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [walkInName, setWalkInName] = useState('Walk-in Client');
-  const [walkInBarber, setWalkInBarber] = useState('Tariq');
-  const [walkInService, setWalkInService] = useState('Master Haircut & Beard Sculpt');
-  const [walkInPrice, setWalkInPrice] = useState(2000);
+  const [walkInBarber, setWalkInBarber] = useState('Master Aslam');
+  const [walkInSelectedServiceIds, setWalkInSelectedServiceIds] = useState<string[]>(['s1']);
+  const [walkInPrice, setWalkInPrice] = useState(800);
   const [walkInPhone, setWalkInPhone] = useState('');
   const [walkInBirthDate, setWalkInBirthDate] = useState('');
   const [walkInImmediateChair, setWalkInImmediateChair] = useState(false);
@@ -1034,9 +1029,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       clientName: 'Bilal Ahmed',
       clientLang: 'ur',
       ownerVoiceLang: 'ur',
-      summary: 'New 03:30 PM booking · Barber: Aslam · Master Haircut & Skin Fade',
+      summary: 'New 03:30 PM booking · Barber: Master Aslam · Master Haircut & Skin Fade',
       spokenText:
-        'Hamza Sahab! Aslam ki nayi appointment Bilal Ahmed kay sath 3:30 PM par confirm ho gayi hai: Master Haircut and Skin Fade.',
+        'Hamza Sahab! Master Aslam ki nayi appointment Bilal Ahmed kay sath 3:30 PM par confirm ho gayi hai: Master Haircut and Skin Fade.',
       time: '03:15 PM',
       isUrgent: false,
     },
@@ -1054,7 +1049,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     },
   ]);
 
-  // Query 4 (Prev): 5th-of-Month Maintenance Cycle Stage & Automated Reminders
+  // 5th-of-Month Maintenance Cycle Stage & Automated Reminders
   const [maintCycleStage, setMaintCycleStage] = useState<MaintCycleStage>('PAID_ACTIVE');
   const [maintTid, setMaintTid] = useState<string | null>('EP-90482716455');
   const [isPayingMaint, setIsPayingMaint] = useState(false);
@@ -1063,23 +1058,6 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
   const isMaintenanceOverdue = maintCycleStage === 'OVERDUE_TIER_2';
   const isMaintPaid = maintCycleStage === 'PAID_ACTIVE';
-
-  // Query 5 & 6: End-User Regional Chatbot, Day-of-Week / 7-10 Day VIP Deal Engine, Multi-Service Cart & Immutable Proof
-  const [endUserLang, setEndUserLang] = useState<ClientChatLang>(
-    regionConfig.clientLanguages[0].id
-  );
-  const [isLanguageConfirmedByClient, setIsLanguageConfirmedByClient] = useState(true);
-  const [dayScheduleMode, setDayScheduleMode] = useState<'FRI_SUN_WEEKEND' | 'MON_THU_NORMAL'>(
-    'FRI_SUN_WEEKEND'
-  );
-  const [vipCampaignMode, setVipCampaignMode] = useState<'WEEKEND_ONLY' | 'CONTINUOUS_7_10_DAYS'>(
-    'WEEKEND_ONLY'
-  );
-  const [selectedCartServiceIds, setSelectedCartServiceIds] = useState<string[]>(['s1', 's2']);
-  const [selectedCartSlot, setSelectedCartSlot] = useState<string>('04:30 PM');
-  const [cartClientName, setCartClientName] = useState<string>('Ali Raza');
-  const [cartClientPhone, setCartClientPhone] = useState<string>('+92 300 4411223');
-  const [cartClientBirthDate, setCartClientBirthDate] = useState<string>('');
 
   const [immutableProofs, setImmutableProofs] = useState<ImmutableProofRecord[]>([
     {
@@ -1097,54 +1075,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     },
   ]);
 
-  // Query 4 & 5: Automated Birthday & Festival Wishes (100% Full Standard Rate — Zero Discounts Until Market Review)
-  const [noShowChecks, setNoShowChecks] = useState<Record<string, 'PENDING' | 'CONFIRMED' | 'WAITLIST_FILLED'>>({
-    'BK-101': 'CONFIRMED',
-    'BK-103': 'PENDING',
-  });
-  const [rebookWhisperSentIds, setRebookWhisperSentIds] = useState<string[]>([]);
-  const [openChairAlertSent, setOpenChairAlertSent] = useState(false);
-
-  const [celebrations, setCelebrations] = useState<CelebrationClient[]>([
-    {
-      id: 'cel-1',
-      clientName: 'Ali Raza',
-      phone: '+92 300 1234567',
-      preferredLang: 'ur',
-      eventType: 'BIRTHDAY',
-      eventDate: 'Today (Nov 10)',
-      lastService: 'Master Haircut & Beard',
-      sent: false,
-    },
-    {
-      id: 'cel-2',
-      clientName: 'Khalid Al-Mansoor',
-      phone: '+971 50 8923411',
-      preferredLang: 'ar',
-      eventType: 'BIRTHDAY',
-      eventDate: 'Tomorrow (Nov 11)',
-      lastService: 'Royal Grooming VIP',
-      sent: false,
-    },
-    {
-      id: 'cel-3',
-      clientName: 'Bilal Ahmed',
-      phone: '+92 321 9876543',
-      preferredLang: 'en',
-      eventType: 'EID_UL_FITR',
-      eventDate: 'Upcoming Festival Campaign',
-      lastService: 'Charcoal Detox Facial',
-      sent: true,
-    },
-  ]);
-
-  // Sync salon defaults when switching test salons
+  // Sync salon defaults when switching test salons + poll incoming WhatsApp confirmations & reminder replies
   useEffect(() => {
     setOwnerLang(currentSalon.onboardingLanguage);
-    const cfg = getRegionFromPhone(currentSalon.phone);
+    const cfg = getRegionFromPhone(currentSalon.phone, currentSalon.location);
     setSelectedUpgradeChannel(cfg.paymentChannels[0].id);
     setSelectedUpgradeTargetId(null);
-    setEndUserLang(cfg.clientLanguages[0].id);
+    hasHydratedConciergeRef.current = false;
+    seenLogIdsRef.current = new Set();
+    seenApptIdsRef.current = new Set();
 
     let cancelled = false;
     const params = new URLSearchParams({
@@ -1155,7 +1094,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/concierge-state?${params.toString()}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: SalonConciergeStateResponse | null) => {
-        if (!cancelled && data) setConciergeState(data);
+        if (!cancelled && data) {
+          data.logs.forEach((l) => seenLogIdsRef.current.add(l.id));
+          data.appointments.forEach((a) => seenApptIdsRef.current.add(a.id));
+          hasHydratedConciergeRef.current = true;
+          setConciergeState(data);
+        }
       })
       .catch(() => {});
 
@@ -1598,20 +1542,6 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     },
   ]);
 
-  // Query 6: VIP Deal Applicability Calculation (Fri-Sun Weekend vs Mon-Thu Normal + 7-10 Day Validation)
-  const isVipPackage = currentSalon.planId === 'VIP' || currentSalon.planId === 'CUSTOM';
-  const isVipDealActiveNow =
-    isVipPackage &&
-    (dayScheduleMode === 'FRI_SUN_WEEKEND' || vipCampaignMode === 'CONTINUOUS_7_10_DAYS');
-  const vipDealDiscountRate = isVipDealActiveNow ? 0.25 : 0; // 25% OFF on Fri-Sun or during active 7-10 Day Validation Deal
-  const pricingRuleBadge = !isVipPackage
-    ? 'Standard Rates (Upgrade to VIP for Auto Deals)'
-    : dayScheduleMode === 'FRI_SUN_WEEKEND'
-    ? 'Fri–Sun Weekend VIP Deal Active (25% OFF)'
-    : vipCampaignMode === 'CONTINUOUS_7_10_DAYS'
-    ? '7–10 Day VIP Validation Campaign Active (25% OFF Mon–Thu)'
-    : 'Mon–Thu Normal Days · Standard Menu Rates Applied';
-
   const isLadies =
     onboardedData?.salonCategory === 'LADIES' ||
     salonCategory === 'LADIES' ||
@@ -1699,28 +1629,32 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   useEffect(() => {
     if (!onboardedData) return;
     setOwnerLang(onboardedData.language);
-    setEndUserLang(onboardedData.language);
     if (onboardedData.services && onboardedData.services.length > 0) {
-      setServices(
-        onboardedData.services.map((s) => {
-          if (s.translations && (s.translations.ur || s.translations.ar)) {
-            SERVICE_TRANSLATIONS[s.name] = {
-              ur: s.translations.ur || s.name,
-              ar: s.translations.ar || s.name,
-            };
-          }
-          return {
-            id: s.id,
-            name: s.name,
-            durationMins: 35,
-            price: s.price,
-            active: s.enabled,
+      const mapped = onboardedData.services.map((s) => {
+        if (s.translations && (s.translations.ur || s.translations.ar)) {
+          SERVICE_TRANSLATIONS[s.name] = {
+            ur: s.translations.ur || s.name,
+            ar: s.translations.ar || s.name,
           };
-        })
-      );
+        }
+        return {
+          id: s.id,
+          name: s.name,
+          durationMins: 35,
+          price: s.price,
+          active: s.enabled,
+        };
+      });
+      setServices(mapped);
+      const firstActive = mapped.find((s) => s.active);
+      if (firstActive) {
+        setWalkInSelectedServiceIds([firstActive.id]);
+        setWalkInPrice(firstActive.price);
+      }
     }
     if (onboardedData.barbers && onboardedData.barbers.length > 0) {
       setBarbersList(onboardedData.barbers);
+      setWalkInBarber(onboardedData.barbers[0]);
     }
   }, [onboardedData]);
   const [newBarberDashboardInput, setNewBarberDashboardInput] = useState('');
@@ -1804,431 +1738,231 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setTimeout(() => setMaintToast(null), 4000);
   };
 
-  // Query 2 Voice Booking Announcement (Speaks in Owner's Own Voice Language)
-  const triggerVoiceBookingAnnouncement = (
-    ownerFirst: string,
-    barber: string,
-    client: string,
-    time: string,
-    servicesText: string,
-    priceVal: number,
-    clientLangUsed: ClientChatLang = 'ur'
-  ) => {
-    const newClient: BookingRecord = {
-      id: `BK-${Date.now().toString().slice(-3)}`,
-      clientName: client,
-      barberName: barber,
-      phone: cartClientPhone,
-      service: servicesText,
-      price: priceVal,
-      timeSlot: time,
-      status: 'CONFIRMED',
-    };
-    setBookings((prev) => [newClient, ...prev]);
+  // Hands-Free Loudspeaker Engine for Incoming Appointment Confirmations & Reminder Replies
+  const announceInboundEventLoudly = (params: {
+    eventType:
+      | 'APPOINTMENT_CONFIRMED'
+      | 'REMINDER_REPLY_CONFIRMED'
+      | 'REMINDER_REPLY_LATE'
+      | 'REMINDER_REPLY_RESCHEDULE';
+    clientName: string;
+    clientPhone: string;
+    clientLang: ClientChatLang;
+    barberName: string;
+    servicesText: string;
+    timeSlot: string;
+    rawBody: string;
+  }) => {
+    const { eventType, clientName, clientPhone, clientLang, barberName, servicesText, timeSlot, rawBody } =
+      params;
+    const isUrgent =
+      eventType === 'REMINDER_REPLY_LATE' || eventType === 'REMINDER_REPLY_RESCHEDULE';
 
-    const speechByOwnerLang: Record<VoiceLang, string> = {
-      en: `${ownerFirst}, your barber ${barber} has a new appointment from ${client} at ${time}. Services: ${servicesText}.`,
-      ur: `${ownerFirst} صاحب، آپ کے باربر ${barber} کی نئی اپائنٹمنٹ ${client} کے ساتھ ${time} پر کنفرم ہو گئی ہے۔ سروسز: ${servicesText}۔`,
-      ar: `${ownerFirst}، الحلاق ${barber} لديه موعد جديد مع ${client} في الساعة ${time}. الخدمات: ${servicesText}.`,
+    const speechByLang: Record<VoiceLang, string> = {
+      en:
+        eventType === 'APPOINTMENT_CONFIRMED'
+          ? `Attention! Appointment confirmed. ${clientName} wants barber ${barberName}. Services: ${servicesText}, for ${timeSlot}.`
+          : eventType === 'REMINDER_REPLY_CONFIRMED'
+          ? `Reminder reply! ${clientName} confirmed coming at ${timeSlot} with barber ${barberName}.`
+          : eventType === 'REMINDER_REPLY_LATE'
+          ? `Urgent arrival update! ${clientName} replied they are running 15 minutes late for ${timeSlot} with ${barberName}.`
+          : `Urgent schedule update! ${clientName} cannot make ${timeSlot} and requested to reschedule.`,
+      ur:
+        eventType === 'APPOINTMENT_CONFIRMED'
+          ? `توجہ فرمائیں! ${clientName} کی اپائنٹمنٹ باربر ${barberName} کے ساتھ ${timeSlot} پر کنفرم ہو گئی ہے۔ سروسز: ${servicesText}۔`
+          : eventType === 'REMINDER_REPLY_CONFIRMED'
+          ? `ریمائنڈر کا جواب! ${clientName} نے ${timeSlot} پر باربر ${barberName} کے پاس آنے کی تصدیق کر دی ہے۔`
+          : eventType === 'REMINDER_REPLY_LATE'
+          ? `ضروری اطلاع! ${clientName} نے ریمائنڈر پر جواب دیا ہے کہ وہ ${timeSlot} پر تھوڑی دیر سے پہنچیں گے۔`
+          : `اہم اطلاع! ${clientName} آج ${timeSlot} پر نہیں آ سکیں گے اور نیا وقت مانگا ہے۔`,
+      ar:
+        eventType === 'APPOINTMENT_CONFIRMED'
+          ? `تنبيه! تم تأكيد موعد جديد. ${clientName} يريد الحلاق ${barberName}. الخدمات: ${servicesText} الساعة ${timeSlot}.`
+          : eventType === 'REMINDER_REPLY_CONFIRMED'
+          ? `رد التذكير! أكد ${clientName} حضوره الساعة ${timeSlot} مع الحلاق ${barberName}.`
+          : eventType === 'REMINDER_REPLY_LATE'
+          ? `تحديث وصول عاجل! أرسل ${clientName} أنه سيتأخر عن موعد ${timeSlot}.`
+          : `تنبيه جدول عاجل! طلب ${clientName} تأجيل موعد ${timeSlot}.`,
     };
 
-    const spokenText = speechByOwnerLang[ownerLang];
+    const romanUrduByEvent: Record<typeof eventType, string> = {
+      APPOINTMENT_CONFIRMED: `Tawajjo farmayein! ${clientName} ki appointment barber ${barberName} kay sath ${timeSlot} par confirm ho gayi hai. Services: ${servicesText}.`,
+      REMINDER_REPLY_CONFIRMED: `Reminder jawab: ${clientName} nay ${timeSlot} par barber ${barberName} kay paas aane ki tasdeeq kar di hai.`,
+      REMINDER_REPLY_LATE: `Zaroori itlaa: ${clientName} nay reminder par jawab diya hai ke woh ${timeSlot} par late pohanchein gay.`,
+      REMINDER_REPLY_RESCHEDULE: `Ahem itlaa: ${clientName} aaj ${timeSlot} par nahi aa sakein gay aur naya time manga hai.`,
+    };
+
+    const spokenText = speechByLang[ownerLang];
+    const logType: VoiceEventLog['type'] =
+      eventType === 'APPOINTMENT_CONFIRMED'
+        ? 'BOOKING'
+        : isUrgent
+        ? 'REPLY_URGENT'
+        : 'REPLY_CONFIRMED';
+
     setVoiceLogs((prev) => [
       {
-        id: `vlog-${Date.now()}`,
-        type: 'BOOKING',
-        clientName: client,
-        clientLang: clientLangUsed,
-        ownerVoiceLang: ownerLang,
-        summary: `New ${time} booking (${clientLangUsed.toUpperCase()} chat ➔ ${ownerLang.toUpperCase()} voice) · Barber: ${barber}`,
-        spokenText,
-        time: 'Just now',
-        isUrgent: false,
-      },
-      ...prev,
-    ]);
-
-    const romanUrduText = `${ownerFirst} Sahab! Aap kay barber ${barber} ki nayi appointment ${client} kay sath ${time} par confirm ho gayi hai. Services: ${servicesText}.`;
-
-    if (voiceFilter === 'ALL') {
-      speakHandsFree(spokenText, ownerLang, romanUrduText);
-    }
-  };
-
-  // Query 4 Cross-Language Client Reply Voice Translator (Client Chat Language -> Owner's Voice Language!)
-  const triggerCrossLanguageClientReply = (
-    client: string,
-    clientLang: ClientChatLang,
-    slotTime: string,
-    replyType: 'CONFIRMED' | 'DECLINED' | 'LATE',
-    rawClientText: string
-  ) => {
-    const isUrgent = replyType === 'DECLINED' || replyType === 'LATE';
-    setSimChatMessages((prev) => [
-      ...prev,
-      { sender: 'CLIENT', text: `[${clientLang.toUpperCase()}] ${rawClientText}`, time: 'Just now' },
-    ]);
-
-    // Bot replies back to end-user in CLIENT'S OWN LANGUAGE
-    const botAckByClientLang: Record<ClientChatLang, Record<'CONFIRMED' | 'DECLINED' | 'LATE', string>> = {
-      ar: {
-        CONFIRMED: `شكراً ${client}! تم تأكيد موعدك الساعة ${slotTime} في ${currentSalon.name}. بانتظارك!`,
-        DECLINED: `تم استلام طلبك يا ${client}. سنقوم بإعادة جدولة موعدك ليوم غد وإرسال الأوقات المتاحة.`,
-        LATE: `لا بأس يا ${client}! أبلغنا الحلاق أنك ستتأخر 15 دقيقة لموعد ${slotTime}.`,
-      },
-      ur: {
-        CONFIRMED: `شکریہ ${client}! آپ کی ${slotTime} کی اپائنٹمنٹ ${currentSalon.name} میں کنفرم ہے۔ ہم منتظر ہیں!`,
-        DECLINED: `جی ${client}، کوئی بات نہیں۔ ہم کل کے دستیاب ٹائم آپ کو بھیج رہے ہیں۔`,
-        LATE: `کوئی مسئلہ نہیں ${client}، ہم نے باربر کو بتا دیا ہے کہ آپ 15 منٹ لیٹ آئیں گے۔`,
-      },
-      en: {
-        CONFIRMED: `Thank you ${client}! Your ${slotTime} slot at ${currentSalon.name} is confirmed. See you soon!`,
-        DECLINED: `Got it ${client}. We will send available slots to reschedule for tomorrow.`,
-        LATE: `No problem ${client}! We notified your barber you will be 15 minutes late for ${slotTime}.`,
-      },
-    };
-
-    // Dashboard speaks aloud in OWNER'S OWN PREFERRED VOICE LANGUAGE (e.g. Asian barber in Dubai hears Urdu/English!)
-    const ownerSpeechByOwnerLang: Record<VoiceLang, Record<'CONFIRMED' | 'DECLINED' | 'LATE', string>> = {
-      en: {
-        CONFIRMED: `Translated from ${clientLang.toUpperCase()}: Client ${client} confirmed he is coming today at ${slotTime}.`,
-        DECLINED: `Urgent from ${clientLang.toUpperCase()} chat: ${client} cannot come at ${slotTime} and requested tomorrow.`,
-        LATE: `Arrival alert from ${clientLang.toUpperCase()}: ${client} replied he is 15 minutes late for ${slotTime}.`,
-      },
-      ur: {
-        CONFIRMED: `${clientLang === 'ar' ? 'عربی' : clientLang === 'en' ? 'انگلش' : 'اردو'} پیغام کا ترجمہ: کسٹمر ${client} نے آج ${slotTime} آنے کی تصدیق کر دی ہے۔`,
-        DECLINED: `اہم اطلاع (${clientLang.toUpperCase()} میسج): کسٹمر ${client} آج ${slotTime} نہیں آ سکیں گے، کل کا وقت مانگا ہے۔`,
-        LATE: `کسٹمر ${client} کا پیغام (${clientLang.toUpperCase()}): وہ ${slotTime} اپائنٹمنٹ پر 15 منٹ لیٹ پہنچیں گے۔`,
-      },
-      ar: {
-        CONFIRMED: `ترجمة رد العميل (${clientLang.toUpperCase()}): أكد ${client} حضوره اليوم الساعة ${slotTime}.`,
-        DECLINED: `تنبيه عاجل (${clientLang.toUpperCase()}): اعتذر ${client} عن موعد ${slotTime} ويطلب التأجيل للغد.`,
-        LATE: `تحديث وصول (${clientLang.toUpperCase()}): أرسل ${client} أنه سيتأخر 15 دقيقة عن ${slotTime}.`,
-      },
-    };
-
-    const spokenText = ownerSpeechByOwnerLang[ownerLang][replyType];
-    setVoiceLogs((prev) => [
-      {
-        id: `vlog-${Date.now()}`,
-        type: isUrgent ? 'REPLY_URGENT' : 'REPLY_CONFIRMED',
-        clientName: client,
+        id: `vlog-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        type: logType,
+        clientName,
         clientLang,
         ownerVoiceLang: ownerLang,
-        summary: `Client (${clientLang.toUpperCase()}) ➔ Owner Voice (${ownerLang.toUpperCase()}): "${rawClientText}"`,
+        summary:
+          eventType === 'APPOINTMENT_CONFIRMED'
+            ? `Confirmed ${timeSlot} · Barber: ${barberName} · ${servicesText}`
+            : `Reminder Reply (${timeSlot}) · ${clientName}: "${rawBody}"`,
         spokenText,
-        time: 'Just now',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isUrgent,
       },
       ...prev,
     ]);
 
-    setTimeout(() => {
-      setSimChatMessages((prev) => [
-        ...prev,
+    if (eventType === 'APPOINTMENT_CONFIRMED') {
+      const hash = `SHA256:${Math.random().toString(36).substring(2, 6).toUpperCase()}...${Math.random()
+        .toString(36)
+        .substring(2, 6)
+        .toUpperCase()}`;
+      setImmutableProofs((prev) => [
         {
-          sender: 'BOT',
-          text: `[Bot Replied in ${clientLang.toUpperCase()}] ${botAckByClientLang[clientLang][replyType]}`,
-          time: 'Just now',
+          id: `PRF-${Date.now().toString().slice(-4)}`,
+          clientName,
+          clientPhone,
+          clientLang,
+          services: servicesText.split('&').map((s) => s.trim()),
+          totalAmount: regionConfig.currency === 'PKR' ? 1500 : 85,
+          pricingModeLabel: 'WhatsApp Auto-Confirmed',
+          slotTime: timeSlot,
+          confirmedMessage: rawBody,
+          timestamp: `${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (Immutable)`,
+          hash,
         },
+        ...prev,
       ]);
-    }, 350);
+    }
 
-    const romanUrduReplyByReplyType: Record<'CONFIRMED' | 'DECLINED' | 'LATE', string> = {
-      CONFIRMED: `${clientLang.toUpperCase()} message ka tarjuma: Customer ${client} nay aaj ${slotTime} aane ki tasdeeq kar di hai.`,
-      DECLINED: `Zaroori itlaa: Customer ${client} aaj ${slotTime} nahi aa sakte, kal ka time manga hai.`,
-      LATE: `Customer ${client} ka paigham: Woh ${slotTime} appointment par 15 minute late pohanchein gay.`,
-    };
-
-    if (voiceFilter === 'ALL' || isUrgent) {
-      speakHandsFree(spokenText, ownerLang, romanUrduReplyByReplyType[replyType]);
+    if (voiceFilter === 'ALL' || isUrgent || eventType === 'APPOINTMENT_CONFIRMED') {
+      speakHandsFree(spokenText, ownerLang, romanUrduByEvent[eventType]);
     }
   };
 
-  // Query 5 & 6: End-User Multi-Service Selection & Permanent Immutable Confirmation
-  const selectedCartServices = services.filter((s) => selectedCartServiceIds.includes(s.id));
-  const cartRawSubtotal = selectedCartServices.reduce((sum, s) => sum + s.price, 0);
-  const cartDiscountAmount = Math.round(cartRawSubtotal * vipDealDiscountRate);
-  const cartFinalTotal = Math.max(0, cartRawSubtotal - cartDiscountAmount);
+  // Process incoming concierge state updates (both from 6s polling and Retention Settings simulator)
+  const processIncomingConciergeState = (nextState: SalonConciergeStateResponse) => {
+    setConciergeState(nextState);
 
-  const handleConfirmEndUserCartBooking = () => {
-    if (selectedCartServices.length === 0) return;
-    const svcNames = selectedCartServices.map((s) => s.name);
-    const svcListJoined = svcNames.join(', ');
-    const confirmMsgByLang: Record<ClientChatLang, string> = {
-      en: `YES, I confirm ${svcListJoined} at ${selectedCartSlot} for ${regionConfig.symbol}${cartFinalTotal.toLocaleString()} (${pricingRuleBadge}).`,
-      ur: `جی ہاں، میں ${selectedCartSlot} کے لیے ${svcListJoined} اور کل بل ${regionConfig.symbol}${cartFinalTotal.toLocaleString()} کنفرم کرتا ہوں۔`,
-      ar: `نعم، أؤكد حجز (${svcListJoined}) الساعة ${selectedCartSlot} بمبلغ إجمالي ${regionConfig.symbol}${cartFinalTotal.toLocaleString()}.`,
-    };
+    if (!hasHydratedConciergeRef.current) {
+      nextState.logs.forEach((l) => seenLogIdsRef.current.add(l.id));
+      nextState.appointments.forEach((a) => seenApptIdsRef.current.add(a.id));
+      hasHydratedConciergeRef.current = true;
+      return;
+    }
 
-    const confirmedMessage = confirmMsgByLang[endUserLang];
-    const hash = `SHA256:${Math.random().toString(36).substring(2, 6).toUpperCase()}...${Math.random()
-      .toString(36)
-      .substring(2, 6)
-      .toUpperCase()}`;
+    const newAppts = nextState.appointments.filter((a) => !seenApptIdsRef.current.has(a.id));
+    if (newAppts.length > 0) {
+      newAppts.forEach((a) => seenApptIdsRef.current.add(a.id));
+      setBookings((prev) => {
+        const existingIds = new Set(prev.map((b) => b.id));
+        const additions: BookingRecord[] = newAppts
+          .filter((a) => !existingIds.has(a.id))
+          .map((a) => ({
+            id: a.id,
+            clientName: a.clientName,
+            barberName: a.barberName,
+            phone: a.clientPhone,
+            service: a.service,
+            price: a.price,
+            timeSlot: a.timeSlot,
+            durationMins: 35,
+            chairLabel: barberChairs[a.barberName],
+            status: a.status,
+          }));
+        return additions.length > 0 ? [...additions, ...prev] : prev;
+      });
+    }
 
-    const newProof: ImmutableProofRecord = {
-      id: `PRF-${Date.now().toString().slice(-4)}`,
-      clientName: cartClientName || 'Walk-in Client',
-      clientPhone: cartClientPhone,
-      clientLang: endUserLang,
-      services: svcNames,
-      totalAmount: cartFinalTotal,
-      pricingModeLabel: pricingRuleBadge,
-      slotTime: selectedCartSlot,
-      confirmedMessage,
-      timestamp: `${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (Immutable)`,
-      hash,
-    };
+    const newInboundLogs = nextState.logs.filter((l) => {
+      if (seenLogIdsRef.current.has(l.id)) return false;
+      seenLogIdsRef.current.add(l.id);
+      return l.direction === 'INBOUND' && (l.eventMetadata || l.module === 'WINBACK_30D');
+    });
 
-    setImmutableProofs((prev) => [newProof, ...prev]);
-    setSimChatMessages((prev) => [
-      ...prev,
-      { sender: 'CLIENT', text: confirmedMessage, time: 'Just now' },
-      {
-        sender: 'BOT',
-        text:
-          endUserLang === 'ar'
-            ? `تم تأكيد الحجز وحفظ الفاتورة الدائمة (${newProof.id}). ننتظرك في ${currentSalon.name}!`
-            : endUserLang === 'ur'
-            ? `آپ کا حتمی آرڈر (${newProof.id}) محفوظ کر لیا گیا ہے۔ ${currentSalon.name} میں خوش آمدید!`
-            : `Confirmed! Permanent receipt ${newProof.id} locked. ${currentSalon.name} location pin sent!`,
-        time: 'Just now',
-      },
-    ]);
+    if (newInboundLogs.length > 0) {
+      const latest = newInboundLogs[0];
+      const meta = latest.eventMetadata;
+      const mappedClientLang: ClientChatLang =
+        latest.language === 'ar' ? 'ar' : latest.language === 'ur' || latest.language === 'roman_ur' ? 'ur' : 'en';
+      announceInboundEventLoudly({
+        eventType: meta?.eventType || 'APPOINTMENT_CONFIRMED',
+        clientName: latest.clientName,
+        clientPhone: latest.clientPhone,
+        clientLang: mappedClientLang,
+        barberName: meta?.barberName || barbersList[0] || 'Master Aslam',
+        servicesText: meta?.services || 'Haircut & Beard',
+        timeSlot: meta?.timeSlot || '04:30 PM',
+        rawBody: latest.body,
+      });
+    }
+  };
 
-    triggerVoiceBookingAnnouncement(
-      currentSalon.owner.split(' ')[0] || 'Hamza',
-      'Aslam',
-      cartClientName || 'Client',
-      selectedCartSlot,
-      svcListJoined,
-      cartFinalTotal,
-      endUserLang
-    );
-
-    if (cartClientPhone.trim()) {
-      fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/clients`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: cartClientName || 'WhatsApp Client',
-          phone: cartClientPhone.trim(),
-          birthDate: cartClientBirthDate.trim(),
-          preferredLanguage: endUserLang === 'ur' ? 'ur' : endUserLang === 'ar' ? 'ar' : 'en',
-        }),
-      })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (data?.state) setConciergeState(data.state);
+  // Live 6s background poll for incoming WhatsApp confirmations & reminder replies while working hands-free
+  useEffect(() => {
+    if (isFounderInspector || isOwnerLoggedOut) return;
+    const interval = setInterval(() => {
+      fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/concierge-state`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: SalonConciergeStateResponse | null) => {
+          if (data) processIncomingConciergeState(data);
         })
         .catch(() => {});
-    }
+    }, 6000);
+    return () => clearInterval(interval);
+  });
 
-    setMaintToast(
-      `🔒 Permanent Proof ${newProof.id} Saved (${hash}): Even if client deletes WhatsApp message, salon keeps full approval record.`
-    );
-    setTimeout(() => setMaintToast(null), 6000);
-  };
+  const handleTriggerSimulatedVoiceWebhook = async (
+    kind: 'CONFIRMATION' | 'REMINDER_LATE' | 'REMINDER_COMING'
+  ) => {
+    setIsTestingLoudAlert(true);
+    try {
+      const payload =
+        kind === 'CONFIRMATION'
+          ? {
+              salonId: currentSalon.id,
+              fromPhone: '+92 300 9988776',
+              clientName: 'Mr. Ali',
+              messageText:
+                'Confirmed! Mr. Ali wants barber Hamza for Haircut and Beard at 4:30 PM',
+            }
+          : kind === 'REMINDER_LATE'
+          ? {
+              salonId: currentSalon.id,
+              fromPhone: '+92 321 7766554',
+              clientName: 'Bilal Ahmed',
+              messageText: 'I am 15 minutes late for my 3:30 PM slot with barber Aslam',
+            }
+          : {
+              salonId: currentSalon.id,
+              fromPhone: '+92 333 4567890',
+              clientName: 'Dr. Usman',
+              messageText: 'Yes I am coming at 5:00 PM with barber Tariq, confirm',
+            };
 
-  // End-User Bot Simulator Messages
-  const [simChatMessages, setSimChatMessages] = useState([
-    {
-      sender: 'BOT',
-      text: `Hi / Assalamu Alaikum / Marhaba! 👋 Welcome to ${currentSalon.name}. Please select your language:`,
-      time: '03:10 PM',
-    },
-    {
-      sender: 'CLIENT',
-      text: 'Assalamu Alaikum, aaj 3:30 PM slot aur rate list?',
-      time: '03:14 PM',
-    },
-    {
-      sender: 'BOT',
-      text: `Walaikum Assalam! How can I help you? Tap services below to calculate your exact total (${pricingRuleBadge}).`,
-      time: '03:14 PM',
-    },
-  ]);
-  const [customQuery, setCustomQuery] = useState('');
-
-  const handleSendQuickMenuAction = (action: 'BOOK' | 'RATES' | 'DEALS' | 'LOCATION' | 'HOURS') => {
-    if (action === 'LOCATION') {
-      setIsLocationModalOpen(true);
-    }
-    if (action === 'HOURS') {
-      setIsTimingModalOpen(true);
-    }
-
-    const isStarter = currentSalon.planId === 'STARTER';
-
-    const labelMap: Record<ClientChatLang, Record<typeof action, { q: string; a: string }>> = {
-      en: {
-        BOOK: {
-          q: 'I want to book an appointment date & time',
-          a: 'Great! Pick your preferred barber, services and time slot in the Multi-Service Cart below to see your confirmed total.',
-        },
-        RATES: {
-          q: 'Send me your service rates list',
-          a: services
-            .filter((s) => s.active)
-            .map((s) => `• ${getLocalizedServiceName(s.name, 'en')}: ${regionConfig.symbol}${s.price.toLocaleString()}`)
-            .join(' | '),
-        },
-        DEALS: {
-          q: 'What VIP deals are active today?',
-          a: isStarter
-            ? `Our salon operates on clear, standard daily rates across all days of the week. View our complete rate card below!`
-            : isVipDealActiveNow
-            ? `🎉 Active VIP Deal (25% OFF): Valid on Fri–Sun & 7–10 Day Campaigns! Select multiple services below to apply discount automatically.`
-            : `Today is Mon–Thu (Normal Day): Standard rates apply unless a 7–10 Day VIP Campaign is active. Fri–Sun unlocks 25% OFF VIP Deals!`,
-        },
-        LOCATION: {
-          q: 'Send salon location & Google Maps pin',
-          a: `📍 ${currentSalon.name}, ${currentSalon.location} — Google Maps Pin: maps.google.com/?q=${encodeURIComponent(currentSalon.location)} (Tap to open full interactive map)`,
-        },
-        HOURS: {
-          q: 'What are your salon opening hours?',
-          a: `🕒 Open daily 11:00 AM – 11:00 PM (Friday break 1:00 PM – 2:30 PM). Tap to see full weekly schedule!`,
-        },
-      },
-      ur: {
-        BOOK: {
-          q: 'مجھے اپائنٹمنٹ کی تاریخ اور ٹائم بک کرنا ہے',
-          a: 'جی بالکل! نیچے دیئے گئے کارٹ میں اپنا پسندیدہ باربر، سروسز اور وقت منتخب کریں تاکہ مکمل بل اور کنفرمیشن مل سکے۔',
-        },
-        RATES: {
-          q: 'مجھے سروسز کی ریٹ لسٹ بھیج دیں',
-          a: services
-            .filter((s) => s.active)
-            .map((s) => `• ${getLocalizedServiceName(s.name, 'ur')}: ${regionConfig.symbol}${s.price.toLocaleString()}`)
-            .join(' | '),
-        },
-        DEALS: {
-          q: 'آج کون سی VIP ڈیل چل رہی ہے؟',
-          a: isStarter
-            ? `ہمارے سیلون میں تمام دن معیاری اور یکساں ریٹس لاگو ہیں۔ نیچے دی گئی مکمل ریٹ لسٹ ملاحظہ فرمائیں!`
-            : isVipDealActiveNow
-            ? `🎉 VIP ڈیل فعال ہے (25% ڈسکاؤنٹ)! جمعہ، ہفتہ، اتوار یا 7 سے 10 دن کی مہم میں آٹومیٹک ڈسکاؤنٹ لگتا ہے۔`
-            : `آج پیر تا جمعرات معمول کے ریٹس لاگو ہیں۔ جمعہ تا اتوار یا 7-10 دن کی VIP ڈیل پر ڈسکاؤنٹ ملتا ہے۔`,
-        },
-        LOCATION: {
-          q: 'سیلون کی لوکیشن اور گوگل میپ پن بھیجیں',
-          a: `📍 ${currentSalon.name}، ${currentSalon.location} — گوگل میپس لنک: maps.google.com/?q=${encodeURIComponent(currentSalon.location)} (مکمل لوکیشن میپ اوپن ہو گیا ہے)`,
-        },
-        HOURS: {
-          q: 'سیلون کھلنے اور بند ہونے کا ٹائم کیا ہے؟',
-          a: `🕒 روزانہ صبح 11:00 بجے سے رات 11:00 بجے تک کھلا ہے (جمعہ وقفہ 1:00 تا 2:30)۔ شیڈول باکس کھول دیا گیا ہے!`,
-        },
-      },
-      ar: {
-        BOOK: {
-          q: 'أريد حجز موعد وتاريخ',
-          a: 'أهلاً بك! اختر الحلاق المفضل والخدمات والوقت المناسب من القائمة بالأسفل لعرض السعر الإجمالي والتأكيد.',
-        },
-        RATES: {
-          q: 'أرسل لي قائمة الأسعار والخدمات',
-          a: services
-            .filter((s) => s.active)
-            .map((s) => `• ${getLocalizedServiceName(s.name, 'ar')}: ${regionConfig.symbol}${s.price.toLocaleString()}`)
-            .join(' | '),
-        },
-        DEALS: {
-          q: 'ما هي عروض VIP المتاحة اليوم؟',
-          a: isStarter
-            ? `تطبق في صالوننا الأسعار الاعتيادية الموحدة لجميع الخدمات طوال أيام الأسبوع. تفضل بالاطلاع على قائمة الأسعار أدناه!`
-            : isVipDealActiveNow
-            ? `🎉 عرض VIP مفعل (خصم 25%): يسري الجمعة والسبت والأحد وعروض 7-10 أيام!`
-            : `اليوم من الإثنين إلى الخميس تطبق الأسعار العادية ما لم يكن عرض 7-10 أيام مفعلاً.`,
-        },
-        LOCATION: {
-          q: 'أرسل موقع الصالون وخريطة جوجل',
-          a: `📍 ${currentSalon.name}، ${currentSalon.location} — رابط الخريطة: maps.google.com/?q=${encodeURIComponent(currentSalon.location)} (تم فتح تفاصيل الموقع والملاحة)`,
-        },
-        HOURS: {
-          q: 'ما هي ساعات العمل؟',
-          a: `🕒 يومياً من 11:00 صباحاً حتى 11:00 مساءً (استراحة الجمعة 1:00 - 2:30). تم فتح جدول الأوقات!`,
-        },
-      },
-    };
-
-    const entry = labelMap[endUserLang][action];
-    setSimChatMessages((prev) => [
-      ...prev,
-      { sender: 'CLIENT', text: entry.q, time: 'Just now' },
-      { sender: 'BOT', text: entry.a, time: 'Just now' },
-    ]);
-  };
-
-  const handleSendSimQuery = (textToSend?: string) => {
-    const text = (textToSend || customQuery).trim();
-    if (!text) return;
-    const lower = text.toLowerCase();
-
-    // Query 5 Check: Ambiguous time e.g. "9", "at 9", "9 baje", "الساعة 9"
-    const isBare9 =
-      /^(at\s*)?9(\s*(o'clock|baje)?)?$/i.test(text) ||
-      lower === '9' ||
-      lower === 'at 9' ||
-      lower === '9 baje' ||
-      text.includes('الساعة 9');
-    const hasAmPm =
-      lower.includes('am') ||
-      lower.includes('pm') ||
-      lower.includes('صبح') ||
-      lower.includes('شام') ||
-      lower.includes('رات') ||
-      lower.includes('صباح') ||
-      lower.includes('مساء');
-
-    if (isBare9 && !hasAmPm) {
-      setTimeDisambiguationPrompt({ rawHour: '9' });
-      const promptText =
-        endUserLang === 'ur'
-          ? 'کیا آپ کا مطلب صبح 9:00 AM ہے یا رات 9:00 PM؟ برائے مہربانی اپنا مطلوبہ وقت منتخب کریں:'
-          : endUserLang === 'ar'
-          ? 'هل تقصد 9:00 صباحاً (AM) أم 9:00 مساءً (PM)؟ يرجى تحديد الوقت المفضل:'
-          : 'Did you mean 9:00 AM (Morning) or 9:00 PM (Night)? Please select:';
-      setSimChatMessages((prev) => [
-        ...prev,
-        { sender: 'CLIENT', text: `[${endUserLang.toUpperCase()}] ${text}`, time: 'Just now' },
-        { sender: 'BOT', text: promptText, time: 'Just now' },
-      ]);
-      if (!textToSend) setCustomQuery('');
-      return;
-    }
-
-    // Query 3 Check: Barber Tariq occupied at 04:15 PM -> Suggest Barber Ali
-    const mentionsTariq = lower.includes('tariq') || lower.includes('طارق');
-    const mentions415 =
-      lower.includes('4:15') ||
-      lower.includes('04:15') ||
-      lower.includes('4') ||
-      lower.includes('سوا چار') ||
-      lower.includes('الأربعة');
-
-    if (mentionsTariq && mentions415) {
-      setBarberConflictPrompt({
-        slot: '04:15 PM',
-        requestedBarber: 'Tariq',
-        suggestedBarber: 'Ali Raza',
+      const res = await fetch('/api/whatsapp/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
-      const conflictText =
-        endUserLang === 'ur'
-          ? '⚠️ باربر طارق اس وقت (04:15 PM) پر پہلے سے مصروف ہیں۔ باربر علی اس ٹائم پر بالکل دستیاب ہیں! کیا آپ باربر علی کے ساتھ اپائنٹمنٹ بک کرنا چاہتے ہیں؟'
-          : endUserLang === 'ar'
-          ? '⚠️ الحلاق طارق مشغول في هذا الوقت (04:15 PM). الحلاق علي متاح في هذا الوقت! هل ترغب في حجز الموعد مع الحلاق علي؟'
-          : '⚠️ Barber Tariq is currently occupied at 04:15 PM. Barber Ali is free on that slot! Do you want to book your appointment with Barber Ali?';
-      setSimChatMessages((prev) => [
-        ...prev,
-        { sender: 'CLIENT', text: `[${endUserLang.toUpperCase()}] ${text}`, time: 'Just now' },
-        { sender: 'BOT', text: conflictText, time: 'Just now' },
-      ]);
-      if (!textToSend) setCustomQuery('');
-      return;
+      if (!res.ok) throw new Error('Webhook failed');
+      const data = (await res.json()) as { state?: SalonConciergeStateResponse };
+      if (data.state) {
+        processIncomingConciergeState(data.state);
+      }
+      setMaintToast('🔊 Incoming WhatsApp message received & announced loudly!');
+      setTimeout(() => setMaintToast(null), 4500);
+    } catch {
+      setMaintToast('Could not trigger loud announcement test.');
+    } finally {
+      setIsTestingLoudAlert(false);
     }
-
-    triggerCrossLanguageClientReply('WhatsApp Client', endUserLang, '05:00 PM', 'CONFIRMED', text);
-    if (!textToSend) setCustomQuery('');
   };
 
   const handleToggleService = (id: string) => {
@@ -2279,20 +2013,40 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }
   };
 
+  const handleToggleWalkInService = (svcId: string) => {
+    setWalkInSelectedServiceIds((prev) => {
+      const exists = prev.includes(svcId);
+      const next = exists ? prev.filter((id) => id !== svcId) : [...prev, svcId];
+      const nextTotal = services
+        .filter((s) => next.includes(s.id))
+        .reduce((sum, s) => sum + s.price, 0);
+      setWalkInPrice(nextTotal);
+      return next;
+    });
+  };
+
   const handleSaveWalkIn = () => {
     const id = `WLK-${Date.now().toString().slice(-4)}`;
     const timeSlot = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const matchedSvc = services.find((s) => s.name === walkInService);
+    const chosenServices = services.filter((s) => walkInSelectedServiceIds.includes(s.id));
+    const serviceLabel =
+      chosenServices.length > 0
+        ? chosenServices.map((s) => s.name).join(' + ')
+        : services[0]?.name || 'Master Haircut';
+    const totalDuration =
+      chosenServices.length > 0
+        ? chosenServices.reduce((sum, s) => sum + (s.durationMins || 35), 0)
+        : 35;
     const assignedBarber = barbersList.includes(walkInBarber) ? walkInBarber : barbersList[0] || walkInBarber;
     const newBooking: BookingRecord = {
       id,
       clientName: walkInName.trim() || 'Walk-in Client',
       barberName: assignedBarber,
       phone: walkInPhone.trim() || '+92 300 0000000',
-      service: walkInService,
+      service: serviceLabel,
       price: walkInPrice,
       timeSlot,
-      durationMins: matchedSvc?.durationMins || 35,
+      durationMins: totalDuration,
       chairLabel: barberChairs[assignedBarber],
       status: walkInImmediateChair ? 'IN_CHAIR' : 'CONFIRMED',
     };
@@ -2317,13 +2071,28 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setWalkInBirthDate('');
 
     // Speak aloud in Owner's preferred language with Roman Urdu fallback for high-fidelity audio
-    const urduScript = `${walkInBarber} بھائی! نیا واک اِن کسٹمر ${newBooking.clientName} ${walkInImmediateChair ? 'کرسی پر بیٹھ گیا ہے' : 'قطار میں شامل ہو گیا ہے'}۔ سروس: ${walkInService}۔`;
-    const romanUrdu = `${walkInBarber} Bhai! Naya walk-in customer ${newBooking.clientName} ${walkInImmediateChair ? 'chair par baith gaya hai' : 'queue mein shamil ho gaya hai'}. Service: ${walkInService}.`;
-    const englishSpeech = `Barber ${walkInBarber}, new walk-in client ${newBooking.clientName} is ${walkInImmediateChair ? 'seated in chair' : 'in waiting queue'} for ${walkInService}.`;
-    const arabicSpeech = `الحلاق ${walkInBarber}! عميل جديد ${newBooking.clientName} ${walkInImmediateChair ? 'في الكرسي' : 'في الانتظار'}، الخدمة: ${walkInService}.`;
+    const urduScript = `${assignedBarber} بھائی! نیا واک اِن کسٹمر ${newBooking.clientName} ${walkInImmediateChair ? 'کرسی پر بیٹھ گیا ہے' : 'قطار میں شامل ہو گیا ہے'}۔ سروس: ${serviceLabel}۔`;
+    const romanUrdu = `${assignedBarber} Bhai! Naya walk-in customer ${newBooking.clientName} ${walkInImmediateChair ? 'chair par baith gaya hai' : 'queue mein shamil ho gaya hai'}. Service: ${serviceLabel}.`;
+    const englishSpeech = `Barber ${assignedBarber}, new walk-in client ${newBooking.clientName} is ${walkInImmediateChair ? 'seated in chair' : 'in waiting queue'} for ${serviceLabel}.`;
+    const arabicSpeech = `الحلاق ${assignedBarber}! عميل جديد ${newBooking.clientName} ${walkInImmediateChair ? 'في الكرسي' : 'في الانتظار'}، الخدمة: ${serviceLabel}.`;
 
     const speechText = ownerLang === 'ur' ? urduScript : ownerLang === 'ar' ? arabicSpeech : englishSpeech;
     speakHandsFree(speechText, ownerLang, romanUrdu);
+
+    setVoiceLogs((prev) => [
+      {
+        id: `vlog-wlk-${Date.now()}`,
+        type: 'BOOKING',
+        clientName: newBooking.clientName,
+        clientLang: ownerLang,
+        ownerVoiceLang: ownerLang,
+        summary: `Walk-In ${timeSlot} · Barber: ${assignedBarber} · ${serviceLabel}`,
+        spokenText: speechText,
+        time: timeSlot,
+        isUrgent: false,
+      },
+      ...prev,
+    ]);
 
     setMaintToast(`💈 Walk-in ${newBooking.clientName} added! Queue updated & voice alert dispatched.`);
     setTimeout(() => setMaintToast(null), 4500);
@@ -2404,27 +2173,6 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       return `آج 5 تاریخ (آخری دن) وارننگ: اگر آج ${amt} ادا نہ ہوئے تو کل لائیو رپورٹس عارضی طور پر رک جائیں گی اور سروس عمومی موڈ میں چلی جائے گی۔`;
     }
     return `Final Warning (5th Due Day): If ${amt} is not paid today from ${currentSalon.phone}, live stats pause tomorrow until settled.`;
-  };
-
-  // Query 4 (Approved): 100% Complete Full Rate Wishes (Birthday & Festivals — Zero Discount Until Field Visit)
-  const getCelebrationPreview = (cel: CelebrationClient) => {
-    if (cel.eventType === 'BIRTHDAY') {
-      if (cel.preferredLang === 'ar') {
-        return `عيد ميلاد سعيد يا ${cel.clientName}! يتمنى لك ${currentSalon.owner} وفريق ${currentSalon.name} يوماً سعيداً. يسعدنا خدمتك اليوم بأولوية VIP وبالأسعار الرسمية الكاملة.`;
-      }
-      if (cel.preferredLang === 'ur') {
-        return `سالگرہ مبارک ${cel.clientName}! ${currentSalon.owner} اور ${currentSalon.name} کی طرف سے دلی مبارکباد۔ آج آپ کے لیے VIP ترجیحی وقت دستیاب ہے (مکمل معیاری ریٹس پر)۔`;
-      }
-      return `Happy Birthday ${cel.clientName}! Warm wishes from ${currentSalon.owner} at ${currentSalon.name}. Reply to reserve a priority VIP chair today at our standard menu rates.`;
-    }
-
-    if (cel.preferredLang === 'ar') {
-      return `عيد مبارك ${cel.clientName}! يتمنى لك ${currentSalon.owner} وفريق ${currentSalon.name} عيداً سعيداً. احجز موعدك مبكراً بالأسعار الرسمية قبل امتلاء المقاعد.`;
-    }
-    if (cel.preferredLang === 'ur') {
-      return `عید مبارک ${cel.clientName}! ${currentSalon.owner} اور ${currentSalon.name} کی جانب سے عید کی خوشیاں مبارک۔ رش سے بچنے کے لیے معیاری ریٹس پر اپنا وقت پہلے بک کریں۔`;
-    }
-    return `Season's Greetings ${cel.clientName}! Warm wishes from ${currentSalon.owner} & ${currentSalon.name}. Book your priority slot ahead of the rush at full standard rates.`;
   };
 
   // ============================================================================
@@ -2903,6 +2651,43 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
             <button
               type="button"
+              onClick={toggleScreenWakeLock}
+              className={`min-h-[40px] rounded-xl border px-2.5 text-[11px] font-mono font-bold transition flex items-center gap-1.5 ${
+                isWakeLockActive
+                  ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
+                  : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
+              }`}
+              title="Keep shop screen awake for hands-free announcements"
+            >
+              <Zap className="size-3.5 shrink-0" />
+              <span className="hidden sm:inline">{isWakeLockActive ? 'Wake ON' : 'Wake OFF'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = !isLoudspeakerBoostActive;
+                setIsLoudspeakerBoostActive(next);
+                setMaintToast(
+                  next
+                    ? '📢 Rush-Hour Loudspeaker Boost ON: Loud 3-tone chime + clear speech cadence active.'
+                    : '📢 Loudspeaker Boost set to normal volume.'
+                );
+                setTimeout(() => setMaintToast(null), 3500);
+              }}
+              className={`min-h-[40px] rounded-xl border px-2.5 text-[11px] font-mono font-bold transition flex items-center gap-1.5 ${
+                isLoudspeakerBoostActive
+                  ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
+                  : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
+              }`}
+              title="Boost chime & speech clarity for noisy salon hours"
+            >
+              <BellRing className="size-3.5 shrink-0" />
+              <span className="hidden sm:inline">{isLoudspeakerBoostActive ? 'Boost ON' : 'Boost'}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
               className={`min-h-[40px] min-w-[40px] rounded-xl border px-2.5 grid place-items-center transition ${
                 isVoiceEnabled
@@ -2989,6 +2774,19 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 text-[11px] font-mono text-[#F0F6FC] shrink-0"
             >
               Stop
+            </button>
+          </div>
+        )}
+
+        {wakeLockNote && (
+          <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs font-mono text-[#06B6D4] flex items-center justify-between gap-2">
+            <span>{wakeLockNote}</span>
+            <button
+              type="button"
+              onClick={() => setWakeLockNote(null)}
+              className="text-[#8B949E] hover:text-[#F0F6FC] shrink-0"
+            >
+              ✕
             </button>
           </div>
         )}
@@ -3382,8 +3180,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             })}
           </div>
 
-          {/* 1. STAFF & BARBERS (Add/Edit Barbers & Chair Assignments) */}
+          {/* 1. STAFF & BARBERS (Add/Edit Barbers, Chair Assignments & Barber Stats) */}
           {manageSubSection === 'STAFF' && (
+            <div className="space-y-4">
             <PortalCard
               title="Staff & Barbers"
               kicker="BARBER ROSTER & CHAIR ASSIGNMENTS"
@@ -3511,6 +3310,97 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 </form>
               </div>
             </PortalCard>
+
+            {/* Barber Performance & Top Services Breakdown */}
+            <PortalCard
+              title="Barber Performance & Top Services Breakdown"
+              kicker="CHAIR RETENTION · POPULAR SERVICES PER BARBER"
+            >
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {['ALL', ...barbersList].map((barberOption) => {
+                    const active = selectedBarberForServices === barberOption;
+                    return (
+                      <button
+                        key={barberOption}
+                        type="button"
+                        onClick={() => setSelectedBarberForServices(barberOption)}
+                        className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-xs font-mono font-bold transition ${
+                          active
+                            ? 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
+                            : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
+                        }`}
+                      >
+                        {barberOption === 'ALL' ? 'All Chairs Combined' : barberOption}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {(() => {
+                  const directStats = BARBER_SERVICE_STATS[selectedBarberForServices];
+                  const barberBookings = bookings.filter(
+                    (b) => selectedBarberForServices === 'ALL' || b.barberName === selectedBarberForServices
+                  );
+                  const stats = directStats || {
+                    topServices: [
+                      '1. Master Haircut & Skin Fade (52%)',
+                      '2. Classic Beard Trim & Sculpt (31%)',
+                      '3. Charcoal Detox Facial (17%)',
+                    ],
+                    favRate: '95% Positive Rating',
+                    repeatRate: `${Math.min(88, 66 + barberBookings.length * 4)}% Repeat Retention`,
+                    clientLove: `${selectedBarberForServices} (${
+                      barberChairs[selectedBarberForServices] || 'Floor Chair'
+                    }) holds strong repeat demand across regular grooming appointments.`,
+                  };
+
+                  return (
+                    <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-3">
+                          <span className="text-[10px] font-mono uppercase text-[#8B949E] block">
+                            Client Rating
+                          </span>
+                          <p className="text-sm font-black font-mono text-[#3FB950] mt-0.5 flex items-center gap-1.5">
+                            <Award className="size-4 shrink-0" />
+                            <span>{stats.favRate}</span>
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3">
+                          <span className="text-[10px] font-mono uppercase text-[#8B949E] block">
+                            Repeat Client Rate
+                          </span>
+                          <p className="text-sm font-black font-mono text-[#D29922] mt-0.5 flex items-center gap-1.5">
+                            <TrendingUp className="size-4 shrink-0" />
+                            <span>{stats.repeatRate}</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <span className="text-[11px] font-mono font-bold uppercase text-[#06B6D4] block">
+                          Most Requested Services
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {stats.topServices.map((svc) => (
+                            <div
+                              key={svc}
+                              className="rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs font-sans text-[#F0F6FC]"
+                            >
+                              {svc}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-[#8B949E] font-sans">{stats.clientLove}</p>
+                    </div>
+                  );
+                })()}
+              </div>
+            </PortalCard>
+          </div>
           )}
 
           {/* 2. SERVICES & RATES (Edit Service Names, Durations, and Pricing) */}
@@ -3838,7 +3728,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             </PortalCard>
           )}
 
-          {/* 4. AUTOMATION & REWARDS (Birthday %, 30-day Win-Back, Google Review URL, Regional Language Preview) */}
+          {/* 4. AUTOMATION & REWARDS (Birthday %, 30-day Win-Back, Google Review URL, Regional Language Preview, Voice Logs & Proof Ledger) */}
           {manageSubSection === 'AUTOMATION' && (
             <div className="space-y-4">
               <SalonRetentionSettingsPanel
@@ -3847,14 +3737,189 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 ownerName={currentSalon.owner}
                 salonPhone={currentSalon.phone}
                 conciergeState={conciergeState}
-                onStateUpdated={(next) => setConciergeState(next)}
+                onStateUpdated={processIncomingConciergeState}
                 onShowToast={(msg) => {
                   setMaintToast(msg);
                   setTimeout(() => setMaintToast(null), 5000);
                 }}
               />
 
-              {/* Collapsible Plan, Billing & Video Broadcast Drawer inside Manage */}
+              {/* Collapsible 1: Hands-Free Voice Concierge & Announcement Log */}
+              <div className="rounded-2xl border border-[#30363D] bg-[#161B22] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowVoiceLogsDrawer(!showVoiceLogsDrawer)}
+                  className="w-full min-h-[48px] px-4 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-[#21262D]/50 transition"
+                >
+                  <div>
+                    <span className="text-xs font-mono font-bold uppercase text-[#06B6D4] block">
+                      Hands-Free Voice Alerts &amp; Translation Log ({voiceLogs.length})
+                    </span>
+                    <span className="text-[11px] font-sans text-[#8B949E]">
+                      Announces incoming confirmations &amp; reminder replies loudly without opening your phone
+                    </span>
+                  </div>
+                  {showVoiceLogsDrawer ? (
+                    <ChevronUp className="size-4 text-[#8B949E] shrink-0" />
+                  ) : (
+                    <ChevronDown className="size-4 text-[#8B949E] shrink-0" />
+                  )}
+                </button>
+
+                {showVoiceLogsDrawer && (
+                  <div className="p-4 pt-3 border-t border-[#30363D] space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setVoiceFilter('ALL')}
+                          className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono font-bold transition ${
+                            voiceFilter === 'ALL'
+                              ? 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
+                              : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
+                          }`}
+                        >
+                          All Alerts
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVoiceFilter('URGENT_ONLY')}
+                          className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono font-bold transition ${
+                            voiceFilter === 'URGENT_ONLY'
+                              ? 'border-[#D29922] bg-[#3B2E0B] text-[#D29922]'
+                              : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
+                          }`}
+                        >
+                          Urgent Only
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={isTestingLoudAlert}
+                          onClick={() => handleTriggerSimulatedVoiceWebhook('CONFIRMATION')}
+                          className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950] transition disabled:opacity-50"
+                        >
+                          🔊 Test: Ali Confirmed Hamza 4:30 PM
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isTestingLoudAlert}
+                          onClick={() => handleTriggerSimulatedVoiceWebhook('REMINDER_LATE')}
+                          className="min-h-[44px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-3 py-1.5 text-xs font-mono font-bold text-[#D29922] transition disabled:opacity-50"
+                        >
+                          🔊 Test: Reminder Reply (15m Late)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                      {voiceLogs
+                        .filter((v) => voiceFilter === 'ALL' || v.isUrgent)
+                        .map((log) => (
+                          <div
+                            key={log.id}
+                            className={`rounded-xl border p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                              log.isUrgent
+                                ? 'border-[#9E6A03] bg-[#3B2E0B]/40'
+                                : 'border-[#30363D] bg-[#0D1117]'
+                            }`}
+                          >
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded bg-[#161B22] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono font-bold text-[#06B6D4]">
+                                  {log.clientLang.toUpperCase()} ➔ {log.ownerVoiceLang.toUpperCase()} VOICE
+                                </span>
+                                <span className="text-[11px] font-mono text-[#8B949E]">{log.time}</span>
+                              </div>
+                              <p className="text-xs font-bold text-[#F0F6FC]">{log.summary}</p>
+                              <p
+                                dir={log.ownerVoiceLang === 'ur' || log.ownerVoiceLang === 'ar' ? 'rtl' : 'ltr'}
+                                className="text-xs text-[#8B949E] font-sans break-words [overflow-wrap:break-word]"
+                              >
+                                &ldquo;{log.spokenText}&rdquo;
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => speakHandsFree(log.spokenText, log.ownerVoiceLang)}
+                              className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] shrink-0 flex items-center gap-1.5 transition"
+                            >
+                              <Volume2 className="size-4" />
+                              <span>Replay</span>
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Collapsible 2: Immutable Booking Confirmation Proof Ledger (SHA-256) */}
+              <div className="rounded-2xl border border-[#30363D] bg-[#161B22] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowProofLedgerDrawer(!showProofLedgerDrawer)}
+                  className="w-full min-h-[48px] px-4 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-[#21262D]/50 transition"
+                >
+                  <div>
+                    <span className="text-xs font-mono font-bold uppercase text-[#3FB950] block">
+                      Immutable Booking Proof Ledger · SHA-256 ({immutableProofs.length})
+                    </span>
+                    <span className="text-[11px] font-sans text-[#8B949E]">
+                      Tamper-proof WhatsApp price &amp; slot confirmations protected against message deletion
+                    </span>
+                  </div>
+                  {showProofLedgerDrawer ? (
+                    <ChevronUp className="size-4 text-[#8B949E] shrink-0" />
+                  ) : (
+                    <ChevronDown className="size-4 text-[#8B949E] shrink-0" />
+                  )}
+                </button>
+
+                {showProofLedgerDrawer && (
+                  <div className="p-4 pt-3 border-t border-[#30363D] space-y-2.5">
+                    {immutableProofs.map((proof) => (
+                      <div
+                        key={proof.id}
+                        className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <FileCheck className="size-4 text-[#3FB950] shrink-0" />
+                            <span className="text-xs font-mono font-bold text-[#F0F6FC]">
+                              {proof.id} · {proof.clientName}
+                            </span>
+                            <span className="text-[11px] font-mono text-[#06B6D4]" dir="ltr">
+                              {proof.clientPhone}
+                            </span>
+                          </div>
+                          <span className="text-xs font-mono font-black text-[#D29922] tabular-nums">
+                            {regionConfig.symbol}
+                            {proof.totalAmount.toLocaleString()} · {proof.slotTime}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#8B949E] font-sans">
+                          Services: {proof.services.join(', ')} ({proof.pricingModeLabel})
+                        </p>
+                        <p
+                          dir={proof.clientLang === 'ur' || proof.clientLang === 'ar' ? 'rtl' : 'ltr'}
+                          className="rounded-lg border border-[#21262D] bg-[#161B22] p-2.5 text-xs text-[#F0F6FC] font-sans break-words [overflow-wrap:break-word]"
+                        >
+                          &ldquo;{proof.confirmedMessage}&rdquo;
+                        </p>
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-[#6E7681]">
+                          <span>{proof.timestamp}</span>
+                          <span className="text-[#3FB950] break-all">{proof.hash}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Collapsible 3: Plan, Billing & Video Broadcast Drawer inside Manage */}
               <div className="rounded-2xl border border-[#30363D] bg-[#161B22] overflow-hidden">
                 <button
                   type="button"
@@ -4049,31 +4114,48 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-[#8B949E] mb-1">
-                  Select Primary Service:
+                <label className="block text-xs font-mono text-[#8B949E] mb-1.5">
+                  Select Services (Multi-Service Auto Total):
                 </label>
-                <select
-                  value={walkInService}
-                  onChange={(e) => {
-                    setWalkInService(e.target.value);
-                    const matchedSvc = services.find((s) => s.name === e.target.value);
-                    if (matchedSvc) setWalkInPrice(matchedSvc.price);
-                  }}
-                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
-                >
+                <div className="max-h-44 overflow-y-auto space-y-1.5 rounded-xl border border-[#30363D] bg-[#0D1117] p-2">
                   {services
                     .filter((s) => s.active)
-                    .map((s) => (
-                      <option key={s.id} value={s.name}>
-                        {s.name} ({s.durationMins} min) — {regionConfig.symbol}{s.price.toLocaleString()}
-                      </option>
-                    ))}
-                </select>
+                    .map((s) => {
+                      const checked = walkInSelectedServiceIds.includes(s.id);
+                      return (
+                        <label
+                          key={s.id}
+                          className={`min-h-[44px] flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 cursor-pointer border transition ${
+                            checked
+                              ? 'border-[#06B6D4] bg-[#161B22]'
+                              : 'border-transparent hover:bg-[#161B22]/60'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => handleToggleWalkInService(s.id)}
+                              className="size-4 accent-[#06B6D4] shrink-0"
+                            />
+                            <span className="text-xs font-bold text-[#F0F6FC] truncate">{s.name}</span>
+                            <span className="text-[10px] font-mono text-[#8B949E] shrink-0">
+                              {s.durationMins}m
+                            </span>
+                          </span>
+                          <span className="text-xs font-mono font-bold text-[#D29922] tabular-nums shrink-0">
+                            {regionConfig.symbol}
+                            {s.price.toLocaleString()}
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-mono text-[#8B949E] mb-1">
-                  Custom Final Price ({regionConfig.currency}):
+                  Final Total Price ({regionConfig.currency}):
                 </label>
                 <input
                   type="number"
@@ -4102,7 +4184,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-2.5 text-xs font-mono text-[#3FB950] flex items-center gap-2">
                 <Volume2 className="size-3.5 shrink-0" />
                 <span>
-                  Audio will speak aloud: "{walkInBarber} Bhai! Naya walk-in customer {walkInName || 'Guest'} chair par baith gaya hai."
+                  Audio will speak aloud: &ldquo;{walkInBarber} Bhai! Naya walk-in customer {walkInName || 'Guest'} {walkInImmediateChair ? 'chair par baith gaya hai' : 'queue mein shamil ho gaya hai'}.&rdquo;
                 </span>
               </div>
             </div>

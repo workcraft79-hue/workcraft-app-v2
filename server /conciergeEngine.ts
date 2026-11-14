@@ -678,22 +678,60 @@ export function processWhatsAppWebhook(payload: {
       name: payload.clientName || 'WhatsApp Client',
       preferredLanguage: null,
     });
+  } else if (payload.clientName && client.name === 'WhatsApp Client') {
+    client.name = payload.clientName;
   }
 
-  const isGreeting = /^(hi|hello|hey|salam|assalam|assalamu|marhaba|السلام|مرحبا)/i.test(lower);
+  const isGreeting = /^(hi|hello|hey|salam|assalam|assalamu|marhaba|السلام|مرحبا)\b/i.test(lower);
+  const starMatch = raw.match(/^([1-5])(\s*(stars?|★|\*)?.*)?$/i);
+  const reviewApptId = payload.appointmentIdForReview || client.awaitingReviewAppointmentId;
+  const isStarFeedback = Boolean(starMatch && (reviewApptId || lower.includes('star') || (raw.length <= 2 && !client.awaitingLanguageSelection)));
+  const isWinbackRebook = lower.includes('rebook') || (client.awaitingWinbackRebook && raw === '1');
+  const isLateReply =
+    /\b(late|delay|minutes?\s*late|min\s*late|der\s*ho|تأخير|متأخر)\b/i.test(lower);
+  const isRescheduleReply =
+    /\b(reschedule|tomorrow|cancel|can'?t\s*(make|come)|nahi\s*aa|kal\s*ka|تأجيل|إلغاء|غداً)\b/i.test(lower);
+  const isBookingOrConfirm =
+    /\b(confirm|confirmed|book|want|wants|coming|on\s*my\s*way|be\s*there|haircut|beard|facial|fade|shave|groom|slot|aa\s*raha|کنفرم|بک|حجز|أؤكد|تأكيد|قادم)\b/i.test(
+      lower
+    ) || /\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)\b/i.test(lower);
 
-  appendLog(payload.salonId, {
-    direction: 'INBOUND',
-    module: client.awaitingReviewAppointmentId ? 'REVIEW_T2H' : 'LANGUAGE_MENU',
-    clientName: client.name,
-    clientPhone: client.phone,
-    language: client.preferredLanguage || 'en',
-    dir: getLangDirection(client.preferredLanguage || 'en'),
-    body: raw,
-  });
+  const hasStructuredAction =
+    isStarFeedback || isWinbackRebook || isLateReply || isRescheduleReply || isBookingOrConfirm;
+
+  const matchedLangOpt =
+    menuOptions.find((o) => o.index === raw) ||
+    menuOptions.find((o) =>
+      lower.includes(
+        o.lang === 'roman_ur' ? 'roman' : o.lang === 'ur' ? 'urdu' : o.lang === 'ar' ? 'arab' : 'eng'
+      )
+    );
+
+  const isStep5Action =
+    !isStarFeedback &&
+    !isWinbackRebook &&
+    (isLateReply || isRescheduleReply || isBookingOrConfirm);
+
+  // Defer INBOUND log for step 5 so booking/reminder events get rich eventMetadata without duplicate rows
+  if (!(isStep5Action && !payload.forceLanguagePrompt && !(client.awaitingLanguageSelection && matchedLangOpt))) {
+    appendLog(payload.salonId, {
+      direction: 'INBOUND',
+      module: client.awaitingReviewAppointmentId ? 'REVIEW_T2H' : isWinbackRebook ? 'WINBACK_30D' : 'LANGUAGE_MENU',
+      clientName: client.name,
+      clientPhone: client.phone,
+      language: client.preferredLanguage || 'en',
+      dir: getLangDirection(client.preferredLanguage || 'en'),
+      body: raw,
+    });
+  }
 
   // 1. Trigger Region-Aware Language Selector Menu on initial "Hi"/Greeting or explicit reset
-  if (payload.forceLanguagePrompt || (!client.preferredLanguage && !client.awaitingLanguageSelection) || (isGreeting && !client.preferredLanguage)) {
+  if (
+    payload.forceLanguagePrompt ||
+    (!hasStructuredAction &&
+      ((!client.preferredLanguage && !client.awaitingLanguageSelection) ||
+        (isGreeting && !client.preferredLanguage)))
+  ) {
     client.awaitingLanguageSelection = true;
     const greetingText = buildGreetingMenuText(settings.salonName, regionMeta.region);
     appendLog(payload.salonId, {
@@ -716,15 +754,11 @@ export function processWhatsAppWebhook(payload: {
   }
 
   // 2. Lock preferred_language when client responds with 1 / 2 / 3 (or language name)
-  if (client.awaitingLanguageSelection) {
-    const matchedOpt =
-      menuOptions.find((o) => o.index === raw) ||
-      menuOptions.find((o) => lower.includes(o.lang === 'roman_ur' ? 'roman' : o.lang === 'ur' ? 'urdu' : o.lang === 'ar' ? 'arab' : 'eng'));
-
-    if (matchedOpt) {
-      client.preferredLanguage = matchedOpt.lang;
+  if (client.awaitingLanguageSelection && (!hasStructuredAction || Boolean(matchedLangOpt))) {
+    if (matchedLangOpt) {
+      client.preferredLanguage = matchedLangOpt.lang;
       client.awaitingLanguageSelection = false;
-      const dir = getLangDirection(matchedOpt.lang);
+      const dir = getLangDirection(matchedLangOpt.lang);
 
       const confirmationMap: Record<ClientPreferredLang, string> = {
         en: `Language locked: English. Welcome to ${settings.salonName}! Choose an option:\n1. Book Appointment\n2. Service Rates\n3. Location & Hours`,
@@ -732,13 +766,13 @@ export function processWhatsAppWebhook(payload: {
         ur: `زبان محفوظ کر لی گئی: اردو۔ ${settings.salonName} میں خوش آمدید! منتخب کریں:\n1. اپائنٹمنٹ بک کریں\n2. ریٹ لسٹ\n3. لوکیشن اور اوقات`,
         ar: `تم تثبيت اللغة: العربية. أهلاً بك في ${settings.salonName}! اختر:\n1. حجز موعد\n2. قائمة الأسعار\n3. الموقع وساعات العمل`,
       };
-      const replyText = confirmationMap[matchedOpt.lang];
+      const replyText = confirmationMap[matchedLangOpt.lang];
       appendLog(payload.salonId, {
         direction: 'OUTBOUND',
         module: 'LANGUAGE_MENU',
         clientName: client.name,
         clientPhone: client.phone,
-        language: matchedOpt.lang,
+        language: matchedLangOpt.lang,
         dir,
         body: replyText,
       });
@@ -746,8 +780,8 @@ export function processWhatsAppWebhook(payload: {
       return {
         replyText,
         replyDir: dir,
-        lockedLanguage: matchedOpt.lang,
-        routedAction: `LANGUAGE_LOCKED_${matchedOpt.lang.toUpperCase()}`,
+        lockedLanguage: matchedLangOpt.lang,
+        routedAction: `LANGUAGE_LOCKED_${matchedLangOpt.lang.toUpperCase()}`,
         state: getSalonConciergeState(payload.salonId),
       };
     }
@@ -764,13 +798,16 @@ export function processWhatsAppWebhook(payload: {
     };
   }
 
+  if (hasStructuredAction && !client.preferredLanguage) {
+    client.preferredLanguage = 'en';
+    client.awaitingLanguageSelection = false;
+  }
+
   const activeLang: ClientPreferredLang = client.preferredLanguage || 'en';
   const activeDir = getLangDirection(activeLang);
 
   // 3. Smart Reputation Routing for 1–5 Star Feedback (Module 4)
-  const starMatch = raw.match(/^([1-5])(\s*(stars?|★|\*)?.*)?$/i);
-  const reviewApptId = payload.appointmentIdForReview || client.awaitingReviewAppointmentId;
-  if (starMatch && (reviewApptId || lower.includes('star') || raw.length <= 2)) {
+  if (isStarFeedback && starMatch) {
     const rating = Number(starMatch[1]);
     const appt =
       store.appointments.find((a) => a.id === reviewApptId) ||
@@ -911,7 +948,180 @@ export function processWhatsAppWebhook(payload: {
     };
   }
 
-  // 5. General localized concierge acknowledgment in locked preferred_language
+  // 5. Appointment Confirmations & Reminder Replies (triggers hands-free loud owner announcements)
+  if (isLateReply || isRescheduleReply || isBookingOrConfirm) {
+    // Extract optional barber, time slot, and services from message
+    const timeMatch = raw.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.))\b/i);
+    const extractedTime = timeMatch
+      ? timeMatch[1].replace(/\./g, '').toUpperCase().replace(/^(\d{1,2})\s/, '$1:00 ')
+      : '04:30 PM';
+
+    const barberMatch =
+      raw.match(/(?:barber|stylist|حلاق|باربر)\s+([A-Za-z]+)/i) ||
+      raw.match(/\bwith\s+(?!(?:barber|stylist|the|my|our)\b)([A-Za-z]+)/i);
+    const extractedBarber = barberMatch ? barberMatch[1] : 'Master Aslam';
+
+    const matchedServices: string[] = [];
+    if (/haircut|fade|cut|قص|کٹ/i.test(lower)) matchedServices.push('Haircut');
+    if (/beard|shave|trim|لحية|داڑھی/i.test(lower)) matchedServices.push('Beard');
+    if (/facial|scrub|polish|بشرة|فیشل/i.test(lower)) matchedServices.push('Facial');
+    if (/massage|مساج/i.test(lower)) matchedServices.push('Head Massage');
+    const extractedServices =
+      matchedServices.length > 0 ? matchedServices.join(' & ') : 'Haircut & Beard';
+
+    if (isLateReply) {
+      appendLog(payload.salonId, {
+        direction: 'INBOUND',
+        module: 'BOOKING',
+        clientName: client.name,
+        clientPhone: client.phone,
+        language: activeLang,
+        dir: activeDir,
+        body: raw,
+        eventMetadata: {
+          eventType: 'REMINDER_REPLY_LATE',
+          barberName: extractedBarber,
+          timeSlot: extractedTime,
+        },
+      });
+      const lateReplyMap: Record<ClientPreferredLang, string> = {
+        en: `No problem ${client.name}! We have notified ${extractedBarber} that you will arrive shortly for your ${extractedTime} slot.`,
+        roman_ur: `Koi masla nahi ${client.name}! Hum ne barber ${extractedBarber} ko inform kar diya hai ke aap ${extractedTime} ke liye thori der mein pohanch rahe hain.`,
+        ur: `کوئی بات نہیں ${client.name}! ہم نے باربر ${extractedBarber} کو اطلاع دے دی ہے کہ آپ ${extractedTime} کے وقت پر تھوڑی دیر سے پہنچیں گے۔`,
+        ar: `لا بأس يا ${client.name}! أبلغنا الحلاق ${extractedBarber} بأنك ستتأخر قليلاً عن موعد ${extractedTime}.`,
+      };
+      const replyText = lateReplyMap[activeLang];
+      appendLog(payload.salonId, {
+        direction: 'OUTBOUND',
+        module: 'BOOKING',
+        clientName: client.name,
+        clientPhone: client.phone,
+        language: activeLang,
+        dir: activeDir,
+        body: replyText,
+      });
+      persistStore();
+      return {
+        replyText,
+        replyDir: activeDir,
+        lockedLanguage: activeLang,
+        routedAction: 'REMINDER_REPLY_LATE',
+        state: getSalonConciergeState(payload.salonId),
+      };
+    }
+
+    if (isRescheduleReply) {
+      appendLog(payload.salonId, {
+        direction: 'INBOUND',
+        module: 'BOOKING',
+        clientName: client.name,
+        clientPhone: client.phone,
+        language: activeLang,
+        dir: activeDir,
+        body: raw,
+        eventMetadata: {
+          eventType: 'REMINDER_REPLY_RESCHEDULE',
+          barberName: extractedBarber,
+          timeSlot: extractedTime,
+        },
+      });
+      const reschedMap: Record<ClientPreferredLang, string> = {
+        en: `Got it ${client.name}. We alerted ${settings.salonName} so your chair can be offered to the waitlist and we will send tomorrow's slots.`,
+        roman_ur: `Ji ${client.name}, hum ne salon ko update kar diya hai aur kal ke available slots aap ko bhej rahe hain.`,
+        ur: `جی ${client.name}، ہم نے سیلون کو آگاہ کر دیا ہے اور کل کے دستیاب اوقات آپ کو بھیج رہے ہیں۔`,
+        ar: `تم استلام طلبك يا ${client.name}. أبلغنا الصالون وسنرسل لك المواعيد المتاحة ليوم غد.`,
+      };
+      const replyText = reschedMap[activeLang];
+      appendLog(payload.salonId, {
+        direction: 'OUTBOUND',
+        module: 'BOOKING',
+        clientName: client.name,
+        clientPhone: client.phone,
+        language: activeLang,
+        dir: activeDir,
+        body: replyText,
+      });
+      persistStore();
+      return {
+        replyText,
+        replyDir: activeDir,
+        lockedLanguage: activeLang,
+        routedAction: 'REMINDER_REPLY_RESCHEDULE',
+        state: getSalonConciergeState(payload.salonId),
+      };
+    }
+
+    // Appointment Confirmation / New Booking
+    const isReminderOnly =
+      /\b(i'?m coming|on my way|coming|yes\s*confirm|aa\s*raha|جی آ رہا|قادم)\b/i.test(lower) &&
+      matchedServices.length === 0;
+    const eventType = isReminderOnly ? 'REMINDER_REPLY_CONFIRMED' : 'APPOINTMENT_CONFIRMED';
+
+    const newAppt: ConciergeAppointment = {
+      id: `BK-WA-${Date.now().toString().slice(-4)}`,
+      salonId: payload.salonId,
+      clientId: client.id,
+      clientName: client.name,
+      clientPhone: client.phone,
+      barberName: extractedBarber,
+      service: extractedServices,
+      price: settings.currency === 'PKR' ? 1500 : 85,
+      timeSlot: extractedTime,
+      status: 'CONFIRMED',
+      scheduledForIso: new Date().toISOString(),
+      completedAt: null,
+      reviewPromptSentAt: null,
+      rating: null,
+      ratingComment: null,
+      reviewRoutedStatus: 'PENDING',
+    };
+    if (!isReminderOnly) {
+      store.appointments.unshift(newAppt);
+    }
+
+    appendLog(payload.salonId, {
+      direction: 'INBOUND',
+      module: 'BOOKING',
+      clientName: client.name,
+      clientPhone: client.phone,
+      language: activeLang,
+      dir: activeDir,
+      body: raw,
+      eventMetadata: {
+        eventType,
+        barberName: extractedBarber,
+        services: extractedServices,
+        timeSlot: extractedTime,
+      },
+    });
+
+    const confirmReplyMap: Record<ClientPreferredLang, string> = {
+      en: `Confirmed! ${client.name}, your ${extractedServices} with ${extractedBarber} at ${extractedTime} is locked at ${settings.salonName}.`,
+      roman_ur: `Confirm ho gaya ${client.name}! ${extractedBarber} ke sath ${extractedTime} par (${extractedServices}) lock kar diya gaya hai.`,
+      ur: `کنفرم ہو گیا ${client.name}! باربر ${extractedBarber} کے ساتھ ${extractedTime} پر (${extractedServices}) بک ہو گیا ہے۔`,
+      ar: `تم التأكيد يا ${client.name}! موعدك (${extractedServices}) مع الحلاق ${extractedBarber} الساعة ${extractedTime} مؤكد في ${settings.salonName}.`,
+    };
+    const replyText = confirmReplyMap[activeLang];
+    appendLog(payload.salonId, {
+      direction: 'OUTBOUND',
+      module: 'BOOKING',
+      clientName: client.name,
+      clientPhone: client.phone,
+      language: activeLang,
+      dir: activeDir,
+      body: replyText,
+    });
+    persistStore();
+    return {
+      replyText,
+      replyDir: activeDir,
+      lockedLanguage: activeLang,
+      routedAction: eventType,
+      state: getSalonConciergeState(payload.salonId),
+    };
+  }
+
+  // 6. General localized concierge acknowledgment in locked preferred_language
   const generalAck: Record<ClientPreferredLang, string> = {
     en: `Received "${raw}" at ${settings.salonName}. Pick a service or reply BOOK to reserve your chair!`,
     roman_ur: `Aap ka message "${raw}" mil gaya hai. ${settings.salonName} par slot reserve karne ke liye apna waqt aur service batayein!`,
