@@ -37,6 +37,13 @@ import {
   LogOut,
   Key,
   Settings2,
+  SlidersHorizontal,
+  QrCode,
+  ChevronDown,
+  ChevronUp,
+  Banknote,
+  PhoneCall,
+  Save,
 } from 'lucide-react';
 import { PortalCard } from './PortalCard';
 import { BroadcastTab } from './Tabs/BroadcastTab';
@@ -55,7 +62,56 @@ interface BookingRecord {
   service: string;
   price: number;
   timeSlot: string;
+  durationMins?: number;
+  chairLabel?: string;
   status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED';
+}
+
+interface PendingDepositAlert {
+  id: string;
+  clientName: string;
+  phone: string;
+  method: 'EasyPaisa' | 'Raast';
+  amount: number;
+  timeSlot: string;
+  referenceId: string;
+  receivedAt: string;
+  verified: boolean;
+}
+
+interface HumanHandoverAlert {
+  id: string;
+  clientName: string;
+  phone: string;
+  lang: 'en' | 'ur' | 'ar';
+  summary: string;
+  receivedAt: string;
+  handled: boolean;
+}
+
+interface SalonHoursConfig {
+  monThuOpen: string;
+  monThuClose: string;
+  monThuClosed: boolean;
+  fridayOpen: string;
+  fridayClose: string;
+  fridayBreakStart: string;
+  fridayBreakEnd: string;
+  fridayClosed: boolean;
+  satSunOpen: string;
+  satSunClose: string;
+  satSunClosed: boolean;
+}
+
+function parseTimeSlotMinutes(slot: string): number {
+  const m = slot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!m) return 9999;
+  let hour = parseInt(m[1], 10);
+  const mins = parseInt(m[2], 10);
+  const meridiem = (m[3] || '').toUpperCase();
+  if (meridiem === 'PM' && hour < 12) hour += 12;
+  if (meridiem === 'AM' && hour === 12) hour = 0;
+  return hour * 60 + mins;
 }
 
 export interface ClientSalon {
@@ -738,6 +794,8 @@ interface SalonOwnerDashboardProps {
   salonCategory?: 'MENS' | 'LADIES';
   onboardedData?: OnboardedSalonPayload | null;
   isFounderInspector?: boolean;
+  sectionMode?: 'LIVE' | 'MANAGE';
+  onSectionModeChange?: (mode: 'LIVE' | 'MANAGE') => void;
   onOpenSimulator?: () => void;
   onClose?: () => void;
 }
@@ -747,6 +805,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   salonCategory,
   onboardedData,
   isFounderInspector = false,
+  sectionMode,
+  onSectionModeChange,
   onClose,
 }) => {
   const [salonsState, setSalonsState] = useState<ClientSalon[]>(() => {
@@ -816,10 +876,72 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     (p) => p.setupFee > currentPackage.setupFee
   );
 
-  // Query 6: Consolidated Mobile-Friendly Navigation Including Salon Settings & Retention
-  const [activeTab, setActiveTab] = useState<
-    'QUEUE' | 'RATES_BOT' | 'MARKETING' | 'GROWTH_KIT' | 'BILLING_SLA' | 'SETTINGS'
-  >('QUEUE');
+  // Consolidated Two-Mode Architecture: LIVE (Daily Operations) vs MANAGE (Shop Setup & Rules)
+  const [internalSectionMode, setInternalSectionMode] = useState<'LIVE' | 'MANAGE'>('LIVE');
+  const currentSectionMode = sectionMode ?? internalSectionMode;
+  const setSectionMode = (mode: 'LIVE' | 'MANAGE') => {
+    setInternalSectionMode(mode);
+    onSectionModeChange?.(mode);
+  };
+  const [manageSubSection, setManageSubSection] = useState<
+    'STAFF' | 'SERVICES' | 'HOURS' | 'AUTOMATION' | 'POSTER'
+  >('STAFF');
+  const [showManageAdvancedTools, setShowManageAdvancedTools] = useState(false);
+  const [expandedDepositReceiptId, setExpandedDepositReceiptId] = useState<string | null>(null);
+  const [pendingDeposits, setPendingDeposits] = useState<PendingDepositAlert[]>([
+    {
+      id: 'dep-raast-1',
+      clientName: 'Bilal Ahmed',
+      phone: '+92 300 1234567',
+      method: 'EasyPaisa',
+      amount: 600,
+      timeSlot: '03:30 PM',
+      referenceId: 'EP-88412091',
+      receivedAt: '12 mins ago',
+      verified: false,
+    },
+    {
+      id: 'dep-raast-2',
+      clientName: 'Dr. Usman Qureshi',
+      phone: '+92 333 4567890',
+      method: 'Raast',
+      amount: 1000,
+      timeSlot: '05:00 PM',
+      referenceId: 'RST-5520941',
+      receivedAt: '4 mins ago',
+      verified: false,
+    },
+  ]);
+  const [handoverRequests, setHandoverRequests] = useState<HumanHandoverAlert[]>([
+    {
+      id: 'hnd-1',
+      clientName: 'Faisal Mehmood',
+      phone: '+92 321 7744110',
+      lang: 'ur',
+      summary: 'Asked for a custom 3-brother wedding grooming group slot on Saturday evening.',
+      receivedAt: '8 mins ago',
+      handled: false,
+    },
+  ]);
+  const [salonHours, setSalonHours] = useState<SalonHoursConfig>(() => {
+    try {
+      const saved = localStorage.getItem('wcl_salon_hours');
+      if (saved) return JSON.parse(saved) as SalonHoursConfig;
+    } catch {}
+    return {
+      monThuOpen: '11:00 AM',
+      monThuClose: '11:00 PM',
+      monThuClosed: false,
+      fridayOpen: '11:00 AM',
+      fridayClose: '11:30 PM',
+      fridayBreakStart: '01:00 PM',
+      fridayBreakEnd: '02:30 PM',
+      fridayClosed: false,
+      satSunOpen: '10:30 AM',
+      satSunClose: '11:30 PM',
+      satSunClosed: false,
+    };
+  });
   const [conciergeState, setConciergeState] = useState<SalonConciergeStateResponse | null>(null);
 
   // Query 1: Top-Right Upgrade Modal & Payment Details Input
@@ -1433,41 +1555,45 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     {
       id: 'BK-101',
       clientName: 'Bilal Ahmed',
-      barberName: 'Aslam',
+      barberName: 'Master Aslam',
       phone: '+92 300 1234567',
       service: 'Master Haircut & Skin Fade',
       price: 1200,
       timeSlot: '03:30 PM',
+      durationMins: 40,
       status: 'CONFIRMED',
     },
     {
       id: 'BK-102',
       clientName: 'Hamza Malik',
-      barberName: 'Tariq',
+      barberName: 'Tariq Mehmood',
       phone: '+92 321 9876543',
       service: 'Royal Beard Sculpt & Ozone Steam',
       price: 800,
       timeSlot: '04:15 PM',
+      durationMins: 30,
       status: 'IN_CHAIR',
     },
     {
       id: 'BK-103',
       clientName: 'Dr. Usman Qureshi',
-      barberName: 'Aslam',
+      barberName: 'Master Aslam',
       phone: '+92 333 4567890',
       service: 'Charcoal Deep Detox Facial',
       price: 2500,
       timeSlot: '05:00 PM',
+      durationMins: 45,
       status: 'CONFIRMED',
     },
     {
       id: 'BK-104',
       clientName: 'Saad Farooq',
-      barberName: 'Bilal',
+      barberName: 'Bilal Tariq',
       phone: '+92 345 6789012',
       service: 'Haircut + Beard Styling Combo',
       price: 1800,
       timeSlot: '05:45 PM',
+      durationMins: 50,
       status: 'COMPLETED',
     },
   ]);
@@ -1495,7 +1621,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     (typeof window !== 'undefined' && localStorage.getItem('wcl_salon_category') === 'LADIES');
 
   // Rate Card State strictly locked to the onboarded category (Men's Salon vs Ladies Parlor)
-  const [services, setServices] = useState(() => {
+  const [services, setServices] = useState<
+    Array<{ id: string; name: string; durationMins: number; price: number; active: boolean }>
+  >(() => {
     if (onboardedData?.services && onboardedData.services.length > 0) {
       return onboardedData.services.map((s) => {
         if (s.translations && (s.translations.ur || s.translations.ar)) {
@@ -1507,6 +1635,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         return {
           id: s.id,
           name: s.name,
+          durationMins: 35,
           price: s.price,
           active: s.enabled,
         };
@@ -1514,32 +1643,33 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }
     if (isLadies) {
       return [
-        { id: 'l1', name: 'Signature Party Makeup & Styling', price: 4500, active: true },
-        { id: 'l2', name: 'Barat / Walima Bridal Package', price: 35000, active: true },
-        { id: 'l3', name: 'Hydra-Facial & Skin Polish', price: 3500, active: true },
-        { id: 'l4', name: 'Keratin Hair Rebonding / Smoothing', price: 12000, active: true },
-        { id: 'l5', name: 'Mani-Pedi Classic Spa', price: 2000, active: true },
-        { id: 'l6', name: 'Full Face Threading & Waxing', price: 1200, active: true },
-        { id: 'l7', name: 'Deep Conditioning Hair Spa', price: 2500, active: true },
+        { id: 'l1', name: 'Signature Party Makeup & Styling', durationMins: 60, price: 4500, active: true },
+        { id: 'l2', name: 'Barat / Walima Bridal Package', durationMins: 150, price: 35000, active: true },
+        { id: 'l3', name: 'Hydra-Facial & Skin Polish', durationMins: 50, price: 3500, active: true },
+        { id: 'l4', name: 'Keratin Hair Rebonding / Smoothing', durationMins: 120, price: 12000, active: true },
+        { id: 'l5', name: 'Mani-Pedi Classic Spa', durationMins: 45, price: 2000, active: true },
+        { id: 'l6', name: 'Full Face Threading & Waxing', durationMins: 30, price: 1200, active: true },
+        { id: 'l7', name: 'Deep Conditioning Hair Spa', durationMins: 40, price: 2500, active: true },
       ];
     }
     return [
-      { id: 's1', name: 'Master Haircut & Skin Fade', price: 800, active: true },
-      { id: 's2', name: 'Classic Beard Trim & Sculpt', price: 400, active: true },
-      { id: 's3', name: 'Hot Towel Steam Shave', price: 500, active: true },
-      { id: 's4', name: 'Hair Color & Camo', price: 1500, active: true },
-      { id: 's5', name: 'Charcoal Deep Detox Facial', price: 2500, active: true },
-      { id: 's6', name: 'Keratin Hair Protein', price: 6000, active: true },
-      { id: 's7', name: 'Herbal Mint Head Massage', price: 500, active: true },
-      { id: 's8', name: 'Groom Signature Package', price: 12000, active: true },
+      { id: 's1', name: 'Master Haircut & Skin Fade', durationMins: 40, price: 800, active: true },
+      { id: 's2', name: 'Classic Beard Trim & Sculpt', durationMins: 25, price: 400, active: true },
+      { id: 's3', name: 'Hot Towel Steam Shave', durationMins: 25, price: 500, active: true },
+      { id: 's4', name: 'Hair Color & Camo', durationMins: 45, price: 1500, active: true },
+      { id: 's5', name: 'Charcoal Deep Detox Facial', durationMins: 45, price: 2500, active: true },
+      { id: 's6', name: 'Keratin Hair Protein', durationMins: 90, price: 6000, active: true },
+      { id: 's7', name: 'Herbal Mint Head Massage', durationMins: 20, price: 500, active: true },
+      { id: 's8', name: 'Groom Signature Package', durationMins: 120, price: 12000, active: true },
     ];
   });
 
   const [isAddingCustom, setIsAddingCustom] = useState(false);
   const [customServiceName, setCustomServiceName] = useState('');
+  const [customServiceDuration, setCustomServiceDuration] = useState('35');
   const [customServicePrice, setCustomServicePrice] = useState('1500');
 
-  // Query 8: Barbers & Stylists Management State (Synced with Onboarding & LocalStorage)
+  // Query 8: Barbers & Stylists Management State + Chair Assignments (Synced with Onboarding & LocalStorage)
   const [barbersList, setBarbersList] = useState<string[]>(() => {
     if (onboardedData?.barbers && onboardedData.barbers.length > 0) {
       return onboardedData.barbers;
@@ -1552,6 +1682,18 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       }
     } catch {}
     return ['Master Aslam', 'Tariq Mehmood', 'Ali Raza', 'Bilal Tariq'];
+  });
+  const [barberChairs, setBarberChairs] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('wcl_salon_barber_chairs');
+      if (saved) return JSON.parse(saved) as Record<string, string>;
+    } catch {}
+    return {
+      'Master Aslam': 'Chair #1 (VIP Front)',
+      'Tariq Mehmood': 'Chair #2',
+      'Ali Raza': 'Chair #3',
+      'Bilal Tariq': 'Chair #4',
+    };
   });
 
   useEffect(() => {
@@ -1570,6 +1712,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           return {
             id: s.id,
             name: s.name,
+            durationMins: 35,
             price: s.price,
             active: s.enabled,
           };
@@ -1581,44 +1724,83 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }
   }, [onboardedData]);
   const [newBarberDashboardInput, setNewBarberDashboardInput] = useState('');
+  const [newBarberChairInput, setNewBarberChairInput] = useState('');
   const [editingBarberIndex, setEditingBarberIndex] = useState<number | null>(null);
   const [editingBarberName, setEditingBarberName] = useState('');
+  const [editingBarberChair, setEditingBarberChair] = useState('');
 
   const handleAddBarberDashboard = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newBarberDashboardInput.trim()) return;
-    const updated = [...barbersList, newBarberDashboardInput.trim()];
+    const name = newBarberDashboardInput.trim();
+    const chairLabel = newBarberChairInput.trim() || `Chair #${barbersList.length + 1}`;
+    const updated = [...barbersList, name];
+    const nextChairs = { ...barberChairs, [name]: chairLabel };
     setBarbersList(updated);
+    setBarberChairs(nextChairs);
     setNewBarberDashboardInput('');
+    setNewBarberChairInput('');
     try {
       localStorage.setItem('wcl_salon_barbers', JSON.stringify(updated));
+      localStorage.setItem('wcl_salon_barber_chairs', JSON.stringify(nextChairs));
     } catch {}
-    setMaintToast(`✓ Barber "${newBarberDashboardInput.trim()}" added to active roster & voice engine.`);
+    setMaintToast(`✓ ${name} assigned to ${chairLabel} & synced with queue.`);
     setTimeout(() => setMaintToast(null), 4000);
   };
 
   const handleSaveEditBarber = (index: number) => {
     if (!editingBarberName.trim()) return;
     const oldName = barbersList[index];
+    const nextName = editingBarberName.trim();
+    const nextChair = editingBarberChair.trim() || barberChairs[oldName] || `Chair #${index + 1}`;
     const updated = [...barbersList];
-    updated[index] = editingBarberName.trim();
+    updated[index] = nextName;
+    const nextChairs = { ...barberChairs };
+    delete nextChairs[oldName];
+    nextChairs[nextName] = nextChair;
     setBarbersList(updated);
+    setBarberChairs(nextChairs);
     setEditingBarberIndex(null);
     setEditingBarberName('');
+    setEditingBarberChair('');
     try {
       localStorage.setItem('wcl_salon_barbers', JSON.stringify(updated));
+      localStorage.setItem('wcl_salon_barber_chairs', JSON.stringify(nextChairs));
     } catch {}
-    setMaintToast(`✓ Barber "${oldName}" updated to "${editingBarberName.trim()}".`);
+    setMaintToast(`✓ Updated ${nextName} (${nextChair}).`);
     setTimeout(() => setMaintToast(null), 4000);
   };
 
   const handleDeleteBarberDashboard = (name: string) => {
     const updated = barbersList.filter((b) => b !== name);
+    const nextChairs = { ...barberChairs };
+    delete nextChairs[name];
     setBarbersList(updated);
+    setBarberChairs(nextChairs);
     try {
       localStorage.setItem('wcl_salon_barbers', JSON.stringify(updated));
+      localStorage.setItem('wcl_salon_barber_chairs', JSON.stringify(nextChairs));
     } catch {}
     setMaintToast(`✓ Barber "${name}" removed from salon roster.`);
+    setTimeout(() => setMaintToast(null), 4000);
+  };
+
+  const handleUpdateServiceName = (id: string, name: string) => {
+    setServices((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
+  };
+
+  const handleUpdateServiceDuration = (id: string, durationMins: number) => {
+    setServices((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, durationMins: Math.max(5, durationMins) } : s))
+    );
+  };
+
+  const handleSaveSalonHours = (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      localStorage.setItem('wcl_salon_hours', JSON.stringify(salonHours));
+    } catch {}
+    setMaintToast('✓ Salon operating hours saved and synced to WhatsApp Concierge.');
     setTimeout(() => setMaintToast(null), 4000);
   };
 
@@ -2100,14 +2282,18 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const handleSaveWalkIn = () => {
     const id = `WLK-${Date.now().toString().slice(-4)}`;
     const timeSlot = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const matchedSvc = services.find((s) => s.name === walkInService);
+    const assignedBarber = barbersList.includes(walkInBarber) ? walkInBarber : barbersList[0] || walkInBarber;
     const newBooking: BookingRecord = {
       id,
       clientName: walkInName.trim() || 'Walk-in Client',
-      barberName: walkInBarber,
+      barberName: assignedBarber,
       phone: walkInPhone.trim() || '+92 300 0000000',
       service: walkInService,
       price: walkInPrice,
       timeSlot,
+      durationMins: matchedSvc?.durationMins || 35,
+      chairLabel: barberChairs[assignedBarber],
       status: walkInImmediateChair ? 'IN_CHAIR' : 'CONFIRMED',
     };
 
@@ -2655,179 +2841,78 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   }
 
   // ============================================================================
-  // SALON OWNER FULL PWA DASHBOARD
+  // COMPUTED OPERATIONAL METRICS FOR LIVE STATUS STRIP & TIMELINE
+  // ============================================================================
+  const sortedBookings = [...bookings].sort(
+    (a, b) => parseTimeSlotMinutes(a.timeSlot) - parseTimeSlotMinutes(b.timeSlot)
+  );
+  const todayTotalRevenue = bookings.reduce((sum, b) => sum + b.price, 0);
+  const unverifiedDeposits = pendingDeposits.filter((d) => !d.verified);
+  const pendingDepositsTotal = unverifiedDeposits.reduce((sum, d) => sum + d.amount, 0);
+  const activeReviewAlerts = (conciergeState?.alerts || []).filter(
+    (a) => a.status === 'OWNER_INTERVENTION_NEEDED'
+  );
+  const openHandovers = handoverRequests.filter((h) => !h.handled);
+  const totalUrgentCount =
+    activeReviewAlerts.length + unverifiedDeposits.length + openHandovers.length;
+
+  // ============================================================================
+  // SALON OWNER FULL PWA DASHBOARD (MATTE OBSIDIAN · LIVE FLOOR + MANAGE)
   // ============================================================================
   return (
-    <div className="space-y-5 max-w-5xl mx-auto pb-28 lg:pb-10 min-w-0">
+    <div className="space-y-4 max-w-5xl mx-auto pb-28 lg:pb-10 min-w-0">
       {/* ========================================================================= */}
-      {/* 0. POST-ONBOARDING WELCOME SEQUENCE DISPATCH CONFIRMATION (Query 3)       */}
+      {/* TOP STATUS STRIP (ALWAYS VISIBLE · COMPACT DAILY OPERATIONS HEADER)       */}
       {/* ========================================================================= */}
-      <div className="rounded-2xl border border-[#116329] bg-[#0D3822] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in shadow-lg">
-        <div className="flex items-start gap-3">
-          <div className="size-10 rounded-xl bg-[#161B22] border border-[#116329] grid place-items-center text-[#3FB950] shrink-0">
-            <CheckCircle2 className="size-5" />
-          </div>
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-mono font-bold uppercase text-[#3FB950]">
-                Automated WhatsApp Welcome Sequence Dispatched
-              </span>
-              <span className="rounded bg-[#161B22] border border-[#116329] px-2 py-0.5 text-[9px] font-mono text-[#3FB950]">
-                2 MESSAGES DELIVERED ✓✓
-              </span>
-            </div>
-            <p className="text-xs text-[#F0F6FC] font-sans">
-              Welcome to your live Salon Owner Dashboard! Message 1 (Package &amp; SLA Confirmation) and Message 2 (Direct Home Shortcut Link) have been dispatched to <strong className="text-[#06B6D4] font-mono">{currentSalon.phone}</strong>.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="size-2 rounded-full bg-[#3FB950] animate-ping" />
-          <span className="text-[11px] font-mono font-bold text-[#3FB950]">
-            ONLINE &amp; TAKING BOOKINGS
-          </span>
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 1. TOP HEADER: SALON BRAND + TOP LANGUAGE SWITCHER + ACTIVE STATUS        */}
-      {/* ========================================================================= */}
-      <div className="rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-7 relative overflow-hidden">
-        {/* TOP BAR: ACTIVE STATUS BADGE + TOP LANGUAGE SWITCHER (Query 3) */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-[#21262D]">
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#116329] bg-[#0D3822] px-3.5 py-1 text-xs font-mono font-bold text-[#3FB950] shadow-sm">
-              <span className="size-2 rounded-full bg-[#3FB950] animate-pulse" />
-              <span>ACTIVE &amp; CONNECTED · 24/7 WHATSAPP CONCIERGE LIVE</span>
-            </div>
-            <span className="rounded-md bg-[#0D1117] border border-[#30363D] px-2.5 py-0.5 text-[10px] font-mono text-[#06B6D4]">
-              {regionConfig.regionLabel.toUpperCase()}
-            </span>
+      <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 space-y-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          {/* WhatsApp Gateway Connection Badge (#3FB950 on #0D3822) */}
+          <div className="inline-flex items-center gap-2 rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950]">
+            <span className="size-2 rounded-full bg-[#3FB950]" />
+            <span>WhatsApp Gateway · Connected</span>
           </div>
 
-          {/* Top 4-Language Switcher (Query 3) */}
-          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#0D1117] border border-[#30363D]">
-            {[
-              { id: 'ur' as const, label: '🇵🇰 اردو', full: 'Urdu' },
-              { id: 'en' as const, label: '🇬🇧 EN', full: 'English' },
-              { id: 'ar' as const, label: '🇦🇪 العربية', full: 'Arabic' },
-            ].map((lang) => {
-              const isSelected = ownerLang === lang.id;
-              return (
-                <button
-                  key={lang.id}
-                  type="button"
-                  onClick={() => {
-                    setOwnerLang(lang.id);
-                    setMaintToast(`Language updated to ${lang.full} (${lang.label})`);
-                    setTimeout(() => setMaintToast(null), 3000);
-                  }}
-                  className={`min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition flex items-center gap-1 ${
-                    isSelected
-                      ? 'bg-[#06B6D4] text-[#0D1117]'
-                      : 'text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#21262D]'
-                  }`}
-                  title={`Switch language to ${lang.full}`}
-                >
-                  <span>{lang.label}</span>
-                  {isSelected && <Check className="size-3 text-[#0D1117]" />}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 relative z-10">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <span className="text-[10px] font-mono font-bold uppercase tracking-[.22em] text-[#06B6D4]">
-                SALON OWNER PORTAL · MANAGED REVENUE CONTROL
-              </span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-[#F0F6FC] tracking-tight mt-1">
-              {currentSalon.name}
-            </h1>
-            <p className="text-xs text-[#8B949E] font-sans mt-0.5">
-              Owner: <strong className="text-[#F0F6FC]">{currentSalon.owner}</strong> · SIM:{' '}
-              <span className="font-mono text-[#D29922]">{currentSalon.phone}</span> · {currentSalon.location}
-            </p>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-mono">
-              <span className="rounded-lg border border-[#30363D] bg-[#0D1117] px-2.5 py-1 text-[#F0F6FC]">
-                Plan: <strong className="text-[#D29922]">{currentSalon.plan}</strong>
-              </span>
-              <span className="rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1 text-[#3FB950]">
-                10% Monthly Fee Due: <strong>5th of Every Month</strong>
-              </span>
-              <select
-                value={selectedSalonId}
-                onChange={(e) => setSelectedSalonId(e.target.value)}
-                className="min-h-[40px] rounded-lg border border-[#30363D] bg-[#0D1117] px-2 py-1 text-xs font-mono text-[#06B6D4] focus:outline-none focus:border-[#06B6D4]"
-                title="Switch test salon region"
-              >
-                {salonsState.map((s) => (
-                  <option key={s.id} value={s.id} className="bg-[#161B22] text-[#F0F6FC]">
-                    Salon: {s.name} ({getRegionFromPhone(s.phone).currency})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* TOP-RIGHT CORNER: CONTINUOUS UPGRADE BUTTON */}
-          <div className="flex flex-wrap items-center gap-2.5 md:justify-end">
-            {higherPackages.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {/* Desktop Mode Switcher (Hidden on Mobile where fixed Bottom Nav handles Live / Manage) */}
+            <div className="hidden lg:inline-flex items-center rounded-xl border border-[#30363D] bg-[#0D1117] p-1 gap-1">
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedUpgradeTargetId(higherPackages[0].id);
-                  setIsUpgradeModalOpen(true);
-                }}
-                className="min-h-[48px] px-4 py-2 rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-bold uppercase tracking-wider transition active:scale-95 flex items-center gap-2"
+                onClick={() => setSectionMode('LIVE')}
+                className={`min-h-[36px] rounded-lg px-3 py-1 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                  currentSectionMode === 'LIVE'
+                    ? 'bg-[#06B6D4] text-[#0D1117]'
+                    : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                }`}
               >
-                <ArrowUpCircle className="size-4 text-[#0D1117]" />
-                <span>Upgrade Plan ({higherPackages.length} Tiers)</span>
+                <Scissors className="size-3.5" />
+                <span>Live Floor</span>
               </button>
-            ) : (
-              <div className="min-h-[48px] px-3.5 py-2 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] text-[#D29922] text-xs font-mono font-bold flex items-center gap-1.5">
-                <Sparkles className="size-4" />
-                <span>Top Enterprise Tier Active</span>
-              </div>
-            )}
+              <button
+                type="button"
+                onClick={() => setSectionMode('MANAGE')}
+                className={`min-h-[36px] rounded-lg px-3 py-1 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                  currentSectionMode === 'MANAGE'
+                    ? 'bg-[#06B6D4] text-[#0D1117]'
+                    : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                }`}
+              >
+                <SlidersHorizontal className="size-3.5" />
+                <span>Manage</span>
+              </button>
+            </div>
 
             <button
               type="button"
-              onClick={() => setActiveTab('BILLING_SLA')}
-              className={`min-h-[48px] flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-mono font-bold transition hover:opacity-90 ${
-                isMaintenanceOverdue
-                  ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149]'
-                  : maintCycleStage !== 'PAID_ACTIVE'
-                  ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
-                  : 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
+              onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
+              className={`min-h-[40px] min-w-[40px] rounded-xl border px-2.5 grid place-items-center transition ${
+                isVoiceEnabled
+                  ? 'border-[#30363D] bg-[#0D1117] text-[#06B6D4]'
+                  : 'border-[#30363D] bg-[#0D1117] text-[#6E7681]'
               }`}
-              title="Open Plan & Monthly Fee Details"
+              title={isVoiceEnabled ? 'Voice Announcements ON' : 'Voice Announcements Muted'}
+              aria-label="Toggle voice announcements"
             >
-              <ShieldCheck className="size-4" />
-              <span>
-                {isMaintenanceOverdue
-                  ? 'Overdue Grace (Post-5th)'
-                  : maintCycleStage === 'STAGE_3_DAY_5_FINAL'
-                  ? '5th Final Due Day'
-                  : 'Priority Service Active'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('SETTINGS')}
-              className={`min-h-[48px] flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-mono font-bold transition ${
-                activeTab === 'SETTINGS'
-                  ? 'border-[#06B6D4] bg-[#06B6D4]/20 text-[#06B6D4]'
-                  : 'border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] text-[#F0F6FC]'
-              }`}
-              title="Open Retention, Win-Back & Review Settings"
-            >
-              <Settings2 className="size-4 text-[#06B6D4]" />
-              <span>Salon Settings</span>
+              {isVoiceEnabled ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
             </button>
 
             <button
@@ -2838,17 +2923,18 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 setReLoginStep('PHONE');
                 setIsOwnerLoggedOut(true);
               }}
-              className="min-h-[48px] flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] px-3 py-2 text-xs font-mono font-bold text-[#8B949E] hover:text-[#D29922] transition"
-              title="Log out and test self-service WhatsApp OTP re-login without agent or Founder help"
+              className="min-h-[40px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] px-3 text-xs font-mono font-bold text-[#8B949E] hover:text-[#D29922] transition flex items-center gap-1.5"
+              title="Log out"
             >
               <LogOut className="size-3.5" />
-              <span>Log Out</span>
+              <span className="hidden sm:inline">Log Out</span>
             </button>
 
             {onClose && (
               <button
+                type="button"
                 onClick={onClose}
-                className="min-h-[44px] min-w-[44px] rounded-xl border border-[#30363D] bg-[#21262D] p-2 text-[#8B949E] hover:text-[#F0F6FC] grid place-items-center transition"
+                className="min-h-[40px] min-w-[40px] rounded-xl border border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] grid place-items-center transition"
                 title="Close Portal"
               >
                 <X className="size-4" />
@@ -2857,2154 +2943,1017 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           </div>
         </div>
 
-        {/* QUERY 1 (NEW): OFFICIAL FOUNDER NOTICE IN OWNER'S ONBOARDING / VOICE-NOTE LANGUAGE */}
-        <div
-          dir={ownerLang === 'ar' || ownerLang === 'ur' ? 'rtl' : 'ltr'}
-          className={`mt-4 rounded-2xl border border-[#9E6A03] bg-[#3B2E0B] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs overflow-hidden break-words [overflow-wrap:break-word] ${
-            ownerLang === 'ar' || ownerLang === 'ur' ? 'text-right' : 'text-left'
-          }`}
-        >
-          <div className="flex items-start gap-2.5 min-w-0">
-            <Globe className="size-4 text-[#D29922] shrink-0 mt-0.5" />
-            <div className="min-w-0 flex-1">
-              <span className="text-[10px] font-mono font-bold uppercase text-[#D29922] block">
-                Founder Message · Onboarding / Voice-Note Language ({ownerLang.toUpperCase()})
+        {/* Salon Title + Today's Total Revenue & Pending Deposits (#D29922 Gold Highlight) */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-[#21262D]">
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-xl font-black text-[#F0F6FC] truncate">
+              {currentSalon.name}
+            </h1>
+            <p className="text-xs text-[#8B949E] font-mono truncate">
+              {currentSalon.owner} · <span dir="ltr">{currentSalon.phone}</span> · {currentSalon.plan}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5 sm:flex sm:items-center shrink-0">
+            <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[#8B949E] block">
+                Today&apos;s Revenue
               </span>
-              <p className="text-[#F0F6FC] font-sans mt-0.5 leading-relaxed break-words [overflow-wrap:break-word]">
-                {getFounderNoticeForOwner(ownerLang)}
-              </p>
+              <span className="text-base sm:text-lg font-black font-mono tabular-nums text-[#D29922]">
+                {regionConfig.symbol}
+                {todayTotalRevenue.toLocaleString()}
+              </span>
+            </div>
+            <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[#8B949E] block">
+                Pending Deposits
+              </span>
+              <span className="text-base sm:text-lg font-black font-mono tabular-nums text-[#D29922]">
+                {regionConfig.symbol}
+                {pendingDepositsTotal.toLocaleString()}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* QUERY 2 & 4: $0/MO HANDS-FREE CROSS-LANGUAGE VOICE CONCIERGE BAR */}
-        <div className="mt-4 pt-4 border-t border-[#21262D] space-y-3">
-          <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            <div className="flex items-start sm:items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
-                className={`size-12 rounded-xl border grid place-items-center shrink-0 transition ${
-                  isVoiceEnabled
-                    ? 'border-[#06B6D4] bg-[#21262D] text-[#06B6D4]'
-                    : 'border-[#30363D] bg-[#161B22] text-[#6E7681]'
-                }`}
-              >
-                {isVoiceEnabled ? <Volume2 className="size-5" /> : <VolumeX className="size-5" />}
-              </button>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-mono font-bold text-[#F0F6FC] uppercase">
-                    Owner Voice Language &amp; Translator: {isVoiceEnabled ? 'ON' : 'MUTED'}
-                  </span>
-                  <span className="rounded-md bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[9px] font-mono font-bold text-[#3FB950]">
-                    $0/MO FREE · TRANSLATES CLIENT REPLIES
-                  </span>
-                </div>
-                <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">
-                  Client chats in their language (e.g., Arabic in MENA); dashboard speaks aloud to you in your chosen language ({ownerLang.toUpperCase()}).
-                </p>
-              </div>
+        {/* Active Speaking Indicator or Toast */}
+        {currentlySpeakingText && (
+          <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs font-mono text-[#06B6D4] min-w-0">
+              <Radio className="size-4 shrink-0" />
+              <span className="font-sans text-[#F0F6FC] truncate">&ldquo;{currentlySpeakingText}&rdquo;</span>
             </div>
-
-            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
-              <select
-                value={ownerLang}
-                onChange={(e) => setOwnerLang(e.target.value as VoiceLang)}
-                className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
-              >
-                <option value="ur" className="bg-[#161B22] text-[#F0F6FC]">Owner Voice: Urdu (اردو)</option>
-                <option value="en" className="bg-[#161B22] text-[#F0F6FC]">Owner Voice: English</option>
-                <option value="ar" className="bg-[#161B22] text-[#F0F6FC]">Owner Voice: Arabic (العربية)</option>
-              </select>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setVoiceFilter((prev) => (prev === 'ALL' ? 'URGENT_ONLY' : 'ALL'))
-                }
-                className={`min-h-[44px] rounded-xl border px-3 py-1.5 transition ${
-                  voiceFilter === 'URGENT_ONLY'
-                    ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922] font-bold'
-                    : 'border-[#30363D] bg-[#161B22] text-[#F0F6FC] hover:border-[#06B6D4]'
-                }`}
-              >
-                {voiceFilter === 'URGENT_ONLY' ? 'Filter: Urgent & Arrivals' : 'Filter: All Alerts'}
-              </button>
-
-              <button
-                type="button"
-                onClick={toggleScreenWakeLock}
-                className={`min-h-[44px] rounded-xl border px-3 py-1.5 transition flex items-center gap-1.5 ${
-                  isWakeLockActive
-                    ? 'border-[#116329] bg-[#0D3822] text-[#3FB950] font-bold'
-                    : 'border-[#30363D] bg-[#161B22] text-[#8B949E] hover:text-[#F0F6FC] hover:border-[#3FB950]'
-                }`}
-              >
-                <Smartphone className="size-3.5" />
-                <span>{isWakeLockActive ? 'Counter Wake: ON' : 'Keep Counter Awake'}</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={stopSpeaking}
+              className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 text-[11px] font-mono text-[#F0F6FC] shrink-0"
+            >
+              Stop
+            </button>
           </div>
-
-          {currentlySpeakingText && (
-            <div className="rounded-xl border border-[#06B6D4] bg-[#21262D] px-3.5 py-2.5 flex items-center justify-between gap-3 animate-in fade-in">
-              <div className="flex items-center gap-2.5 text-xs font-mono text-[#06B6D4]">
-                <Radio className="size-4 animate-ping shrink-0" />
-                <span className="font-bold">SPEAKING ({ownerLang.toUpperCase()}):</span>
-                <span className="text-[#F0F6FC] font-sans">"{currentlySpeakingText}"</span>
-              </div>
-              <button
-                type="button"
-                onClick={stopSpeaking}
-                className="min-h-[36px] rounded-lg bg-[#0D1117] border border-[#30363D] px-2.5 py-1 text-[10px] font-mono text-[#F0F6FC] hover:border-[#06B6D4] shrink-0"
-              >
-                Stop Voice
-              </button>
-            </div>
-          )}
-
-          {wakeLockNote && (
-            <div className="rounded-xl border border-[#116329] bg-[#0D3822] px-3.5 py-2 text-[11px] font-mono text-[#3FB950]">
-              {wakeLockNote}
-            </div>
-          )}
-        </div>
-
-        {/* QUERY 5: LIVE MONTHLY ROI METER RIGHT ABOVE / BESIDE UPGRADE PATH */}
-        {(() => {
-          const monthlyEarnedAmount =
-            regionConfig.currency === 'PKR'
-              ? 68500
-              : regionConfig.currency === 'AED' || regionConfig.currency === 'SAR'
-              ? 4200
-              : regionConfig.currency === 'GBP'
-              ? 1480
-              : 1850;
-          const roiMultiple = Math.max(12, Math.round(monthlyEarnedAmount / Math.max(1, currentSalon.maint)));
-          return (
-            <div className="mt-4 rounded-2xl border border-[#116329] bg-[#0D1117] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <span className="size-10 rounded-xl border border-[#116329] bg-[#0D3822] grid place-items-center text-[#3FB950] shrink-0">
-                  <TrendingUp className="size-5" />
-                </span>
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#3FB950]">
-                      MONEY WORKCRAFT EARNED YOU THIS MONTH
-                    </span>
-                    <span className="rounded-md bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[10px] font-mono font-black text-[#3FB950]">
-                      {roiMultiple}x RETURN
-                    </span>
-                  </div>
-                  <p className="text-sm sm:text-base font-black text-[#F0F6FC] mt-0.5 font-mono">
-                    {regionConfig.symbol}{monthlyEarnedAmount.toLocaleString()}{' '}
-                    <span className="text-xs font-sans font-normal text-[#8B949E]">
-                      from 38 automated bookings · vs {regionConfig.symbol}{currentSalon.maint.toLocaleString()}/mo plan fee
-                    </span>
-                  </p>
-                </div>
-              </div>
-              {higherPackages.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedUpgradeTargetId(higherPackages[0].id);
-                    setIsUpgradeModalOpen(true);
-                  }}
-                  className="min-h-[44px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:border-[#D29922] px-3.5 py-2 text-xs font-mono font-bold text-[#D29922] transition shrink-0"
-                >
-                  Unlock More With {higherPackages[0].name} →
-                </button>
-              )}
-            </div>
-          );
-        })()}
+        )}
 
         {maintToast && (
-          <div className="mt-4 rounded-xl border border-[#116329] bg-[#0D3822] p-3 text-xs font-mono text-[#3FB950] animate-in fade-in flex items-center justify-between gap-3">
-            <span>{maintToast}</span>
-            <button onClick={() => setMaintToast(null)} className="text-[#8B949E] hover:text-[#F0F6FC] font-bold">
+          <div className="rounded-xl border border-[#116329] bg-[#0D3822] px-3.5 py-2.5 text-xs font-mono text-[#3FB950] flex items-center justify-between gap-3">
+            <span className="break-words [overflow-wrap:break-word]">{maintToast}</span>
+            <button
+              type="button"
+              onClick={() => setMaintToast(null)}
+              className="text-[#8B949E] hover:text-[#F0F6FC] font-bold shrink-0"
+            >
               ✕
             </button>
           </div>
         )}
       </div>
 
-      {/* 5TH-OF-MONTH REMINDER BANNER */}
-      {maintCycleStage !== 'PAID_ACTIVE' && maintCycleStage !== 'OVERDUE_TIER_2' && (
+      {/* Overdue / Due-Day Maintenance Alert Banner (Only visible if unpaid) */}
+      {maintCycleStage !== 'PAID_ACTIVE' && (
         <div
-          className={`rounded-2xl border p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 animate-in fade-in ${
-            maintCycleStage === 'STAGE_3_DAY_5_FINAL'
-              ? 'border-[#da3633] bg-[#4C1C1D] text-[#F0F6FC]'
-              : 'border-[#9E6A03] bg-[#3B2E0B] text-[#F0F6FC]'
+          className={`rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            isMaintenanceOverdue || maintCycleStage === 'STAGE_3_DAY_5_FINAL'
+              ? 'border-[#da3633] bg-[#4C1C1D]'
+              : 'border-[#9E6A03] bg-[#3B2E0B]'
           }`}
         >
-          <div className="flex items-start gap-3">
-            <AlertTriangle
-              className={`size-5 shrink-0 mt-0.5 ${
-                maintCycleStage === 'STAGE_3_DAY_5_FINAL' ? 'text-[#F85149] animate-pulse' : 'text-[#D29922]'
-              }`}
-            />
-            <div className="space-y-1">
-              <span className={`text-xs font-mono font-black uppercase tracking-wider block ${
-                maintCycleStage === 'STAGE_3_DAY_5_FINAL' ? 'text-[#F85149]' : 'text-[#D29922]'
-              }`}>
-                {maintCycleStage === 'STAGE_1_PREV_MONTH'
-                  ? '📅 Reminder 1/3 · Last 2 Days of Previous Month'
-                  : maintCycleStage === 'STAGE_2_DAY_3'
-                  ? '⏰ Reminder 2/3 · 3rd of Month (48h Until 5th Due Date)'
-                  : '🚨 Final Due Warning · 5th of Month (Due Today)'}
-              </span>
-              <p
-                dir={ownerLang === 'ar' || ownerLang === 'ur' ? 'rtl' : 'ltr'}
-                className={`text-xs leading-relaxed font-sans text-[#F0F6FC] overflow-hidden break-words [overflow-wrap:break-word] ${
-                  ownerLang === 'ar' || ownerLang === 'ur' ? 'text-right' : 'text-left'
-                }`}
-              >
-                {getMaintenanceReminderMessage(maintCycleStage, ownerLang)}
-              </p>
-            </div>
+          <div className="flex items-start gap-2.5 min-w-0">
+            <AlertTriangle className="size-5 text-[#D29922] shrink-0 mt-0.5" />
+            <p className="text-xs text-[#F0F6FC] font-sans leading-relaxed">
+              {getMaintenanceReminderMessage(maintCycleStage, ownerLang)}
+            </p>
           </div>
-
           <button
             type="button"
             disabled={isPayingMaint}
             onClick={() => setIsMaintPaymentModalOpen(true)}
-            className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase shrink-0 transition active:scale-95 flex items-center gap-2"
+            className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase shrink-0 transition"
           >
-            <CreditCard className="size-4" />
-            <span>Pay {regionConfig.symbol}{currentSalon.maint.toLocaleString()} Maintenance →</span>
+            Pay {regionConfig.symbol}
+            {currentSalon.maint.toLocaleString()} →
           </button>
         </div>
       )}
 
-      {/* HIGH-PRIORITY PRIVATE OWNER INTERVENTION ALERTS (1–3 STAR RATINGS) */}
-      {(() => {
-        const activeAlerts = (conciergeState?.alerts || []).filter(
-          (a) => a.status === 'OWNER_INTERVENTION_NEEDED'
-        );
-        if (activeAlerts.length === 0) return null;
-        return (
-          <div className="space-y-3">
-            {activeAlerts.map((alert) => (
-              <div
-                key={alert.id}
-                className="rounded-2xl border border-[#da3633] bg-[#4C1C1D] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-              >
-                <div className="flex items-start gap-3 min-w-0">
-                  <div className="size-10 rounded-xl border border-[#da3633] bg-[#161B22] grid place-items-center text-[#F85149] shrink-0">
-                    <AlertTriangle className="size-5" />
-                  </div>
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-md bg-[#161B22] border border-[#da3633] px-2 py-0.5 text-[10px] font-mono font-bold text-[#F85149]">
-                        OWNER_INTERVENTION_NEEDED
-                      </span>
-                      <span className="text-xs font-mono font-bold text-[#D29922]">
-                        {alert.rating}★ Private Rating · Google Link Suppressed
-                      </span>
-                    </div>
-                    <h4 className="text-sm font-bold text-[#F0F6FC]">
-                      {alert.clientName} ({alert.clientPhone}) — {alert.service}
-                    </h4>
-                    <p className="text-xs text-[#F0F6FC]/90 font-sans break-words [overflow-wrap:break-word]">
-                      Client Reply: &ldquo;{alert.feedbackText}&rdquo; · {new Date(alert.createdAt).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleResolveOwnerAlert(alert.id)}
-                  className="min-h-[48px] rounded-xl bg-[#0D1117] border border-[#30363D] hover:border-[#3FB950] px-4 py-2 text-xs font-mono font-bold text-[#3FB950] shrink-0 transition"
-                >
-                  Mark Resolved &amp; Followed Up ✓
-                </button>
-              </div>
-            ))}
-          </div>
-        );
-      })()}
-
       {/* ========================================================================= */}
-      {/* 2. METRIC CARDS + QUERY 2 LIGHTWEIGHT STRATEGY ANALYTICS MATRIX BOXES     */}
+      {/* VIEW 1: MAIN SALON LIVE DASHBOARD (DAILY OPERATIONS ONLY)                 */}
       {/* ========================================================================= */}
-      <div className="relative space-y-3">
-        <div
-          className={`space-y-3 transition-all duration-300 ${
-            isMaintenanceOverdue ? 'filter blur-sm opacity-25 select-none pointer-events-none' : ''
-          }`}
-        >
-          {/* Core 4 Live Operational Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#3FB950]">
-                  TODAY'S APPOINTMENTS
-                </span>
-                <Calendar className="size-4 text-[#3FB950]" />
-              </div>
-              <p className="text-2xl font-black text-[#F0F6FC] font-mono">{bookings.length}</p>
-              <p className="text-[11px] text-[#8B949E] font-sans">
-                Voice-announced to barbers · 0 calls
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#F0F6FC]">
-                  10% MONTHLY FEE (DUE 5TH)
-                </span>
-                <ShieldCheck className="size-4 text-[#D29922]" />
-              </div>
-              <p className="text-2xl font-black text-[#D29922] font-mono">
-                {regionConfig.symbol}{currentSalon.maint.toLocaleString()}
-              </p>
-              <p className="text-[11px] text-[#8B949E] font-sans">
-                {isMaintPaid ? 'Paid & Priority Active ✓' : 'Pay from registered SIM'}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#06B6D4]">
-                  AUTOMATIC REPLIES
-                </span>
-                <MessageSquare className="size-4 text-[#06B6D4]" />
-              </div>
-              <p className="text-2xl font-black text-[#06B6D4] font-mono">89</p>
-              <p className="text-[11px] text-[#8B949E] font-sans">
-                Instant auto-replies (UR / AR / EN)
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#D29922]">
-                  {currentSalon.planId === 'STARTER' ? 'CLIENT SATISFACTION' : 'GOOGLE REVIEWS'}
-                </span>
-                <Star className="size-4 text-[#D29922] fill-[#D29922]" />
-              </div>
-              <div className="flex items-baseline gap-2">
-                <p className="text-2xl font-black text-[#D29922] font-mono">4.9 ★</p>
-                {currentSalon.planId === 'STARTER' && (
-                  <span className="rounded bg-[#21262D] px-1.5 py-0.5 text-[9px] font-mono text-[#D29922] font-bold">
-                    Starter Feedback
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-[#8B949E] font-sans">
-                {currentSalon.planId === 'STARTER'
-                  ? '+31 WhatsApp survey ratings · Upgrade for Google Sync'
-                  : '+31 Positive reviews boosted'}
-              </p>
-            </div>
-          </div>
-
-          {/* ZERO-STORAGE STRATEGY ANALYTICS BOXES (SALON OWNER ONLY) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-3.5 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono font-bold uppercase text-[#06B6D4]">
-                  TOP BOOKED SERVICES
-                </span>
-                <Scissors className="size-3.5 text-[#06B6D4]" />
-              </div>
-
-              {/* Barber Stylist Selector for Top Booked Services */}
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] font-mono text-[#8B949E]">Stylist:</span>
-                <select
-                  value={selectedBarberForServices}
-                  onChange={(e) => setSelectedBarberForServices(e.target.value)}
-                  className="rounded-lg border border-[#30363D] bg-[#0D1117] px-2 py-0.5 text-[10px] font-mono font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
-                >
-                  <option value="ALL">All Stylists (Combined)</option>
-                  {barbersList.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {(() => {
-                const stats =
-                  BARBER_SERVICE_STATS[selectedBarberForServices] ||
-                  BARBER_SERVICE_STATS['Tariq (Master Barber)'] ||
-                  BARBER_SERVICE_STATS['ALL'];
-                return (
-                  <div className="space-y-1">
-                    <p className="text-xs font-bold text-[#F0F6FC]">{stats.topServices[0]}</p>
-                    <p className="text-[11px] text-[#8B949E] font-sans">
-                      {stats.topServices.slice(1).join(' · ')}
-                    </p>
-                    <div className="pt-1 border-t border-[#21262D] flex items-center justify-between text-[10px] font-mono text-[#06B6D4]">
-                      <span>{stats.favRate}</span>
-                      <span className="text-[#8B949E]">{stats.repeatRate}</span>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-
-            {currentSalon.planId === 'STARTER' ? (
-              <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-3.5 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono font-bold uppercase text-[#06B6D4]">
-                    CHAIR QUEUE CAPACITY
-                  </span>
-                  <span className="rounded bg-[#21262D] px-1.5 py-0.5 text-[9px] font-mono font-bold text-[#8B949E]">
-                    Starter Plan
-                  </span>
+      {currentSectionMode === 'LIVE' && (
+        <div className="space-y-4">
+          {/* 1. URGENT ALERTS CARD (TOP PRIORITY) */}
+          {totalUrgentCount > 0 && (
+            <section
+              aria-label="Urgent Floor Alerts"
+              className="rounded-2xl border border-[#9E6A03] bg-[#161B22] p-4 sm:p-5 space-y-3"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="size-4 text-[#D29922] shrink-0" />
+                  <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
+                    Urgent Alerts
+                  </h2>
                 </div>
-                <p className="text-xs font-bold text-[#F0F6FC] font-mono">
-                  28 / 30 Slots Filled (93% Chair Capacity)
-                </p>
-                <p className="text-[11px] text-[#8B949E] font-sans">
-                  Avg wait: 8 mins · Zero missed bookings
-                </p>
-                <div className="pt-1 border-t border-[#21262D] flex items-center justify-between text-[10px]">
-                  <span className="text-[#8B949E]">Video Deals:</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedUpgradeTargetId('GROWTH');
-                      setIsUpgradeModalOpen(true);
-                    }}
-                    className="text-[#D29922] font-mono font-bold hover:underline"
+                <span className="rounded-lg border border-[#9E6A03] bg-[#3B2E0B] px-2.5 py-0.5 text-[11px] font-mono font-bold text-[#D29922]">
+                  {totalUrgentCount} Action Required
+                </span>
+              </div>
+
+              <div className="space-y-2.5">
+                {/* A. OWNER_INTERVENTION_NEEDED (1–3 Star Feedback Alerts) */}
+                {activeReviewAlerts.map((alert) => (
+                  <div
+                    key={alert.id}
+                    className="rounded-xl border border-[#da3633] bg-[#4C1C1D] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
-                    Upgrade to Unlock →
-                  </button>
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-[#0D1117] border border-[#da3633] px-2 py-0.5 text-[10px] font-mono font-bold text-[#F85149]">
+                          OWNER_INTERVENTION_NEEDED · {alert.rating}★
+                        </span>
+                        <span className="text-xs font-mono text-[#D29922]">
+                          Google Link Suppressed
+                        </span>
+                      </div>
+                      <p className="text-sm font-bold text-[#F0F6FC]">
+                        {alert.clientName} (<span dir="ltr">{alert.clientPhone}</span>) — {alert.service}
+                      </p>
+                      <p className="text-xs text-[#F0F6FC]/90 font-sans break-words [overflow-wrap:break-word]">
+                        &ldquo;{alert.feedbackText}&rdquo;
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleResolveOwnerAlert(alert.id)}
+                      className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#3FB950] px-4 py-2 text-xs font-mono font-bold text-[#3FB950] shrink-0 transition"
+                    >
+                      Mark Resolved ✓
+                    </button>
+                  </div>
+                ))}
+
+                {/* B. Unverified Raast / EasyPaisa Deposit Screenshots */}
+                {unverifiedDeposits.map((dep) => {
+                  const isExpanded = expandedDepositReceiptId === dep.id;
+                  return (
+                    <div
+                      key={dep.id}
+                      className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2.5"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded bg-[#3B2E0B] border border-[#9E6A03] px-2 py-0.5 text-[10px] font-mono font-bold text-[#D29922] flex items-center gap-1">
+                              <Banknote className="size-3" />
+                              <span>{dep.method} Deposit Screenshot</span>
+                            </span>
+                            <span className="text-[11px] font-mono text-[#8B949E]">
+                              {dep.receivedAt} · Slot {dep.timeSlot}
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold text-[#F0F6FC]">
+                            {dep.clientName} ·{' '}
+                            <span className="font-mono text-[#D29922] tabular-nums">
+                              {regionConfig.symbol}
+                              {dep.amount.toLocaleString()}
+                            </span>
+                          </p>
+                          <p className="text-xs font-mono text-[#8B949E] break-all">
+                            Ref: {dep.referenceId} · <span dir="ltr">{dep.phone}</span>
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedDepositReceiptId(isExpanded ? null : dep.id)
+                            }
+                            className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3 py-2 text-xs font-mono font-bold text-[#06B6D4] transition"
+                          >
+                            {isExpanded ? 'Hide Proof' : 'View Screenshot'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPendingDeposits((prev) =>
+                                prev.map((item) =>
+                                  item.id === dep.id ? { ...item, verified: true } : item
+                                )
+                              );
+                              setMaintToast(
+                                `✓ Verified ${dep.method} deposit (${regionConfig.symbol}${dep.amount.toLocaleString()}) from ${dep.clientName}.`
+                              );
+                              setTimeout(() => setMaintToast(null), 4000);
+                            }}
+                            className="min-h-[48px] rounded-xl bg-[#0D3822] border border-[#116329] hover:bg-[#116329]/50 px-4 py-2 text-xs font-mono font-bold text-[#3FB950] transition"
+                          >
+                            Verify Deposit ✓
+                          </button>
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3 text-xs font-mono text-[#8B949E] flex flex-wrap items-center justify-between gap-2">
+                          <span>
+                            WhatsApp Image Attachment · Sender: {dep.phone} · TID: {dep.referenceId}
+                          </span>
+                          <span className="text-[#D29922] font-bold">
+                            Amount: {regionConfig.symbol}
+                            {dep.amount.toLocaleString()} ({dep.method})
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* C. Human Handover Requests */}
+                {openHandovers.map((req) => (
+                  <div
+                    key={req.id}
+                    className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-[#21262D] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono font-bold text-[#06B6D4] flex items-center gap-1">
+                          <PhoneCall className="size-3" />
+                          <span>Human Handover Request</span>
+                        </span>
+                        <span className="text-[11px] font-mono text-[#8B949E]">
+                          {req.receivedAt} · {req.lang.toUpperCase()}
+                        </span>
+                      </div>
+                      <p className="text-sm font-bold text-[#F0F6FC]">
+                        {req.clientName} (<span dir="ltr" className="font-mono text-[#06B6D4]">{req.phone}</span>)
+                      </p>
+                      <p className="text-xs text-[#8B949E] font-sans break-words [overflow-wrap:break-word]">
+                        {req.summary}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHandoverRequests((prev) =>
+                          prev.map((h) => (h.id === req.id ? { ...h, handled: true } : h))
+                        );
+                        setMaintToast(`✓ Handover request for ${req.clientName} marked handled.`);
+                        setTimeout(() => setMaintToast(null), 4000);
+                      }}
+                      className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-4 py-2 text-xs font-mono font-bold text-[#06B6D4] shrink-0 transition"
+                    >
+                      Mark Handled ✓
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* 2. TODAY'S LIVE SCHEDULE & CHAIR TIMELINE */}
+          <section
+            aria-label="Today's Live Schedule and Chair Timeline"
+            className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-4"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#30363D] pb-3.5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Calendar className="size-4 text-[#06B6D4]" />
+                  <h2 className="text-base sm:text-lg font-black text-[#F0F6FC]">
+                    Today&apos;s Live Schedule &amp; Chair Timeline
+                  </h2>
                 </div>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-3.5 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono font-bold uppercase text-[#D29922]">
-                    VIDEO DEAL RESULTS
-                  </span>
-                  <Video className="size-3.5 text-[#D29922]" />
-                </div>
-                <p className="text-xs font-bold text-[#D29922] font-mono">
-                  450 Sent ➔ 380 Viewed ➔ 50 Booked
-                </p>
-                <p className="text-[11px] text-[#8B949E] font-sans">
-                  {regionConfig.symbol}{(currentSalon.phone.startsWith('+92') ? 75000 : 2250).toLocaleString()} deal revenue · 13.2% conversion
+                <p className="text-xs text-[#8B949E] font-mono mt-0.5 tabular-nums">
+                  {sortedBookings.length} scheduled ·{' '}
+                  {sortedBookings.filter((b) => b.status === 'COMPLETED').length} completed
                 </p>
               </div>
-            )}
 
-            <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-3.5 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono font-bold uppercase text-[#3FB950]">
-                  PEAK RUSH HOURS
-                </span>
-                <TrendingUp className="size-3.5 text-[#3FB950]" />
-              </div>
-              <p className="text-xs font-bold text-[#F0F6FC]">4:00 PM – 8:00 PM (64%)</p>
-              <p className="text-[11px] text-[#8B949E] font-sans">
-                Keep 3+ barbers active during evening rush
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-3.5 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono font-bold uppercase text-[#58A6FF]">
-                  REPEAT CLIENT RETURN
-                </span>
-                <Award className="size-3.5 text-[#58A6FF]" />
-              </div>
-              <p className="text-xs font-bold text-[#F0F6FC]">68% Repeat Visitors</p>
-              <p className="text-[11px] text-[#8B949E] font-sans">
-                Avg return cycle: 21 days · Zero media storage
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Tier-2 Post-5th Unpaid Metrics Lock Overlay */}
-        {isMaintenanceOverdue && (
-          <div className="absolute inset-0 z-20 rounded-3xl border border-[#da3633] bg-[#0D1117]/80 backdrop-blur-md p-5 flex flex-col items-center justify-center text-center space-y-3 animate-in fade-in">
-            <div className="size-11 rounded-2xl bg-[#4C1C1D] border border-[#da3633] grid place-items-center text-[#F85149]">
-              <Lock className="size-6" />
-            </div>
-            <div className="max-w-xl space-y-1">
-              <h3 className="text-base font-black text-[#F0F6FC]">
-                Account Overdue (Past 5th Due Date) · Live Stats Paused
-              </h3>
-              <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
-                Send <strong className="text-[#F0F6FC]">{regionConfig.symbol}{currentSalon.maint.toLocaleString()}</strong> from your registered SIM (
-                <span className="text-[#06B6D4] font-mono font-bold">{currentSalon.phone}</span>) to unlock Live Stats, Business Insights &amp; Priority Service.
-              </p>
-            </div>
-            <button
-              type="button"
-              disabled={isPayingMaint}
-              onClick={() => setIsMaintPaymentModalOpen(true)}
-              className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-5 py-2.5 text-xs font-mono font-bold uppercase transition active:scale-95 flex items-center gap-2"
-            >
-              <CreditCard className="size-4 text-[#0D1117]" />
-              <span>
-                Pay {regionConfig.symbol}{currentSalon.maint.toLocaleString()} via {currentSalon.phone} &amp; Restore Priority →
-              </span>
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 3. CONSOLIDATED NAVIGATION (INCLUDES SETTINGS & RETENTION MODULES)         */}
-      {/* ========================================================================= */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 p-1.5 rounded-2xl bg-[#0D1117] border border-[#30363D]">
-        {[
-          { id: 'QUEUE' as const, label: 'Live Queue & Voice', icon: Calendar, badge: `${bookings.length} today` },
-          { id: 'RATES_BOT' as const, label: 'Rates, Bot & Proof', icon: Scissors, badge: `${services.length} · ${immutableProofs.length}` },
-          { id: 'MARKETING' as const, label: 'Video & Events', icon: Video, badge: isVipPackage ? 'Live' : 'Deals' },
-          { id: 'GROWTH_KIT' as const, label: 'Growth Kit & PDF', icon: Printer, badge: 'PDF + 4.9★' },
-          { id: 'BILLING_SLA' as const, label: 'Plan & Monthly Fee', icon: ShieldCheck, badge: isMaintPaid ? 'Paid ✓' : 'Due 5th' },
-          {
-            id: 'SETTINGS' as const,
-            label: 'Settings',
-            icon: Settings2,
-            badge:
-              (conciergeState?.alerts || []).filter((a) => a.status === 'OWNER_INTERVENTION_NEEDED').length > 0
-                ? `${(conciergeState?.alerts || []).filter((a) => a.status === 'OWNER_INTERVENTION_NEEDED').length} Alert`
-                : '4 Rules',
-          },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`min-h-[48px] flex items-center justify-between gap-1.5 px-3 py-2.5 rounded-xl text-xs font-mono font-bold transition ${
-                isActive
-                  ? 'bg-[#06B6D4] text-[#0D1117] border border-[#06B6D4]'
-                  : 'text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#21262D] border border-transparent'
-              }`}
-            >
-              <span className="flex items-center gap-1.5 truncate">
-                <Icon className="size-3.5 shrink-0" />
-                <span className="truncate">{tab.label}</span>
-              </span>
-              <span className={`rounded-full px-1.5 py-0.5 text-[9px] shrink-0 ${
-                isActive ? 'bg-[#0D1117]/20 text-[#0D1117]' : 'bg-[#21262D] text-[#8B949E]'
-              }`}>
-                {tab.badge}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 4. TAB 1: LIVE BOOKING QUEUE + VOICE DISPATCHER                            */}
-      {/* ========================================================================= */}
-      {activeTab === 'QUEUE' && (
-        <PortalCard title="Today's Live Client Queue & Voice Dispatcher" kicker="SALON OWNER ONLY · HANDS-FREE">
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs font-sans text-[#8B949E]">
-              <p>
-                Visible strictly to salon owners. Every new booking speaks aloud in your preferred language ({ownerLang.toUpperCase()}) with barber, client, time, and services.
-              </p>
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() =>
-                    triggerVoiceBookingAnnouncement(
-                      currentSalon.owner.split(' ')[0] || 'Hamza',
-                      'Aslam',
-                      'Ali',
-                      '3:00 PM',
-                      'Haircut, Beard Setting, and Hair Color',
-                      3200
-                    )
-                  }
-                  className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-3 py-1.5 text-xs font-mono font-bold uppercase transition active:scale-95"
-                >
-                  <Volume2 className="size-3.5" />
-                  <span>Test Booking (Ali · 3:00 PM)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsWalkInModalOpen(true)}
-                  className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-3.5 py-1.5 text-xs font-mono font-bold uppercase transition active:scale-95 shadow-md"
-                >
-                  <Plus className="size-3.5" />
-                  <span>+ Add Walk-In</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Auto-Advance & Bluetooth Alert Bar */}
-            <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 text-[11px] font-mono text-[#8B949E]">
-                <Clock className="size-3.5 text-[#06B6D4]" />
-                <span>Chair Automation:</span>
-                <label className="inline-flex items-center gap-1.5 cursor-pointer text-[#F0F6FC]">
-                  <input
-                    type="checkbox"
-                    checked={autoAdvanceChairs}
-                    onChange={(e) => {
-                      setAutoAdvanceChairs(e.target.checked);
-                      setMaintToast(
-                        e.target.checked
-                          ? '⚡ Auto-Advance Active: Chairs will auto-complete after estimated service time.'
-                          : 'Manual Done Mode: Barbers mark Done when finishing client.'
-                      );
-                      setTimeout(() => setMaintToast(null), 4000);
-                    }}
-                    className="accent-[#06B6D4] size-3.5"
-                  />
-                  <span className="font-bold">Auto-Complete by Duration (Hands-Free)</span>
-                </label>
-              </div>
-
-              <div className="flex items-center gap-2 text-[11px] font-mono">
-                <span className="text-[#8B949E]">Shop Speaker:</span>
-                <span className={isLoudspeakerBoostActive ? 'text-[#06B6D4] font-bold' : 'text-[#8B949E]'}>
-                  {isLoudspeakerBoostActive ? '🔊 Bluetooth / Aux Boosted' : 'Normal Mobile Speaker'}
-                </span>
-              </div>
+              <button
+                type="button"
+                onClick={() => setIsWalkInModalOpen(true)}
+                className="min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 py-2.5 text-xs font-mono font-black uppercase transition active:scale-95 shrink-0"
+              >
+                <Plus className="size-4" />
+                <span>+ Walk-In</span>
+              </button>
             </div>
 
             <div className="space-y-2.5">
-              {bookings.map((booking) => (
-                <div
-                  key={booking.id}
-                  className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-[#484F58] transition"
-                >
-                  <div className="flex items-start gap-3.5">
-                    <div className="grid size-10 place-items-center rounded-xl bg-[#161B22] border border-[#30363D] font-mono text-xs font-bold text-[#D29922] shrink-0">
-                      {booking.timeSlot.split(' ')[0]}
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-bold text-[#F0F6FC]">{booking.clientName}</span>
-                        <span className="rounded-md bg-[#21262D] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono text-[#D29922]">
-                          Barber: {booking.barberName}
+              {sortedBookings.map((booking) => {
+                const chairTag =
+                  booking.chairLabel ||
+                  barberChairs[booking.barberName] ||
+                  `Chair #${Math.max(1, barbersList.indexOf(booking.barberName) + 1)}`;
+                const duration = booking.durationMins || 35;
+
+                return (
+                  <div
+                    key={booking.id}
+                    className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3"
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      {/* Chronological Time & Duration Block */}
+                      <div className="rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 py-2 text-center shrink-0 min-w-[78px]">
+                        <span className="text-xs font-mono font-black text-[#D29922] tabular-nums block">
+                          {booking.timeSlot}
                         </span>
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[9px] font-mono font-bold border ${
-                            booking.status === 'CONFIRMED'
-                              ? 'bg-[#06B6D4]/15 text-[#06B6D4] border-[#06B6D4]/30'
-                              : booking.status === 'IN_CHAIR'
-                              ? 'bg-[#3B2E0B] text-[#D29922] border-[#9E6A03] animate-pulse'
-                              : 'bg-[#0D3822] text-[#3FB950] border-[#116329]'
-                          }`}
-                        >
-                          {booking.status}
+                        <span className="text-[10px] font-mono text-[#8B949E] tabular-nums block mt-0.5">
+                          {duration} min
                         </span>
                       </div>
-                      <p className="text-xs text-[#8B949E] font-sans mt-0.5">{booking.service}</p>
-                      <p className="text-[11px] font-mono text-[#6E7681] mt-0.5">
-                        Client: {booking.phone} · Slot: {booking.timeSlot}
-                      </p>
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 self-end sm:self-center">
-                    <span className="text-sm font-mono font-bold text-[#D29922] mr-1">
-                      {regionConfig.symbol}{booking.price.toLocaleString()}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const ownerFirst = currentSalon.owner.split(' ')[0] || 'Hamza';
-                        const urduText = `${ownerFirst} صاحب، آپ کے باربر ${booking.barberName} کے پاس ${booking.clientName} کی ${booking.timeSlot} پر بکنگ ہے۔ سروس: ${booking.service}۔`;
-                        const romanUrdu = `${ownerFirst} Sahab! Aap kay barber ${booking.barberName} kay paas ${booking.clientName} ki ${booking.timeSlot} par booking hai. Service: ${booking.service}.`;
-                        const arText = `${ownerFirst}، الحلاق ${booking.barberName} لديه موعد مع ${booking.clientName} في ${booking.timeSlot}. الخدمة: ${booking.service}.`;
-                        const enText = `${ownerFirst}, your barber ${booking.barberName} has ${booking.clientName} at ${booking.timeSlot}: ${booking.service}.`;
-                        const text = ownerLang === 'ur' ? urduText : ownerLang === 'ar' ? arText : enText;
-                        speakHandsFree(text, ownerLang, romanUrdu);
-                      }}
-                      className="min-h-[40px] min-w-[40px] grid place-items-center p-1.5 rounded-lg border border-[#06B6D4]/30 bg-[#06B6D4]/10 text-[#06B6D4] hover:bg-[#06B6D4]/20 transition"
-                      title="Announce aloud in owner language"
-                    >
-                      <Volume2 className="size-4" />
-                    </button>
-                    {booking.status === 'CONFIRMED' && (
-                      <button
-                        onClick={() => handleUpdateStatus(booking.id, 'IN_CHAIR')}
-                        className="min-h-[40px] rounded-lg border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#D29922] transition"
-                      >
-                        Seat in Chair →
-                      </button>
-                    )}
-                    {booking.status === 'IN_CHAIR' && (
-                      <button
-                        onClick={() => handleUpdateStatus(booking.id, 'COMPLETED')}
-                        className="min-h-[40px] rounded-lg border border-[#116329] bg-[#0D3822] hover:bg-[#0D3822]/80 px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950] transition"
-                      >
-                        Mark Done ✓
-                      </button>
-                    )}
-                    {booking.status === 'COMPLETED' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/cron/run`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              job: 'review_t2h',
-                              force: true,
-                              appointmentId: booking.id,
-                            }),
-                          })
-                            .then((r) => (r.ok ? r.json() : null))
-                            .then((data) => {
-                              if (data?.state) setConciergeState(data.state);
-                              setMaintToast(`★ T+2h Review Prompt dispatched to ${booking.clientName}. Open Settings to test 1–5★ reply.`);
-                              setTimeout(() => setMaintToast(null), 5000);
-                            })
-                            .catch(() => {});
-                        }}
-                        className="min-h-[40px] rounded-lg border border-[#30363D] bg-[#161B22] hover:border-[#D29922] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#D29922] transition"
-                      >
-                        Send T+2h Review ★
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Query 8: Barbers & Stylists Staff Management Card (Owner Editable 24/7) */}
-            <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3.5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#21262D] pb-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-8 rounded-lg bg-[#3B2E0B] border border-[#9E6A03] grid place-items-center text-[#D29922]">
-                    <Scissors className="size-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-[#F0F6FC] flex items-center gap-2">
-                      <span>Manage Barbers &amp; Stylists Staff</span>
-                      <span className="rounded-md bg-[#21262D] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono font-bold text-[#06B6D4]">
-                        {barbersList.length} Active Staff
-                      </span>
-                    </h4>
-                    <p className="text-[11px] text-[#8B949E] font-sans">
-                      Add, edit, or remove your salon barbers. Changes automatically feed into WhatsApp booking assignment and voice dispatch announcements.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Barbers Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {barbersList.map((barber, bIdx) => {
-                  const isEditing = editingBarberIndex === bIdx;
-                  return (
-                    <div
-                      key={bIdx}
-                      className="rounded-xl border border-[#30363D] bg-[#161B22] p-3 flex items-center justify-between gap-2"
-                    >
-                      {isEditing ? (
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <input
-                            type="text"
-                            value={editingBarberName}
-                            onChange={(e) => setEditingBarberName(e.target.value)}
-                            className="min-h-[38px] flex-1 rounded-lg border border-[#06B6D4] bg-[#0D1117] px-2.5 py-1 text-xs text-[#F0F6FC] focus:outline-none"
-                            placeholder="Barber name"
-                            autoFocus
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleSaveEditBarber(bIdx)}
-                            className="min-h-[38px] px-2.5 py-1 rounded-lg bg-[#06B6D4] text-[#0D1117] text-xs font-mono font-bold hover:bg-[#22D3EE] transition"
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-[#F0F6FC]">
+                            {booking.clientName}
+                          </span>
+                          <span className="rounded-md bg-[#21262D] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono text-[#06B6D4]">
+                            {chairTag} · {booking.barberName}
+                          </span>
+                          <span
+                            className={`rounded-md px-2 py-0.5 text-[10px] font-mono font-bold border ${
+                              booking.status === 'CONFIRMED'
+                                ? 'bg-[#161B22] text-[#06B6D4] border-[#30363D]'
+                                : booking.status === 'IN_CHAIR'
+                                ? 'bg-[#3B2E0B] text-[#D29922] border-[#9E6A03]'
+                                : 'bg-[#0D3822] text-[#3FB950] border-[#116329]'
+                            }`}
                           >
-                            Save
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingBarberIndex(null);
-                              setEditingBarberName('');
-                            }}
-                            className="min-h-[38px] px-2 py-1 rounded-lg border border-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] text-xs font-mono"
-                          >
-                            Cancel
-                          </button>
+                            {booking.status === 'IN_CHAIR' ? 'IN CHAIR' : booking.status}
+                          </span>
                         </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <span className="size-6 rounded-md bg-[#21262D] border border-[#30363D] grid place-items-center text-[10px] font-mono font-bold text-[#D29922] shrink-0">
-                              #{bIdx + 1}
-                            </span>
-                            <div className="min-w-0">
-                              <p className="text-xs font-bold text-[#F0F6FC] truncate">{barber}</p>
-                              <span className="text-[10px] font-mono text-[#3FB950] flex items-center gap-1">
-                                <span className="size-1.5 rounded-full bg-[#3FB950]" />
-                                <span>Chair #{bIdx + 1} · Ready</span>
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingBarberIndex(bIdx);
-                                setEditingBarberName(barber);
-                              }}
-                              className="size-8 grid place-items-center rounded-lg border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] text-[#8B949E] hover:text-[#06B6D4] transition"
-                              title="Rename Barber"
-                            >
-                              <Edit2 className="size-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteBarberDashboard(barber)}
-                              className="size-8 grid place-items-center rounded-lg border border-[#30363D] bg-[#0D1117] hover:border-[#F85149] text-[#8B949E] hover:text-[#F85149] transition"
-                              title="Remove Barber"
-                            >
-                              <Trash2 className="size-3.5" />
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Add New Barber Input Form */}
-              <form onSubmit={handleAddBarberDashboard} className="flex flex-col sm:flex-row gap-2 pt-1">
-                <input
-                  type="text"
-                  value={newBarberDashboardInput}
-                  onChange={(e) => setNewBarberDashboardInput(e.target.value)}
-                  placeholder="Enter new barber / stylist name (e.g. Master Kamran or Salman)"
-                  className="flex-1 min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-xs text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
-                />
-                <button
-                  type="submit"
-                  className="min-h-[44px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase transition flex items-center justify-center gap-1.5 shrink-0"
-                >
-                  <Plus className="size-4" />
-                  <span>+ Add Barber to Staff</span>
-                </button>
-              </form>
-            </div>
-
-            {/* QUERY 5: 2-Hour Pre-Appointment "Are You Coming?" Auto-Check & Waitlist Shield */}
-            <div className="rounded-2xl border border-[#116329] bg-[#0D3822]/40 p-4 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                  <span className="text-[11px] font-mono font-bold uppercase text-[#3FB950] flex items-center gap-1.5">
-                    <Clock className="size-3.5" />
-                    <span>2-Hour Auto Check-In &amp; Empty-Chair Waitlist Shield</span>
-                  </span>
-                  <p className="text-xs text-[#F0F6FC] font-sans mt-0.5">
-                    Sends an automatic WhatsApp check 2 hours before every booking. If someone cancels, the open chair is offered to the next waiting client at <strong>100% full standard rate</strong>.
-                  </p>
-                </div>
-                <span className="rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1 text-[10px] font-mono font-bold text-[#3FB950] shrink-0">
-                  AUTO-RUNNING ✓
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
-                {[
-                  { id: 'BK-101', name: 'Bilal Ahmed', slot: '03:30 PM', svc: 'Master Haircut & Skin Fade' },
-                  { id: 'BK-103', name: 'Dr. Usman Qureshi', slot: '05:00 PM', svc: 'Charcoal Deep Detox Facial' },
-                ].map((item) => {
-                  const status = noShowChecks[item.id] || 'PENDING';
-                  return (
-                    <div
-                      key={item.id}
-                      className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex flex-col justify-between gap-2"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-[#F0F6FC]">
-                          {item.name} · <span className="font-mono text-[#06B6D4]">{item.slot}</span>
-                        </span>
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[9px] font-mono font-bold border ${
-                            status === 'CONFIRMED'
-                              ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
-                              : status === 'WAITLIST_FILLED'
-                              ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
-                              : 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
-                          }`}
-                        >
-                          {status === 'CONFIRMED'
-                            ? 'Client Confirmed Coming ✓'
-                            : status === 'WAITLIST_FILLED'
-                            ? 'Waitlist Client Seated (Full Rate)'
-                            : '2h Ping Awaiting Reply'}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNoShowChecks((prev) => ({ ...prev, [item.id]: 'CONFIRMED' }));
-                            setMaintToast(`✓ ${item.name} confirmed ${item.slot} via 2h WhatsApp check-in.`);
-                            setTimeout(() => setMaintToast(null), 4500);
-                          }}
-                          className="min-h-[40px] rounded-lg border border-[#116329] bg-[#0D3822] hover:bg-[#0D3822]/80 px-2.5 py-1 text-[10px] font-mono font-bold text-[#3FB950] transition"
-                        >
-                          Client Replied &ldquo;Coming&rdquo;
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNoShowChecks((prev) => ({ ...prev, [item.id]: 'WAITLIST_FILLED' }));
-                            setMaintToast(`Chair auto-offered at 100% full standard rate to Waitlist Client for ${item.slot}.`);
-                            setTimeout(() => setMaintToast(null), 5000);
-                          }}
-                          className="min-h-[40px] rounded-lg border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-2.5 py-1 text-[10px] font-mono font-bold text-[#D29922] transition"
-                        >
-                          Cancelled ➔ Auto-Fill Waitlist
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Voice Feed Log */}
-            <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-2.5">
-              <span className="text-[11px] font-mono font-bold uppercase text-[#06B6D4] flex items-center gap-1.5">
-                <BellRing className="size-3.5" />
-                <span>Cross-Language Voice Log ($0/mo On-Device)</span>
-              </span>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {voiceLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="rounded-xl border border-[#30363D] bg-[#161B22] p-2.5 flex items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2 min-w-0">
-                        <span
-                          className={`rounded px-1.5 py-0.5 text-[9px] font-mono font-bold shrink-0 border ${
-                            log.isUrgent
-                              ? 'bg-[#3B2E0B] text-[#D29922] border-[#9E6A03]'
-                              : 'bg-[#06B6D4]/15 text-[#06B6D4] border-[#06B6D4]/30'
-                          }`}
-                        >
-                          {log.type === 'BOOKING' ? 'BOOKING' : log.isUrgent ? 'URGENT' : 'CONFIRMED'}
-                        </span>
-                        <span className="font-bold text-[#F0F6FC] break-words [overflow-wrap:break-word] min-w-0">{log.summary}</span>
-                        <span className="text-[10px] font-mono text-[#6E7681] shrink-0">{log.time}</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => speakHandsFree(log.spokenText, ownerLang)}
-                      className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#21262D] hover:border-[#06B6D4] px-2.5 py-1 text-[10px] font-mono text-[#06B6D4] shrink-0"
-                    >
-                      🔊 Replay
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </PortalCard>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 5. TAB 2: RATES, BOT CHAT & IMMUTABLE PROOF (CONSOLIDATED)                */}
-      {/* ========================================================================= */}
-      {activeTab === 'RATES_BOT' && (
-        <div className="space-y-5">
-          {/* Separate Service Rates & Menu Editor (Salon Owner Only Edit) */}
-          <PortalCard title="Separate Service Rates & WhatsApp Menu" kicker="SALON OWNER ONLY EDIT · END USERS READ-ONLY">
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-sans text-[#8B949E]">
-                <p>
-                  Every service is listed separately with its individual price. <strong className="text-[#06B6D4]">Only the Salon Owner</strong> can edit or toggle rates—end users can only select services in their booking cart.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setIsAddingCustom(!isAddingCustom)}
-                  className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-3.5 py-1.5 text-xs font-mono font-bold uppercase transition shrink-0"
-                >
-                  <Plus className="size-3.5" />
-                  <span>{isAddingCustom ? 'Close' : 'Add Custom Service'}</span>
-                </button>
-              </div>
-
-              {isAddingCustom && (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!customServiceName.trim()) return;
-                    const newSvc = {
-                      id: `custom_${Date.now()}`,
-                      name: customServiceName.trim(),
-                      price: parseInt(customServicePrice, 10) || 1000,
-                      active: true,
-                    };
-                    setServices((prev) => [...prev, newSvc]);
-                    setCustomServiceName('');
-                    setCustomServicePrice('1500');
-                    setIsAddingCustom(false);
-                  }}
-                  className="p-3.5 rounded-2xl border border-[#9E6A03] bg-[#0D1117] space-y-3"
-                >
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <input
-                      type="text"
-                      required
-                      placeholder="Service Name"
-                      value={customServiceName}
-                      onChange={(e) => setCustomServiceName(e.target.value)}
-                      className="sm:col-span-2 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-xs text-[#F0F6FC] placeholder:text-[#484F58]"
-                    />
-                    <input
-                      type="number"
-                      required
-                      placeholder={`Price (${regionConfig.currency})`}
-                      value={customServicePrice}
-                      onChange={(e) => setCustomServicePrice(e.target.value)}
-                      className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-xs font-mono font-bold text-[#D29922] placeholder:text-[#484F58]"
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <button
-                      type="submit"
-                      className="min-h-[44px] px-4 py-1.5 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] text-xs font-mono font-bold uppercase"
-                    >
-                      Save &amp; Sync ✓
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                {services.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`rounded-2xl border p-3 flex items-center justify-between gap-3 transition ${
-                      item.active ? 'border-[#30363D] bg-[#161B22]' : 'border-[#21262D] bg-[#0D1117] opacity-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <input
-                        type="checkbox"
-                        checked={item.active}
-                        onChange={() => handleToggleService(item.id)}
-                        className="size-4 rounded shrink-0"
-                      />
-                      <span className="text-xs font-bold text-[#F0F6FC] truncate">{item.name}</span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs font-mono text-[#8B949E]">{regionConfig.currency}</span>
-                      <input
-                        type="number"
-                        value={item.price}
-                        onChange={(e) => handleUpdatePrice(item.id, parseInt(e.target.value, 10) || 0)}
-                        className="w-24 min-h-[40px] rounded-lg border border-[#30363D] bg-[#0D1117] px-2.5 py-1 text-xs font-mono font-bold text-[#D29922]"
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </PortalCard>
-
-          {/* A. Cross-Language Voice Bridge Simulator (Query 4) */}
-          <PortalCard title="Cross-Language Voice Bridge (Client Reply ➔ Owner Voice)" kicker="QUERY 4 · ZERO LANGUAGE BARRIER">
-            <div className="space-y-3">
-              <p className="text-xs text-[#8B949E] font-sans">
-                Clients reply in their chosen language (e.g. Arabic in MENA), the bot responds in their language, and your dashboard translates and speaks the alert aloud in <strong className="text-[#F0F6FC]">your own voice language ({ownerLang.toUpperCase()})</strong>.
-              </p>
-              <div className="flex flex-wrap gap-2 text-xs font-mono">
-                <button
-                  type="button"
-                  onClick={() =>
-                    triggerCrossLanguageClientReply(
-                      'Saud Al-Rashid',
-                      'ar',
-                      '4:00 PM',
-                      'CONFIRMED',
-                      'نعم، سأحضر الساعة 4 عصراً لحلاقة الشعر واللحية'
-                    )
-                  }
-                  className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#0D3822]/80 px-3 py-1.5 text-[#3FB950] font-bold transition"
-                >
-                  🔊 MENA Demo: Arabic Client Confirms ➔ Speak in {ownerLang.toUpperCase()}
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    triggerCrossLanguageClientReply(
-                      'Zain',
-                      'ur',
-                      '4:30 PM',
-                      'DECLINED',
-                      'Sorry bhai, aaj nahi aa sakta, kal par shift kar dein.'
-                    )
-                  }
-                  className="min-h-[44px] rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#4C1C1D]/80 px-3 py-1.5 text-[#F85149] font-bold transition"
-                >
-                  🔊 Urgent: Client Reschedules (Urdu ➔ {ownerLang.toUpperCase()})
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    triggerCrossLanguageClientReply(
-                      'Oliver',
-                      'en',
-                      '5:15 PM',
-                      'LATE',
-                      'Running 15 minutes late due to traffic!'
-                    )
-                  }
-                  className="min-h-[44px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-3 py-1.5 text-[#D29922] font-bold transition"
-                >
-                  🔊 Arrival: Client 15m Late (English ➔ {ownerLang.toUpperCase()})
-                </button>
-              </div>
-            </div>
-          </PortalCard>
-
-          {/* B. Regional End-User Chatbot + Multi-Service VIP Deal Cart (Query 5 & 6) */}
-          <PortalCard title="End-User WhatsApp Concierge, VIP Deal Rules & Multi-Service Cart" kicker={`QUERY 5 & 6 · REGION: ${regionConfig.regionLabel.toUpperCase()}`}>
-            <div className="space-y-4">
-              {/* Step 1: Greeting + Region-Locked Language Switcher */}
-              <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2.5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <span className="text-[11px] font-mono font-bold text-[#06B6D4] uppercase">
-                    1. Client Greeting ("Hi / Assalamu Alaikum / Marhaba") &amp; Regional Language:
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {regionConfig.clientLanguages.map((l) => (
-                      <button
-                        key={l.id}
-                        type="button"
-                        onClick={() => {
-                          setEndUserLang(l.id);
-                          setIsLanguageConfirmedByClient(true);
-                        }}
-                        className={`min-h-[40px] rounded-xl border px-3 py-1 text-xs font-mono font-bold transition ${
-                          endUserLang === l.id
-                            ? 'border-[#06B6D4] bg-[#06B6D4]/20 text-[#06B6D4]'
-                            : 'border-[#30363D] bg-[#161B22] text-[#8B949E] hover:text-[#F0F6FC]'
-                        }`}
-                      >
-                        {l.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Step 2: Quick Action Menu ("How can I help you?") */}
-                {isLanguageConfirmedByClient && (
-                  <div className="pt-2 border-t border-[#21262D] flex flex-wrap items-center gap-2 text-[11px] font-mono">
-                    <span className="text-[#8B949E]">
-                      {endUserLang === 'ar'
-                        ? 'كيف أساعدك؟'
-                        : endUserLang === 'ur'
-                        ? 'میں آپ کی کیا مدد کر سکتا ہوں؟'
-                        : 'How can I help you?'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleSendQuickMenuAction('BOOK')}
-                      className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-2.5 py-1 text-[#F0F6FC]"
-                    >
-                      📅 Book Date &amp; Time
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSendQuickMenuAction('RATES')}
-                      className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-2.5 py-1 text-[#F0F6FC]"
-                    >
-                      ✂️ Services &amp; Rates
-                    </button>
-                    {currentSalon.planId !== 'STARTER' ? (
-                      <button
-                        type="button"
-                        onClick={() => handleSendQuickMenuAction('DEALS')}
-                        className="min-h-[36px] rounded-lg border border-[#9E6A03] bg-[#3B2E0B]/40 hover:border-[#D29922] px-2.5 py-1 text-[#D29922]"
-                      >
-                        🔥 {endUserLang === 'ur' ? 'VIP ڈیلز' : endUserLang === 'ar' ? 'عروض VIP' : 'Active VIP Deals'}
-                      </button>
-                    ) : (
-                      <span
-                        className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1 text-[#6E7681] text-[10px] font-mono flex items-center gap-1 cursor-not-allowed"
-                        title="VIP Deals are exclusive to Growth and VIP tiers"
-                      >
-                        <Lock className="size-3 text-[#6E7681]" />
-                        <span>{endUserLang === 'ur' ? 'معمول کے ریٹس' : endUserLang === 'ar' ? 'أسعار عادية' : 'Standard Rates Only'}</span>
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleSendQuickMenuAction('LOCATION')}
-                      className="min-h-[36px] rounded-lg border border-[#116329] bg-[#0D3822] hover:border-[#3FB950] px-2.5 py-1 text-[#3FB950] flex items-center gap-1"
-                    >
-                      <MapPin className="size-3" />
-                      <span>{endUserLang === 'ur' ? 'لوکیشن پن' : endUserLang === 'ar' ? 'موقع الصالون' : 'Location Pin'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSendQuickMenuAction('HOURS')}
-                      className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-2.5 py-1 text-[#F0F6FC]"
-                    >
-                      🕒 {endUserLang === 'ur' ? 'سیلون ٹائمنگ' : endUserLang === 'ar' ? 'ساعات العمل' : 'Salon Timing'}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Step 3: VIP Deal Day-of-Week & 7-10 Day Validation Engine (Strict Package Gating) */}
-              {currentSalon.planId === 'STARTER' ? (
-                <div className="rounded-2xl border border-[#9E6A03]/60 bg-[#3B2E0B]/30 p-4 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      <div className="size-9 rounded-xl bg-[#3B2E0B] border border-[#9E6A03] grid place-items-center text-[#D29922] shrink-0 mt-0.5">
-                        <Lock className="size-4" />
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs font-mono font-bold text-[#D29922] uppercase block">
-                          2. VIP Deal Pricing Engine (Locked on Starter Plan)
-                        </span>
-                        <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
-                          Automatic Friday–Sunday weekend deals, dynamic 25% discounts, and continuous 7–10 day promotional campaigns are exclusive to <strong className="text-[#06B6D4]">Growth Automation</strong> and <strong className="text-[#D29922]">VIP Executive</strong> packages. Your salon is currently on <strong className="text-[#F0F6FC]">Starter Setup</strong>.
+                        <p className="text-xs text-[#8B949E] font-sans">{booking.service}</p>
+                        <p className="text-[11px] font-mono text-[#6E7681]" dir="ltr">
+                          {booking.phone}
                         </p>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedUpgradeTargetId('GROWTH');
-                        setIsUpgradeModalOpen(true);
-                      }}
-                      className="min-h-[44px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-black uppercase transition shrink-0 flex items-center justify-center gap-1.5 shadow-lg active:scale-95"
-                    >
-                      <span>⚡ Upgrade to Unlock Deals →</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B]/25 p-4 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <span className="text-xs font-mono font-bold text-[#D29922] uppercase block">
-                        2. VIP Deal Pricing Engine (Fri–Sun vs Mon–Thu &amp; 7–10 Day Validation)
+
+                    <div className="flex flex-wrap items-center justify-between md:justify-end gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-[#21262D] shrink-0">
+                      <span className="text-sm font-mono font-black text-[#D29922] tabular-nums mr-1">
+                        {regionConfig.symbol}
+                        {booking.price.toLocaleString()}
                       </span>
-                      <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">
-                        Deals auto-apply on <strong className="text-[#F0F6FC]">Friday, Saturday &amp; Sunday</strong>. Monday–Thursday uses normal rates unless a <strong className="text-[#F0F6FC]">7-to-10 day continuous VIP deal</strong> is active.
-                      </p>
-                    </div>
-                    <span
-                      className={`rounded-lg border px-2.5 py-1 text-[10px] font-mono font-bold shrink-0 ${
-                        isVipDealActiveNow
-                          ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
-                          : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
-                      }`}
-                    >
-                      {pricingRuleBadge}
-                    </span>
-                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs font-mono">
-                    <div className="flex items-center gap-1.5 rounded-xl bg-[#0D1117] border border-[#30363D] p-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setDayScheduleMode('FRI_SUN_WEEKEND')}
-                        className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
-                          dayScheduleMode === 'FRI_SUN_WEEKEND'
-                            ? 'bg-[#D29922] text-[#0D1117]'
-                            : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                        }`}
-                      >
-                        Fri – Sun (Weekend Deal)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDayScheduleMode('MON_THU_NORMAL')}
-                        className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
-                          dayScheduleMode === 'MON_THU_NORMAL'
-                            ? 'bg-[#06B6D4] text-[#0D1117]'
-                            : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                        }`}
-                      >
-                        Mon – Thu (Normal Days)
-                      </button>
-                    </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const ownerFirst = currentSalon.owner.split(' ')[0] || 'Hamza';
+                            const urduText = `${ownerFirst} صاحب، آپ کے باربر ${booking.barberName} کے پاس ${booking.clientName} کی ${booking.timeSlot} پر بکنگ ہے۔ سروس: ${booking.service}۔`;
+                            const romanUrdu = `${ownerFirst} Sahab! Aap kay barber ${booking.barberName} kay paas ${booking.clientName} ki ${booking.timeSlot} par booking hai. Service: ${booking.service}.`;
+                            const arText = `${ownerFirst}، الحلاق ${booking.barberName} لديه موعد مع ${booking.clientName} في ${booking.timeSlot}. الخدمة: ${booking.service}.`;
+                            const enText = `${ownerFirst}, your barber ${booking.barberName} has ${booking.clientName} at ${booking.timeSlot}: ${booking.service}.`;
+                            const text =
+                              ownerLang === 'ur' ? urduText : ownerLang === 'ar' ? arText : enText;
+                            speakHandsFree(text, ownerLang, romanUrdu);
+                          }}
+                          className="min-h-[48px] min-w-[48px] grid place-items-center rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] text-[#06B6D4] transition"
+                          title="Speak booking aloud"
+                          aria-label="Speak booking aloud"
+                        >
+                          <Volume2 className="size-4" />
+                        </button>
 
-                    <div className="flex items-center gap-1.5 rounded-xl bg-[#0D1117] border border-[#30363D] p-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setVipCampaignMode('WEEKEND_ONLY')}
-                        className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
-                          vipCampaignMode === 'WEEKEND_ONLY'
-                            ? 'bg-[#21262D] text-[#F0F6FC] border border-[#484F58]'
-                            : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                        }`}
-                      >
-                        Standard Fri–Sun Deal
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setVipCampaignMode('CONTINUOUS_7_10_DAYS')}
-                        className={`min-h-[40px] flex-1 rounded-lg px-2.5 py-1.5 font-bold transition ${
-                          vipCampaignMode === 'CONTINUOUS_7_10_DAYS'
-                            ? 'bg-[#0D3822] text-[#3FB950] border border-[#116329]'
-                            : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                        }`}
-                      >
-                        7–10 Day VIP Valid Deal
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Multi-Service Picker + Combined Total Confirmation */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                <div className="space-y-2">
-                  <span className="text-[10px] font-mono font-bold text-[#8B949E] uppercase block">
-                    {endUserLang === 'ur'
-                      ? 'سروسز منتخب کریں (کسٹمر ویو):'
-                      : endUserLang === 'ar'
-                      ? 'اختر الخدمات المتعددة (عرض العميل):'
-                      : 'Select Multiple Services (Client View):'}
-                  </span>
-                  <div className="space-y-1.5">
-                    {services
-                      .filter((s) => s.active)
-                      .map((svc) => {
-                        const checked = selectedCartServiceIds.includes(svc.id);
-                        const effectivePrice = Math.round(svc.price * (1 - vipDealDiscountRate));
-                        const localizedTitle = getLocalizedServiceName(svc.name, endUserLang);
-                        return (
-                          <label
-                            key={svc.id}
-                            className={`min-h-[44px] flex items-center justify-between rounded-xl border px-3 py-2 text-xs cursor-pointer transition ${
-                              checked
-                                ? 'border-[#06B6D4] bg-[#06B6D4]/10 text-[#F0F6FC]'
-                                : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
-                            }`}
-                          >
-                            <span className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() =>
-                                  setSelectedCartServiceIds((prev) =>
-                                    prev.includes(svc.id)
-                                      ? prev.filter((id) => id !== svc.id)
-                                      : [...prev, svc.id]
-                                  )
-                                }
-                                className="size-4 rounded text-[#06B6D4]"
-                              />
-                              <span className={endUserLang === 'ur' || endUserLang === 'ar' ? 'font-sans' : ''}>
-                                {localizedTitle}
-                              </span>
-                            </span>
-                            <span className="font-mono font-bold text-[#D29922]">
-                              {isVipDealActiveNow && (
-                                <span className="line-through text-[#6E7681] mr-1.5 text-[10px]">
-                                  {regionConfig.symbol}{svc.price.toLocaleString()}
-                                </span>
-                              )}
-                              {regionConfig.symbol}{effectivePrice.toLocaleString()}
-                            </span>
-                          </label>
-                        );
-                      })}
-                  </div>
-                </div>
-
-                {/* Summary + Confirm Lock */}
-                <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-3.5 flex flex-col justify-between space-y-3">
-                  <div className="space-y-2">
-                    <span className="text-[10px] font-mono font-bold text-[#06B6D4] uppercase block">
-                      {endUserLang === 'ur'
-                        ? 'کسٹمر کنفرمیشن اور بل ٹوٹل:'
-                        : endUserLang === 'ar'
-                        ? 'تأكيد الحجز وتفاصيل الفاتورة:'
-                        : 'Client Confirmation & Rate Total:'}
-                    </span>
-
-                    {/* Preferred Barber Selector in Cart */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-mono text-[#8B949E] block">
-                        {endUserLang === 'ur'
-                          ? 'پسندیدہ باربر منتخب کریں:'
-                          : endUserLang === 'ar'
-                          ? 'اختر الحلاق المفضل:'
-                          : 'Select Preferred Barber / Stylist:'}
-                      </label>
-                      <select
-                        value={selectedCartBarber}
-                        onChange={(e) => setSelectedCartBarber(e.target.value)}
-                        className="w-full min-h-[42px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1 text-xs text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
-                      >
-                        {barbersList.map((b) => (
-                          <option key={b} value={b}>
-                            {b}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Query 3: Multi-Barber Conflict Detection in Cart */}
-                    {selectedCartBarber.toLowerCase().includes('tariq') &&
-                      (selectedCartSlot === '04:15 PM' || selectedCartSlot === '4:15 PM') && (
-                        <div className="rounded-xl bg-[#4C1C1D] border border-[#da3633] p-2.5 text-xs space-y-1.5 animate-in fade-in">
-                          <div className="flex items-start gap-1.5 text-[#F85149]">
-                            <AlertTriangle className="size-4 shrink-0 mt-0.5" />
-                            <span className="text-[11px] leading-tight">
-                              {endUserLang === 'ur'
-                                ? 'باربر طارق 04:15 PM پر مصروف ہیں۔ باربر علی اس سلاٹ پر فارغ ہیں!'
-                                : endUserLang === 'ar'
-                                ? 'الحلاق طارق مشغول 04:15 PM. الحلاق علي متاح في هذا الوقت!'
-                                : 'Barber Tariq is occupied at 04:15 PM. Barber Ali is free on that slot!'}
-                            </span>
-                          </div>
+                        {booking.status === 'CONFIRMED' && (
                           <button
                             type="button"
-                            onClick={() => {
-                              const ali =
-                                barbersList.find((b) => b.toLowerCase().includes('ali')) || 'Ali Raza';
-                              setSelectedCartBarber(ali);
-                              setMaintToast(`✓ Switched booking to ${ali} at 04:15 PM.`);
-                              setTimeout(() => setMaintToast(null), 4000);
-                            }}
-                            className="w-full py-1.5 rounded-lg bg-[#3FB950] text-[#0D1117] font-mono font-bold text-xs hover:bg-[#2ea043] transition active:scale-95"
+                            onClick={() => handleUpdateStatus(booking.id, 'IN_CHAIR')}
+                            className="min-h-[48px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-3 py-2 text-xs font-mono font-bold text-[#D29922] transition"
                           >
-                            {endUserLang === 'ur'
-                              ? 'جی ہاں، باربر علی کے ساتھ 04:15 PM بک کریں ✓'
-                              : endUserLang === 'ar'
-                              ? 'نعم، احجز مع الحلاق علي في 04:15 PM ✓'
-                              : 'Book with Barber Ali at 04:15 PM ✓'}
+                            Seat
                           </button>
-                        </div>
-                      )}
+                        )}
 
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <input
-                        type="text"
-                        value={cartClientName}
-                        onChange={(e) => setCartClientName(e.target.value)}
-                        placeholder={endUserLang === 'ur' ? 'کسٹمر کا نام' : endUserLang === 'ar' ? 'اسم العميل' : 'Client Name'}
-                        className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-xs"
-                      />
-                      <input
-                        type="text"
-                        value={selectedCartSlot}
-                        onChange={(e) => setSelectedCartSlot(e.target.value)}
-                        placeholder="Slot e.g. 04:30 PM"
-                        className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-xs font-mono"
-                      />
-                    </div>
-
-                    {/* Query 5: Ambiguous Time Disambiguation in Cart */}
-                    {(selectedCartSlot.trim() === '9' || selectedCartSlot.trim().toLowerCase() === 'at 9') && (
-                      <div className="rounded-xl bg-[#3B2E0B] border border-[#9E6A03] p-2.5 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 animate-in fade-in">
-                        <span className="text-[11px] text-[#D29922] font-mono">
-                          {endUserLang === 'ur'
-                            ? 'کیا آپ کا مطلب 9:00 AM ہے یا 9:00 PM؟'
-                            : endUserLang === 'ar'
-                            ? 'هل تقصد 9:00 AM أم 9:00 PM؟'
-                            : 'Did you mean 9:00 AM or 9:00 PM?'}
-                        </span>
-                        <div className="flex gap-1.5 shrink-0">
+                        {booking.status !== 'COMPLETED' ? (
                           <button
                             type="button"
-                            onClick={() => setSelectedCartSlot('09:00 AM')}
-                            className="px-2.5 py-1 rounded-md bg-[#06B6D4] text-[#0D1117] text-[10px] font-mono font-bold hover:bg-[#22D3EE]"
+                            onClick={() => handleUpdateStatus(booking.id, 'COMPLETED')}
+                            className="min-h-[48px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/60 px-3.5 py-2 text-xs font-mono font-bold text-[#3FB950] transition active:scale-95"
                           >
-                            9:00 AM {endUserLang === 'ur' ? '(صبح)' : endUserLang === 'ar' ? '(صباحاً)' : ''}
+                            Mark Completed ✓
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedCartSlot('09:00 PM')}
-                            className="px-2.5 py-1 rounded-md bg-[#D29922] text-[#0D1117] text-[10px] font-mono font-bold hover:bg-[#e0b252]"
-                          >
-                            9:00 PM {endUserLang === 'ur' ? '(رات)' : endUserLang === 'ar' ? '(مساءً)' : ''}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                      <input
-                        type="text"
-                        value={cartClientPhone}
-                        onChange={(e) => setCartClientPhone(e.target.value)}
-                        placeholder={endUserLang === 'ur' ? 'کسٹمر کا واٹس ایپ نمبر' : endUserLang === 'ar' ? 'رقم واتساب العميل' : 'Client WhatsApp Number'}
-                        className="w-full min-h-[48px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-sm font-mono"
-                      />
-                      <input
-                        type="text"
-                        value={cartClientBirthDate}
-                        onChange={(e) => setCartClientBirthDate(e.target.value)}
-                        placeholder="Birth Date (DD/MM, optional)"
-                        className="w-full min-h-[48px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#D29922] placeholder:text-[#484F58] text-sm font-mono"
-                      />
-                    </div>
-
-                    <div className="rounded-xl bg-[#161B22] border border-[#30363D] p-2.5 text-xs font-mono space-y-1">
-                      <div className="flex justify-between text-[#8B949E]">
-                        <span>
-                          {endUserLang === 'ur'
-                            ? `منتخب سروسز (${selectedCartServices.length}):`
-                            : endUserLang === 'ar'
-                            ? `الخدمات المختارة (${selectedCartServices.length}):`
-                            : `Selected Services (${selectedCartServices.length}):`}
-                        </span>
-                        <span>{regionConfig.symbol}{cartRawSubtotal.toLocaleString()}</span>
-                      </div>
-                      {cartDiscountAmount > 0 && (
-                        <div className="flex justify-between text-[#3FB950]">
-                          <span>
-                            {endUserLang === 'ur' ? 'VIP ڈیل ڈسکاؤنٹ (25%):' : endUserLang === 'ar' ? 'خصم عرض VIP (25%):' : 'VIP Deal Discount (25%):'}
+                        ) : (
+                          <span className="min-h-[48px] inline-flex items-center gap-1.5 rounded-xl border border-[#116329] bg-[#0D3822]/50 px-3 py-2 text-[11px] font-mono font-bold text-[#3FB950]">
+                            <CheckCircle2 className="size-3.5" />
+                            <span>T+2h Review Queued</span>
                           </span>
-                          <span>-{regionConfig.symbol}{cartDiscountAmount.toLocaleString()}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between text-sm font-black text-[#D29922] pt-1 border-t border-[#21262D]">
-                        <span>{endUserLang === 'ur' ? 'کل حتمی بل:' : endUserLang === 'ar' ? 'الإجمالي النهائي:' : 'Confirmed Total:'}</span>
-                        <span>{regionConfig.symbol}{cartFinalTotal.toLocaleString()}</span>
+                        )}
                       </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={selectedCartServices.length === 0}
-                    onClick={handleConfirmEndUserCartBooking}
-                    className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] py-2.5 text-xs font-mono font-black uppercase transition active:scale-95 disabled:opacity-40"
-                  >
-                    {endUserLang === 'ur'
-                      ? 'اپائنٹمنٹ تصدیق + دائمی ریکارڈ لاک ✓'
-                      : endUserLang === 'ar'
-                      ? 'تأكيد الحجز + حفظ الفاتورة الدائمة ✓'
-                      : 'Confirm Booking + Lock Permanent Proof + Voice Alert ✓'}
-                  </button>
-                </div>
-              </div>
-
-            {/* Chat Thread Preview */}
-            <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-2.5 max-h-[300px] overflow-y-auto overflow-x-hidden">
-              {simChatMessages.map((msg, idx) => {
-                const msgIsRtl = /[\u0600-\u06FF]/.test(msg.text);
-                const hasLocationLink = msg.text.includes('maps.google.com') || msg.text.includes('📍');
-                const hasHoursLink = msg.text.includes('11:00 AM') || msg.text.includes('🕒');
-                return (
-                  <div
-                    key={idx}
-                    className={`flex ${msg.sender === 'CLIENT' ? 'justify-start' : 'justify-end'}`}
-                  >
-                    <div
-                      className={`max-w-[85%] min-w-0 rounded-2xl p-3 text-xs leading-relaxed overflow-hidden break-words [overflow-wrap:break-word] space-y-2 ${
-                        msg.sender === 'CLIENT'
-                          ? 'bg-[#21262D] border border-[#30363D] text-[#F0F6FC]'
-                          : 'bg-[#0D3822] border border-[#116329] text-[#3FB950]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3 text-[9px] font-mono opacity-75 mb-1">
-                        <span>{msg.sender === 'CLIENT' ? 'Customer' : 'WORKCRAFT Concierge Bot'}</span>
-                        <span>{msg.time}</span>
-                      </div>
-                      <p
-                        dir={msgIsRtl ? 'rtl' : 'ltr'}
-                        className={`break-words [overflow-wrap:break-word] ${msgIsRtl ? 'text-right' : 'text-left'}`}
-                      >
-                        {msg.text}
-                      </p>
-
-                      {/* Interactive In-Message Quick Action Buttons for Location & Timing */}
-                      {hasLocationLink && msg.sender === 'BOT' && (
-                        <div className="pt-1">
-                          <button
-                            type="button"
-                            onClick={() => setIsLocationModalOpen(true)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#3FB950] text-[#0D1117] text-[10px] font-mono font-bold hover:bg-[#2ea043] transition shadow-sm"
-                          >
-                            <MapPin className="size-3" />
-                            <span>📍 Open Interactive Map &amp; Navigation</span>
-                          </button>
-                        </div>
-                      )}
-                      {hasHoursLink && msg.sender === 'BOT' && (
-                        <div className="pt-1">
-                          <button
-                            type="button"
-                            onClick={() => setIsTimingModalOpen(true)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#06B6D4] text-[#0D1117] text-[10px] font-mono font-bold hover:bg-[#22D3EE] transition shadow-sm"
-                          >
-                            <Clock className="size-3" />
-                            <span>🕒 View Weekly Schedule &amp; Prayer Break</span>
-                          </button>
-                        </div>
-                      )}
                     </div>
                   </div>
                 );
               })}
-
-              {/* In-Chat Interactive Prompt: Ambiguous Time Disambiguation */}
-              {timeDisambiguationPrompt && (
-                <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B]/80 p-3 space-y-2 animate-in fade-in">
-                  <div className="flex items-center gap-2 text-xs font-mono text-[#D29922]">
-                    <Clock className="size-4" />
-                    <span>
-                      {endUserLang === 'ur'
-                        ? 'برائے مہربانی صبح یا شام کا وقت منتخب کریں:'
-                        : endUserLang === 'ar'
-                        ? 'يرجى تحديد الفترة الصباحية أم المسائية:'
-                        : 'Please choose Morning or Evening slot:'}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedCartSlot('09:00 AM');
-                        setTimeDisambiguationPrompt(null);
-                        triggerCrossLanguageClientReply(
-                          'WhatsApp Client',
-                          endUserLang,
-                          '09:00 AM',
-                          'CONFIRMED',
-                          '09:00 AM (Morning / صبح)'
-                        );
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-[#06B6D4] text-[#0D1117] text-xs font-mono font-bold hover:bg-[#22D3EE] transition"
-                    >
-                      9:00 AM {endUserLang === 'ur' ? '(صبح)' : endUserLang === 'ar' ? '(صباحاً)' : '(Morning)'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedCartSlot('09:00 PM');
-                        setTimeDisambiguationPrompt(null);
-                        triggerCrossLanguageClientReply(
-                          'WhatsApp Client',
-                          endUserLang,
-                          '09:00 PM',
-                          'CONFIRMED',
-                          '09:00 PM (Night / رات)'
-                        );
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-[#D29922] text-[#0D1117] text-xs font-mono font-bold hover:bg-[#e0b252] transition"
-                    >
-                      9:00 PM {endUserLang === 'ur' ? '(رات)' : endUserLang === 'ar' ? '(مساءً)' : '(Night)'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* In-Chat Interactive Prompt: Multi-Barber Conflict Tariq -> Ali */}
-              {barberConflictPrompt && (
-                <div className="rounded-xl border border-[#116329] bg-[#0D3822]/90 p-3 space-y-2 animate-in fade-in">
-                  <div className="flex items-center gap-2 text-xs font-sans text-[#3FB950]">
-                    <UserCheck className="size-4" />
-                    <span className="font-bold">
-                      {endUserLang === 'ur'
-                        ? `باربر علی رضا ${barberConflictPrompt.slot} پر دستیاب ہیں:`
-                        : endUserLang === 'ar'
-                        ? `الحلاق علي رضا متاح في ${barberConflictPrompt.slot}:`
-                        : `Barber Ali Raza is ready and available at ${barberConflictPrompt.slot}:`}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedCartBarber('Ali Raza');
-                        setBarberConflictPrompt(null);
-                        triggerCrossLanguageClientReply(
-                          'WhatsApp Client',
-                          endUserLang,
-                          barberConflictPrompt.slot,
-                          'CONFIRMED',
-                          `Yes, please confirm my booking with Barber Ali Raza at ${barberConflictPrompt.slot}!`
-                        );
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-[#3FB950] text-[#0D1117] text-xs font-mono font-bold hover:bg-[#2ea043] transition active:scale-95 flex items-center gap-1.5"
-                    >
-                      <Check className="size-3.5" />
-                      <span>
-                        {endUserLang === 'ur'
-                          ? 'جی ہاں، باربر علی کے ساتھ بک کریں ✓'
-                          : endUserLang === 'ar'
-                          ? 'نعم، احجز مع الحلاق علي ✓'
-                          : 'Book with Barber Ali (04:15 PM) ✓'}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBarberConflictPrompt(null)}
-                      className="px-2.5 py-1.5 rounded-lg border border-[#30363D] text-[#8B949E] text-xs font-mono hover:text-[#F0F6FC]"
-                    >
-                      {endUserLang === 'ur' ? 'دوسرا وقت چنیں' : endUserLang === 'ar' ? 'اختيار وقت آخر' : 'Pick Another Slot'}
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
+          </section>
+        </div>
+      )}
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendSimQuery();
-              }}
-              className="flex items-center gap-2"
-            >
-              <input
-                type="text"
-                value={customQuery}
-                onChange={(e) => setCustomQuery(e.target.value)}
-                placeholder="Type custom client message to test voice translation & permanent log..."
-                className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 py-2.5 text-xs text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
-              />
-              <button
-                type="submit"
-                className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2.5 text-xs font-mono font-bold uppercase transition flex items-center gap-1.5"
-              >
-                <span>Send</span>
-                <Send className="size-3.5" />
-              </button>
-            </form>
-          </div>
-        </PortalCard>
-
-          {/* C. Immutable Un-Deletable Client Proof Ledger (Query 6) */}
-          <PortalCard title="Immutable Client Confirmation Ledger (Cannot Be Deleted by End User)" kicker="PERMANENT SALON AUDIT TRAIL">
-            <div className="space-y-2.5">
-              <p className="text-xs text-[#8B949E] font-sans">
-                Even if a customer deletes WhatsApp messages from their phone, WORKCRAFT permanently locks their confirmed services, applied deal/normal rate, and approval message hash here.
-              </p>
-              {immutableProofs.map((proof) => (
-                <div
-                  key={proof.id}
-                  className="rounded-2xl border border-[#116329] bg-[#0D3822]/40 p-3.5 space-y-1.5 text-xs"
+      {/* ========================================================================= */}
+      {/* VIEW 2: DEDICATED "MANAGE" SECTION (SHOP SETUP & RULES)                   */}
+      {/* ========================================================================= */}
+      {currentSectionMode === 'MANAGE' && (
+        <div className="space-y-4">
+          {/* Sub-Section Switcher Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1.5 rounded-2xl border border-[#30363D] bg-[#161B22]">
+            {[
+              { id: 'STAFF' as const, label: 'Staff & Barbers', icon: Scissors },
+              { id: 'SERVICES' as const, label: 'Services & Rates', icon: Receipt },
+              { id: 'HOURS' as const, label: 'Salon Hours', icon: Clock },
+              { id: 'AUTOMATION' as const, label: 'Automation & Rewards', icon: Settings2 },
+              { id: 'POSTER' as const, label: 'Window QR Poster', icon: QrCode },
+            ].map((sub) => {
+              const Icon = sub.icon;
+              const isActive = manageSubSection === sub.id;
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => setManageSubSection(sub.id)}
+                  className={`min-h-[48px] flex items-center justify-center sm:justify-start gap-2 rounded-xl px-3 py-2 text-xs font-mono font-bold transition border ${
+                    isActive
+                      ? 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
+                      : 'border-transparent bg-transparent text-[#8B949E] hover:bg-[#21262D] hover:text-[#F0F6FC]'
+                  }`}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-2 font-mono">
-                    <span className="font-bold text-[#3FB950] flex items-center gap-1.5">
-                      <FileCheck className="size-4" />
-                      <span>
-                        {proof.id} · {proof.clientName} ({proof.clientPhone})
-                      </span>
-                    </span>
-                    <span
-                      dir="ltr"
-                      className="rounded bg-[#0D1117] border border-[#30363D] px-2 py-0.5 text-[10px] text-[#06B6D4] max-w-full overflow-hidden break-all [overflow-wrap:break-word]"
-                    >
-                      🔒 LOCKED · {proof.hash}
-                    </span>
-                  </div>
-                  <p
-                    dir={proof.clientLang === 'ar' || proof.clientLang === 'ur' ? 'rtl' : 'ltr'}
-                    className={`text-[#F0F6FC] font-sans overflow-hidden break-words [overflow-wrap:break-word] ${
-                      proof.clientLang === 'ar' || proof.clientLang === 'ur' ? 'text-right' : 'text-left'
-                    }`}
-                  >
-                    Confirmed Message ({proof.clientLang.toUpperCase()}): <em>&ldquo;{proof.confirmedMessage}&rdquo;</em>
-                  </p>
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-[#8B949E] pt-1 border-t border-[#21262D]">
-                    <span>
-                      Services: {proof.services.join(', ')} · {proof.pricingModeLabel}
-                    </span>
-                    <span className="text-[#D29922] font-bold">
-                      Total: {regionConfig.symbol}{proof.totalAmount.toLocaleString()} · {proof.timestamp}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </PortalCard>
-        </div>
-      )}
+                  <Icon className="size-4 shrink-0" />
+                  <span className="truncate">{sub.label}</span>
+                </button>
+              );
+            })}
+          </div>
 
-      {/* ========================================================================= */}
-      {/* 6. TAB 3: VIDEO DEALS + FULL-RATE BIRTHDAY & FESTIVAL WISHES (CONSOLIDATED) */}
-      {/* ========================================================================= */}
-      {activeTab === 'MARKETING' && (
-        <div className="space-y-5">
-          <PortalCard title="Pay-Per-Deal Video Campaign (4s–9s Ban-Safe)" kicker="ROI · DAY-1 IMPORT · AUTO QA · MENA VOICE">
-            <BroadcastTab
-              salon={activeSalonProfile}
-              contacts={salonContacts}
-              ownerLang={ownerLang}
-              onShowToast={(msg) => {
-                setMaintToast(msg);
-                setTimeout(() => setMaintToast(null), 6000);
-              }}
-            />
-          </PortalCard>
-
-          <PortalCard title="Automated Birthday & Festival VIP Wishes (100% Complete Full Rate)" kicker="PRIVATE 1-TO-1 CLIENT RELATIONSHIP · ZERO DISCOUNTS">
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* 1. STAFF & BARBERS (Add/Edit Barbers & Chair Assignments) */}
+          {manageSubSection === 'STAFF' && (
+            <PortalCard
+              title="Staff & Barbers"
+              kicker="BARBER ROSTER & CHAIR ASSIGNMENTS"
+            >
+              <div className="space-y-4">
                 <p className="text-xs text-[#8B949E] font-sans">
-                  Detects saved client birthdays and festival dates, then sends warm personalized greetings from <strong className="text-[#F0F6FC]">{currentSalon.owner} ({currentSalon.name})</strong> in each client's preferred booking language—inviting priority booking at <strong className="text-[#3FB950]">100% complete full standard rates</strong>.
+                  Manage your barbers and their assigned floor chairs. Updates feed live into Today&apos;s Schedule, Walk-In seating, and WhatsApp booking slots.
                 </p>
-                <span className="rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-1.5 text-[11px] font-mono font-bold text-[#3FB950] shrink-0">
-                  100% Full Standard Rate Only
-                </span>
-              </div>
 
-              <div className="space-y-3">
-                {celebrations.map((cel) => (
-                  <div
-                    key={cel.id}
-                    className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-2.5"
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {barbersList.map((barber, bIdx) => {
+                    const isEditing = editingBarberIndex === bIdx;
+                    const assignedChair = barberChairs[barber] || `Chair #${bIdx + 1}`;
+                    return (
+                      <div
+                        key={bIdx}
+                        className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 flex flex-col gap-2.5"
+                      >
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={editingBarberName}
+                              onChange={(e) => setEditingBarberName(e.target.value)}
+                              className="w-full min-h-[48px] rounded-xl border border-[#06B6D4] bg-[#161B22] px-3 py-2 text-sm text-[#F0F6FC] focus:outline-none"
+                              placeholder="Barber name"
+                              autoFocus
+                            />
+                            <input
+                              type="text"
+                              value={editingBarberChair}
+                              onChange={(e) => setEditingBarberChair(e.target.value)}
+                              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#D29922] focus:outline-none focus:border-[#06B6D4]"
+                              placeholder="Chair assignment (e.g. Chair #1)"
+                            />
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleSaveEditBarber(bIdx)}
+                                className="flex-1 min-h-[48px] rounded-xl bg-[#06B6D4] text-[#0D1117] text-xs font-mono font-bold hover:bg-[#22D3EE] transition"
+                              >
+                                Save Changes ✓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingBarberIndex(null);
+                                  setEditingBarberName('');
+                                  setEditingBarberChair('');
+                                }}
+                                className="min-h-[48px] px-3 rounded-xl border border-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] text-xs font-mono"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="size-8 rounded-lg bg-[#161B22] border border-[#30363D] grid place-items-center text-xs font-mono font-bold text-[#D29922] shrink-0">
+                                #{bIdx + 1}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-sm font-bold text-[#F0F6FC] truncate">{barber}</p>
+                                <span className="text-xs font-mono text-[#06B6D4] block truncate">
+                                  {assignedChair}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingBarberIndex(bIdx);
+                                  setEditingBarberName(barber);
+                                  setEditingBarberChair(assignedChair);
+                                }}
+                                className="min-h-[48px] min-w-[48px] grid place-items-center rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] text-[#8B949E] hover:text-[#06B6D4] transition"
+                                title="Edit Barber & Chair"
+                              >
+                                <Edit2 className="size-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteBarberDashboard(barber)}
+                                className="min-h-[48px] min-w-[48px] grid place-items-center rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#F85149] text-[#8B949E] hover:text-[#F85149] transition"
+                                title="Remove Barber"
+                              >
+                                <Trash2 className="size-4" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <form
+                  onSubmit={handleAddBarberDashboard}
+                  className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 grid grid-cols-1 sm:grid-cols-[1fr_180px_auto] gap-2.5"
+                >
+                  <input
+                    type="text"
+                    value={newBarberDashboardInput}
+                    onChange={(e) => setNewBarberDashboardInput(e.target.value)}
+                    placeholder="Barber / Stylist Name (e.g. Master Kamran)"
+                    className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                  />
+                  <input
+                    type="text"
+                    value={newBarberChairInput}
+                    onChange={(e) => setNewBarberChairInput(e.target.value)}
+                    placeholder={`Chair #${barbersList.length + 1}`}
+                    className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm font-mono text-[#D29922] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                  />
+                  <button
+                    type="submit"
+                    className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase transition flex items-center justify-center gap-1.5 shrink-0"
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2.5">
-                        <span className="rounded-lg bg-[#3B2E0B] border border-[#9E6A03] px-2.5 py-1 text-[10px] font-mono font-bold text-[#D29922]">
-                          {cel.eventType === 'BIRTHDAY' ? '🎂 BIRTHDAY' : '🌙 FESTIVAL VIP'}
-                        </span>
-                        <span className="text-sm font-bold text-[#F0F6FC]">{cel.clientName}</span>
-                        <span className="text-[11px] font-mono text-[#8B949E]">
-                          {cel.phone} · Lang: {cel.preferredLang.toUpperCase()} · {cel.eventDate}
-                        </span>
-                      </div>
+                    <Plus className="size-4" />
+                    <span>Add Barber</span>
+                  </button>
+                </form>
+              </div>
+            </PortalCard>
+          )}
 
-                      {cel.sent ? (
-                        <span className="rounded-lg border border-[#116329] bg-[#0D3822] px-3 py-1 text-[11px] font-mono font-bold text-[#3FB950]">
-                          ✓ Dispatched via WhatsApp (Full Rate)
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCelebrations((prev) =>
-                              prev.map((item) => (item.id === cel.id ? { ...item, sent: true } : item))
-                            );
-                            setMaintToast(
-                              `Sent full-rate ${cel.eventType} wish to ${cel.clientName} in ${cel.preferredLang.toUpperCase()}.`
-                            );
-                            setTimeout(() => setMaintToast(null), 5000);
-                          }}
-                          className="min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-3.5 py-1.5 text-xs font-mono font-bold uppercase transition active:scale-95"
-                        >
-                          Send Wish Now →
-                        </button>
-                      )}
+          {/* 2. SERVICES & RATES (Edit Service Names, Durations, and Pricing) */}
+          {manageSubSection === 'SERVICES' && (
+            <PortalCard
+              title="Services & Rates"
+              kicker="SERVICE NAMES · DURATIONS · PRICING"
+            >
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <p className="text-xs font-sans text-[#8B949E]">
+                    Edit service titles, durations (mins), and rates ({regionConfig.currency}). Changes reflect immediately on your WhatsApp menu.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingCustom(!isAddingCustom)}
+                    className="min-h-[48px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase transition shrink-0"
+                  >
+                    <Plus className="size-4" />
+                    <span>{isAddingCustom ? 'Close Form' : 'Add Service'}</span>
+                  </button>
+                </div>
+
+                {isAddingCustom && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!customServiceName.trim()) return;
+                      const newSvc = {
+                        id: `custom_${Date.now()}`,
+                        name: customServiceName.trim(),
+                        durationMins: parseInt(customServiceDuration, 10) || 35,
+                        price: parseInt(customServicePrice, 10) || 1000,
+                        active: true,
+                      };
+                      setServices((prev) => [...prev, newSvc]);
+                      setCustomServiceName('');
+                      setCustomServiceDuration('35');
+                      setCustomServicePrice('1500');
+                      setIsAddingCustom(false);
+                      setMaintToast(`✓ Service "${newSvc.name}" added.`);
+                      setTimeout(() => setMaintToast(null), 4000);
+                    }}
+                    className="p-4 rounded-2xl border border-[#9E6A03] bg-[#0D1117] space-y-3"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                      <input
+                        type="text"
+                        required
+                        placeholder="Service Name"
+                        value={customServiceName}
+                        onChange={(e) => setCustomServiceName(e.target.value)}
+                        className="sm:col-span-2 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-[#F0F6FC] placeholder:text-[#484F58]"
+                      />
+                      <input
+                        type="number"
+                        required
+                        min={5}
+                        placeholder="Mins"
+                        value={customServiceDuration}
+                        onChange={(e) => setCustomServiceDuration(e.target.value)}
+                        className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm font-mono text-[#06B6D4] placeholder:text-[#484F58]"
+                      />
+                      <input
+                        type="number"
+                        required
+                        placeholder={`Price (${regionConfig.currency})`}
+                        value={customServicePrice}
+                        onChange={(e) => setCustomServicePrice(e.target.value)}
+                        className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm font-mono font-bold text-[#D29922] placeholder:text-[#484F58]"
+                      />
                     </div>
-
-                    <p
-                      dir={cel.preferredLang === 'ar' || cel.preferredLang === 'ur' ? 'rtl' : 'ltr'}
-                      className={`rounded-xl border border-[#30363D] bg-[#161B22] p-3 text-xs text-[#F0F6FC] font-sans leading-relaxed overflow-hidden break-words [overflow-wrap:break-word] ${
-                        cel.preferredLang === 'ar' || cel.preferredLang === 'ur' ? 'text-right' : 'text-left'
-                      }`}
-                    >
-                      &ldquo;{getCelebrationPreview(cel)}&rdquo;
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </PortalCard>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 7. TAB 4: GROWTH KIT, WINDOW PDF, GOOGLE REVIEWS & 21D/30D FULL-RATE REBOOK */}
-      {/* ========================================================================= */}
-      {activeTab === 'GROWTH_KIT' && (
-        <div className="space-y-5">
-          {/* Private 1-to-1 Rebook Whisper & Weekday Full-Rate Open-Chair Alert (Query 4 & 5) */}
-          <PortalCard title="Private 1-to-1 Client Rebook & Weekday Open-Chair Alert" kicker="100% FULL STANDARD RATE · PROTECTS YOUR PRIVATE WHATSAPP MOAT">
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-[#06B6D4]/40 bg-[#06B6D4]/10 p-3.5 text-xs text-[#F0F6FC] font-sans leading-relaxed">
-                WorkCraft privately messages regular clients 1-to-1 on WhatsApp after their natural return window (<strong>21 days</strong> for haircuts / <strong>30 days</strong> for beauty services) at <strong className="text-[#3FB950]">100% complete full standard rates</strong>—bringing them directly back to your booking cart without public social posting.
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {[
-                  {
-                    id: 'rb-1',
-                    name: 'Zayd Al-Mansoor',
-                    cycle: '21 Days Since Last Skin Fade',
-                    lang: 'AR' as const,
-                    preview: 'مرحباً زيد! مر ٢١ يوماً على زيارتك الأخيرة — هل ترغب بحجز موعد جديد هذا الأسبوع بالسعر الرسمي؟',
-                  },
-                  {
-                    id: 'rb-2',
-                    name: 'Usman Farooq',
-                    cycle: '28 Days Since Signature Haircut & Facial',
-                    lang: 'UR' as const,
-                    preview: 'السلام علیکم عثمان! آپ کی آخری وزٹ کو 4 ہفتے ہو گئے ہیں، مکمل معیاری ریٹ پر اپنی اگلی اپائنٹمنٹ بک کریں۔',
-                  },
-                ].map((cli) => {
-                  const isSent = rebookWhisperSentIds.includes(cli.id);
-                  return (
-                    <div key={cli.id} className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2 text-xs">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <p className="font-bold text-[#F0F6FC]">{cli.name}</p>
-                          <p className="text-[10px] font-mono text-[#D29922]">{cli.cycle}</p>
-                        </div>
-                        <span className="rounded bg-[#21262D] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono text-[#06B6D4]">
-                          {cli.lang}
-                        </span>
-                      </div>
-                      <p
-                        dir={cli.lang === 'AR' || cli.lang === 'UR' ? 'rtl' : 'ltr'}
-                        className={`rounded-xl border border-[#30363D] bg-[#161B22] p-2.5 text-[11px] text-[#F0F6FC] font-sans overflow-hidden break-words [overflow-wrap:break-word] ${
-                          cli.lang === 'AR' || cli.lang === 'UR' ? 'text-right' : 'text-left'
-                        }`}
-                      >
-                        &ldquo;{cli.preview}&rdquo;
-                      </p>
+                    <div className="flex justify-end">
                       <button
-                        type="button"
-                        disabled={isSent}
-                        onClick={() => {
-                          setRebookWhisperSentIds((prev) => [...prev, cli.id]);
-                          setMaintToast(`✓ Private 1-to-1 Rebook reminder sent to ${cli.name} at 100% full standard rate.`);
-                          setTimeout(() => setMaintToast(null), 5000);
-                        }}
-                        className={`w-full min-h-[48px] rounded-xl py-2 text-[11px] font-mono font-bold uppercase transition ${
-                          isSent
-                            ? 'bg-[#0D3822] border border-[#116329] text-[#3FB950] cursor-default'
-                            : 'bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117]'
-                        }`}
+                        type="submit"
+                        className="min-h-[48px] px-5 py-2 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] text-xs font-mono font-bold uppercase"
                       >
-                        {isSent ? 'Sent 1-to-1 Rebook Whisper ✓' : 'Send Private Rebook Whisper (Full Rate)'}
+                        Save &amp; Sync ✓
                       </button>
                     </div>
-                  );
-                })}
-              </div>
+                  </form>
+                )}
 
-              {/* Slow Weekday Open-Chair Priority Fill (Mon–Thu Full Rate Only) */}
-              <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B]/40 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <span className="text-[10px] font-mono font-bold uppercase text-[#D29922] block">
-                    MON–THU NORMAL WEEKDAY OPEN-CHAIR PRIORITY ALERT (100% FULL RATE)
-                  </span>
-                  <p className="text-xs text-[#F0F6FC] font-sans mt-0.5">
-                    Notify nearby regulars when afternoon chairs are free today at your <strong>100% complete full standard menu price</strong> (zero discounts applied).
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={openChairAlertSent}
-                  onClick={() => {
-                    setOpenChairAlertSent(true);
-                    setMaintToast('✓ Open-Chair Priority Alert sent privately to 18 nearby clients at 100% full standard rate.');
-                    setTimeout(() => setMaintToast(null), 5000);
-                  }}
-                  className={`min-h-[48px] rounded-xl px-4 py-2 text-xs font-mono font-bold uppercase shrink-0 transition ${
-                    openChairAlertSent
-                      ? 'border border-[#116329] bg-[#0D3822] text-[#3FB950]'
-                      : 'bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117]'
-                  }`}
-                >
-                  {openChairAlertSent ? '18 Regulars Notified ✓' : 'Alert Regulars (Full Rate)'}
-                </button>
-              </div>
-            </div>
-          </PortalCard>
-
-          <PortalCard
-            title="Customer Window Poster & Cabin Pamphlet (PDF)"
-            kicker="WORKCRAFT LOCAL BRANDED · SALONS & LADIES PARLORS"
-          >
-            <SalonWindowPosterPdf
-              salonName={currentSalon.name}
-              salonCategory={
-                currentSalon.name.toLowerCase().includes('beauty') ||
-                currentSalon.name.toLowerCase().includes('parlor') ||
-                currentSalon.name.toLowerCase().includes('ladies')
-                  ? 'LADIES'
-                  : 'MENS'
-              }
-              whatsappNumber={currentSalon.phone}
-              location={currentSalon.location}
-              initialLanguage={ownerLang}
-              onDownloaded={(fileName) => {
-                setMaintToast(`✓ Downloaded Printable PDF: ${fileName}`);
-                setTimeout(() => setMaintToast(null), 5000);
-              }}
-            />
-          </PortalCard>
-
-          <PortalCard title="Google Maps 5-Star Review Booster" kicker="AUTONOMOUS REPUTATION">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="p-4 rounded-2xl border border-[#30363D] bg-[#0D1117] space-y-2">
-                <span className="text-[10px] font-mono text-[#8B949E] uppercase block">Review Trigger Status</span>
-                <span className="text-xs font-mono font-bold text-[#3FB950]">
-                  {currentSalon.planId === 'STARTER' ? 'Upgrade to Growth or VIP to Unlock' : 'Booster Active (15 Min Delay)'}
-                </span>
-                <p className="text-[11px] text-[#8B949E] font-sans">
-                  Target: Google Maps · {currentSalon.name}, {currentSalon.location}
-                </p>
-              </div>
-              <div className="p-4 rounded-2xl border border-[#30363D] bg-[#0D1117] space-y-2">
-                <span className="text-[10px] font-mono text-[#8B949E] uppercase block">Total Reviews Generated</span>
-                <p className="text-xl font-bold font-mono text-[#D29922]">31 Verified Reviews</p>
-                <p className="text-[11px] text-[#8B949E] font-sans">Average rating: 4.9 / 5.0</p>
-              </div>
-            </div>
-          </PortalCard>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 8. TAB 5: PLAN & 5TH-OF-MONTH 10% MAINTENANCE SLA (CONSOLIDATED)          */}
-      {/* ========================================================================= */}
-      {activeTab === 'BILLING_SLA' && (
-        <PortalCard title="Plan Upgrades & 5th-of-Month 10% Service Fee" kicker="AUTOMATED REMINDERS · 24/7 AUTO-PROTECTION">
-          <div className="space-y-5">
-            {higherPackages.length > 0 && (
-              <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B]/40 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <span className="text-[10px] font-mono font-bold text-[#D29922] uppercase block">
-                    ACTIVE PLAN: {currentSalon.plan.toUpperCase()}
-                  </span>
-                  <p className="text-xs text-[#F0F6FC] font-sans mt-0.5">
-                    Upgrade any time by paying only the difference from your setup fee—100% credit preserved.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedUpgradeTargetId(higherPackages[0].id);
-                    setIsUpgradeModalOpen(true);
-                  }}
-                  className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-black uppercase transition shrink-0"
-                >
-                  Upgrade Plan (Pay Difference) →
-                </button>
-              </div>
-            )}
-
-            <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span className="text-xs font-mono font-bold text-[#06B6D4] uppercase flex items-center gap-1.5">
-                  <Clock className="size-4" />
-                  <span>5th-of-Month Reminder Stage Simulator</span>
-                </span>
-                <span className="text-[10px] font-mono text-[#8B949E]">
-                  Owner Onboarding Language: {ownerLang.toUpperCase()}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px] font-mono">
-                {[
-                  { id: 'PAID_ACTIVE' as const, label: 'Paid (Priority Active)' },
-                  { id: 'STAGE_1_PREV_MONTH' as const, label: '1. Prev Month (-2d)' },
-                  { id: 'STAGE_2_DAY_3' as const, label: '2. 3rd Reminder' },
-                  { id: 'STAGE_3_DAY_5_FINAL' as const, label: '3. 5th Final Warning' },
-                  { id: 'OVERDUE_TIER_2' as const, label: '4. Post-5th Overdue' },
-                ].map((stage) => (
-                  <button
-                    key={stage.id}
-                    type="button"
-                    onClick={() => setMaintCycleStage(stage.id)}
-                    className={`min-h-[44px] rounded-xl border px-2.5 py-2 font-bold transition text-center ${
-                      maintCycleStage === stage.id
-                        ? stage.id === 'OVERDUE_TIER_2'
-                          ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149]'
-                          : stage.id === 'STAGE_3_DAY_5_FINAL'
-                          ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
-                          : 'border-[#06B6D4] bg-[#06B6D4]/15 text-[#06B6D4]'
-                        : 'border-[#30363D] bg-[#161B22] text-[#8B949E] hover:text-[#F0F6FC] hover:border-[#484F58]'
-                    }`}
-                  >
-                    {stage.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {[
-                { stage: 'STAGE_1_PREV_MONTH' as const, title: 'Stage 1 · Last 2 Days of Prev Month' },
-                { stage: 'STAGE_2_DAY_3' as const, title: 'Stage 2 · 3rd of Current Month' },
-                { stage: 'STAGE_3_DAY_5_FINAL' as const, title: 'Stage 3 · 5th Final Due Warning' },
-              ].map((item) => (
-                <div
-                  key={item.stage}
-                  className={`rounded-2xl border p-3.5 space-y-2 ${
-                    maintCycleStage === item.stage ? 'border-[#9E6A03] bg-[#3B2E0B]/40' : 'border-[#30363D] bg-[#161B22]'
-                  }`}
-                >
-                  <p className="text-xs font-mono font-bold text-[#D29922]">{item.title}</p>
-                  <p
-                    dir={ownerLang === 'ar' || ownerLang === 'ur' ? 'rtl' : 'ltr'}
-                    className={`text-[11px] text-[#F0F6FC] font-sans rounded-xl bg-[#0D1117] border border-[#30363D] p-2.5 leading-relaxed overflow-hidden break-words [overflow-wrap:break-word] ${
-                      ownerLang === 'ar' || ownerLang === 'ur' ? 'text-right' : 'text-left'
-                    }`}
-                  >
-                    {getMaintenanceReminderMessage(item.stage, ownerLang)}
-                  </p>
-                </div>
-              ))}
-            </div>
-
-            <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3 overflow-hidden">
-              {isMaintPaid ? (
-                <div className="p-4 rounded-xl border border-[#116329] bg-[#0D3822] space-y-1.5 overflow-hidden">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-                    <span className="text-[#3FB950] font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="size-4 text-[#3FB950] shrink-0" />
-                      <span>5th-of-Month Maintenance Paid · Priority Active</span>
-                    </span>
-                    <span dir="ltr" className="text-[#06B6D4] font-bold break-all [overflow-wrap:break-word]">
-                      TID: {maintTid}
-                    </span>
-                  </div>
-                  <p className="text-xs text-[#F0F6FC] font-sans">
-                    Verified from {currentSalon.phone} on {maintPaidDate}.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs font-mono">
-                  {regionConfig.paymentChannels.map((ch) => (
-                    <button
-                      key={ch.id}
-                      type="button"
-                      disabled={isPayingMaint}
-                      onClick={() => {
-                        setMaintPaymentChannel(ch.id);
-                        setIsMaintPaymentModalOpen(true);
-                      }}
-                      className="min-h-[48px] p-3 rounded-xl border border-[#116329] bg-[#161B22] hover:bg-[#0D3822] text-left transition active:scale-95"
+                <div className="space-y-2.5">
+                  {services.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`rounded-xl border p-3.5 grid grid-cols-1 md:grid-cols-[auto_1fr_auto_auto] items-center gap-3 transition ${
+                        item.active
+                          ? 'border-[#30363D] bg-[#0D1117]'
+                          : 'border-[#21262D] bg-[#0D1117] opacity-60'
+                      }`}
                     >
-                      <p className="font-bold text-[#3FB950]">{ch.label}</p>
-                      <p className="text-[10px] text-[#8B949E] mt-0.5">{ch.detail}</p>
-                      <span className="text-[10px] text-[#D29922] font-bold block mt-1.5">
-                        Pay {regionConfig.symbol}{currentSalon.maint.toLocaleString()} →
-                      </span>
-                    </button>
+                      <label className="inline-flex items-center gap-2 cursor-pointer min-h-[48px]">
+                        <input
+                          type="checkbox"
+                          checked={item.active}
+                          onChange={() => handleToggleService(item.id)}
+                          className="size-4 accent-[#06B6D4] rounded shrink-0"
+                        />
+                        <span className="text-xs font-mono text-[#8B949E] md:hidden">Active</span>
+                      </label>
+
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => handleUpdateServiceName(item.id, e.target.value)}
+                        className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                      />
+
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          min={5}
+                          value={item.durationMins}
+                          onChange={(e) =>
+                            handleUpdateServiceDuration(item.id, parseInt(e.target.value, 10) || 15)
+                          }
+                          className="w-20 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 py-2 text-sm font-mono text-[#06B6D4] focus:outline-none focus:border-[#06B6D4]"
+                        />
+                        <span className="text-xs font-mono text-[#8B949E] shrink-0">min</span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-mono text-[#8B949E] shrink-0">
+                          {regionConfig.currency}
+                        </span>
+                        <input
+                          type="number"
+                          value={item.price}
+                          onChange={(e) =>
+                            handleUpdatePrice(item.id, parseInt(e.target.value, 10) || 0)
+                          }
+                          className="w-28 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono font-bold text-[#D29922] focus:outline-none focus:border-[#06B6D4]"
+                        />
+                      </div>
+                    </div>
                   ))}
                 </div>
-              )}
-            </div>
-          </div>
-        </PortalCard>
-      )}
+              </div>
+            </PortalCard>
+          )}
 
-      {/* ========================================================================= */}
-      {/* 9. TAB 6: SALON SETTINGS · 4 WHATSAPP CONCIERGE & RETENTION MODULES       */}
-      {/* ========================================================================= */}
-      {activeTab === 'SETTINGS' && (
-        <SalonRetentionSettingsPanel
-          salonId={currentSalon.id}
-          salonName={currentSalon.name}
-          ownerName={currentSalon.owner}
-          salonPhone={currentSalon.phone}
-          conciergeState={conciergeState}
-          onStateUpdated={(next) => setConciergeState(next)}
-          onShowToast={(msg) => {
-            setMaintToast(msg);
-            setTimeout(() => setMaintToast(null), 5000);
-          }}
-        />
+          {/* 3. SALON HOURS (Editable Opening/Closing Days & Times) */}
+          {manageSubSection === 'HOURS' && (
+            <PortalCard
+              title="Salon Hours"
+              kicker="OPENING & CLOSING SCHEDULE · FRIDAY JUMMAH BREAK"
+            >
+              <form onSubmit={handleSaveSalonHours} className="space-y-4">
+                <p className="text-xs text-[#8B949E] font-sans">
+                  Configure your weekly opening and closing times. The WhatsApp concierge automatically quotes these hours to customers asking when you are open.
+                </p>
+
+                {/* Monday - Thursday */}
+                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-[#F0F6FC]">Monday – Thursday</span>
+                    <label className="inline-flex items-center gap-2 text-xs font-mono text-[#8B949E] cursor-pointer min-h-[48px]">
+                      <input
+                        type="checkbox"
+                        checked={!salonHours.monThuClosed}
+                        onChange={(e) =>
+                          setSalonHours((prev) => ({ ...prev, monThuClosed: !e.target.checked }))
+                        }
+                        className="size-4 accent-[#06B6D4]"
+                      />
+                      <span>{salonHours.monThuClosed ? 'Closed' : 'Open'}</span>
+                    </label>
+                  </div>
+                  {!salonHours.monThuClosed && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] font-mono text-[#8B949E]">Opening Time</span>
+                        <input
+                          type="text"
+                          value={salonHours.monThuOpen}
+                          onChange={(e) =>
+                            setSalonHours((prev) => ({ ...prev, monThuOpen: e.target.value }))
+                          }
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                        />
+                      </label>
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] font-mono text-[#8B949E]">Closing Time</span>
+                        <input
+                          type="text"
+                          value={salonHours.monThuClose}
+                          onChange={(e) =>
+                            setSalonHours((prev) => ({ ...prev, monThuClose: e.target.value }))
+                          }
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                {/* Friday */}
+                <div className="rounded-xl border border-[#9E6A03] bg-[#0D1117] p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-[#D29922]">Friday (Jummah Schedule)</span>
+                    <label className="inline-flex items-center gap-2 text-xs font-mono text-[#8B949E] cursor-pointer min-h-[48px]">
+                      <input
+                        type="checkbox"
+                        checked={!salonHours.fridayClosed}
+                        onChange={(e) =>
+                          setSalonHours((prev) => ({ ...prev, fridayClosed: !e.target.checked }))
+                        }
+                        className="size-4 accent-[#D29922]"
+                      />
+                      <span>{salonHours.fridayClosed ? 'Closed' : 'Open'}</span>
+                    </label>
+                  </div>
+                  {!salonHours.fridayClosed && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] font-mono text-[#8B949E]">Open</span>
+                        <input
+                          type="text"
+                          value={salonHours.fridayOpen}
+                          onChange={(e) =>
+                            setSalonHours((prev) => ({ ...prev, fridayOpen: e.target.value }))
+                          }
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                        />
+                      </label>
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] font-mono text-[#8B949E]">Close</span>
+                        <input
+                          type="text"
+                          value={salonHours.fridayClose}
+                          onChange={(e) =>
+                            setSalonHours((prev) => ({ ...prev, fridayClose: e.target.value }))
+                          }
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                        />
+                      </label>
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] font-mono text-[#D29922]">Prayer Break Start</span>
+                        <input
+                          type="text"
+                          value={salonHours.fridayBreakStart}
+                          onChange={(e) =>
+                            setSalonHours((prev) => ({
+                              ...prev,
+                              fridayBreakStart: e.target.value,
+                            }))
+                          }
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#D29922]"
+                        />
+                      </label>
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] font-mono text-[#D29922]">Prayer Break End</span>
+                        <input
+                          type="text"
+                          value={salonHours.fridayBreakEnd}
+                          onChange={(e) =>
+                            setSalonHours((prev) => ({
+                              ...prev,
+                              fridayBreakEnd: e.target.value,
+                            }))
+                          }
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#D29922]"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                {/* Saturday & Sunday */}
+                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-[#F0F6FC]">Saturday &amp; Sunday</span>
+                    <label className="inline-flex items-center gap-2 text-xs font-mono text-[#8B949E] cursor-pointer min-h-[48px]">
+                      <input
+                        type="checkbox"
+                        checked={!salonHours.satSunClosed}
+                        onChange={(e) =>
+                          setSalonHours((prev) => ({ ...prev, satSunClosed: !e.target.checked }))
+                        }
+                        className="size-4 accent-[#3FB950]"
+                      />
+                      <span>{salonHours.satSunClosed ? 'Closed' : 'Open'}</span>
+                    </label>
+                  </div>
+                  {!salonHours.satSunClosed && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] font-mono text-[#8B949E]">Opening Time</span>
+                        <input
+                          type="text"
+                          value={salonHours.satSunOpen}
+                          onChange={(e) =>
+                            setSalonHours((prev) => ({ ...prev, satSunOpen: e.target.value }))
+                          }
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                        />
+                      </label>
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] font-mono text-[#8B949E]">Closing Time</span>
+                        <input
+                          type="text"
+                          value={salonHours.satSunClose}
+                          onChange={(e) =>
+                            setSalonHours((prev) => ({ ...prev, satSunClose: e.target.value }))
+                          }
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-6 py-2.5 text-xs font-mono font-black uppercase transition flex items-center gap-2"
+                  >
+                    <Save className="size-4" />
+                    <span>Save Salon Hours</span>
+                  </button>
+                </div>
+              </form>
+            </PortalCard>
+          )}
+
+          {/* 4. AUTOMATION & REWARDS (Birthday %, 30-day Win-Back, Google Review URL, Regional Language Preview) */}
+          {manageSubSection === 'AUTOMATION' && (
+            <div className="space-y-4">
+              <SalonRetentionSettingsPanel
+                salonId={currentSalon.id}
+                salonName={currentSalon.name}
+                ownerName={currentSalon.owner}
+                salonPhone={currentSalon.phone}
+                conciergeState={conciergeState}
+                onStateUpdated={(next) => setConciergeState(next)}
+                onShowToast={(msg) => {
+                  setMaintToast(msg);
+                  setTimeout(() => setMaintToast(null), 5000);
+                }}
+              />
+
+              {/* Collapsible Plan, Billing & Video Broadcast Drawer inside Manage */}
+              <div className="rounded-2xl border border-[#30363D] bg-[#161B22] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowManageAdvancedTools(!showManageAdvancedTools)}
+                  className="w-full min-h-[48px] px-4 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-[#21262D]/50 transition"
+                >
+                  <div>
+                    <span className="text-xs font-mono font-bold uppercase text-[#D29922] block">
+                      Plan Upgrades, 10% Maintenance &amp; Video Deals
+                    </span>
+                    <span className="text-[11px] font-sans text-[#8B949E]">
+                      {currentSalon.plan} · {regionConfig.symbol}
+                      {currentSalon.maint.toLocaleString()}/mo (Due 5th)
+                    </span>
+                  </div>
+                  {showManageAdvancedTools ? (
+                    <ChevronUp className="size-4 text-[#8B949E] shrink-0" />
+                  ) : (
+                    <ChevronDown className="size-4 text-[#8B949E] shrink-0" />
+                  )}
+                </button>
+
+                {showManageAdvancedTools && (
+                  <div className="p-4 pt-2 border-t border-[#30363D] space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5">
+                      <div>
+                        <p className="text-xs font-mono font-bold text-[#F0F6FC]">
+                          Owner Voice Language ({ownerLang.toUpperCase()}) · Plan: {currentSalon.plan}
+                        </p>
+                        <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">
+                          Maintenance Status: {isMaintPaid ? `Paid (${maintTid})` : 'Payment Due'}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={ownerLang}
+                          onChange={(e) => setOwnerLang(e.target.value as VoiceLang)}
+                          className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#F0F6FC]"
+                        >
+                          <option value="ur">Owner Voice: Urdu</option>
+                          <option value="en">Owner Voice: English</option>
+                          <option value="ar">Owner Voice: Arabic</option>
+                        </select>
+                        {higherPackages.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedUpgradeTargetId(higherPackages[0].id);
+                              setIsUpgradeModalOpen(true);
+                            }}
+                            className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 text-xs font-mono font-bold uppercase transition"
+                          >
+                            Upgrade Plan
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <BroadcastTab
+                      salon={activeSalonProfile}
+                      contacts={salonContacts}
+                      ownerLang={ownerLang}
+                      onShowToast={(msg) => {
+                        setMaintToast(msg);
+                        setTimeout(() => setMaintToast(null), 6000);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 5. WINDOW QR POSTER (Print / Download PDF) */}
+          {manageSubSection === 'POSTER' && (
+            <PortalCard
+              title="Window QR Poster"
+              kicker="PRINTABLE DOOR POSTER & CABIN PAMPHLET (PDF)"
+            >
+              <SalonWindowPosterPdf
+                salonName={currentSalon.name}
+                salonCategory={
+                  currentSalon.name.toLowerCase().includes('beauty') ||
+                  currentSalon.name.toLowerCase().includes('parlor') ||
+                  currentSalon.name.toLowerCase().includes('ladies')
+                    ? 'LADIES'
+                    : 'MENS'
+                }
+                whatsappNumber={currentSalon.phone}
+                location={currentSalon.location}
+                initialLanguage={ownerLang}
+                onDownloaded={(fileName) => {
+                  setMaintToast(`✓ Downloaded Printable PDF: ${fileName}`);
+                  setTimeout(() => setMaintToast(null), 5000);
+                }}
+              />
+            </PortalCard>
+          )}
+        </div>
       )}
 
       {/* ========================================================================= */}
@@ -5040,9 +3989,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
+            <div className="space-y-3 text-sm">
               <div>
-                <label className="block text-[11px] font-mono text-[#8B949E] mb-1">
+                <label className="block text-xs font-mono text-[#8B949E] mb-1">
                   Client Name / Label:
                 </label>
                 <input
@@ -5050,30 +3999,30 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   value={walkInName}
                   onChange={(e) => setWalkInName(e.target.value)}
                   placeholder="e.g. Walk-in Guest, Usman, Bilal"
-                  className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-mono text-[#8B949E] mb-1">
+                  <label className="block text-xs font-mono text-[#8B949E] mb-1">
                     Assign Barber / Stylist:
                   </label>
                   <select
-                    value={walkInBarber}
+                    value={barbersList.includes(walkInBarber) ? walkInBarber : barbersList[0] || ''}
                     onChange={(e) => setWalkInBarber(e.target.value)}
-                    className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
                   >
                     {barbersList.map((b) => (
                       <option key={b} value={b}>
-                        {b}
+                        {b} {barberChairs[b] ? `(${barberChairs[b]})` : ''}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-mono text-[#8B949E] mb-1">
+                  <label className="block text-xs font-mono text-[#8B949E] mb-1">
                     Phone (Optional for WhatsApp Ticket):
                   </label>
                   <input
@@ -5087,7 +4036,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-mono text-[#8B949E] mb-1">
+                <label className="block text-xs font-mono text-[#8B949E] mb-1">
                   Client Birth Date (Day/Month, Optional for 9:00 AM Birthday Offer):
                 </label>
                 <input
@@ -5100,7 +4049,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-mono text-[#8B949E] mb-1">
+                <label className="block text-xs font-mono text-[#8B949E] mb-1">
                   Select Primary Service:
                 </label>
                 <select
@@ -5110,27 +4059,27 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     const matchedSvc = services.find((s) => s.name === e.target.value);
                     if (matchedSvc) setWalkInPrice(matchedSvc.price);
                   }}
-                  className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
                 >
                   {services
                     .filter((s) => s.active)
                     .map((s) => (
                       <option key={s.id} value={s.name}>
-                        {s.name} — {regionConfig.symbol}{s.price.toLocaleString()}
+                        {s.name} ({s.durationMins} min) — {regionConfig.symbol}{s.price.toLocaleString()}
                       </option>
                     ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-[11px] font-mono text-[#8B949E] mb-1">
+                <label className="block text-xs font-mono text-[#8B949E] mb-1">
                   Custom Final Price ({regionConfig.currency}):
                 </label>
                 <input
                   type="number"
                   value={walkInPrice}
                   onChange={(e) => setWalkInPrice(Number(e.target.value) || 0)}
-                  className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-[#D29922] font-mono font-bold focus:outline-none focus:border-[#06B6D4]"
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#D29922] font-mono font-bold focus:outline-none focus:border-[#06B6D4]"
                 />
               </div>
 
@@ -5139,7 +4088,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   <Scissors className="size-4 text-[#D29922]" />
                   <div>
                     <p className="text-xs font-bold text-[#F0F6FC]">Seat Immediately in Chair?</p>
-                    <p className="text-[10px] text-[#8B949E]">Skip waiting queue and begin cutting now</p>
+                    <p className="text-[11px] text-[#8B949E]">Skip waiting queue and begin cutting now</p>
                   </div>
                 </div>
                 <input
@@ -5150,7 +4099,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 />
               </div>
 
-              <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-2.5 text-[11px] font-mono text-[#3FB950] flex items-center gap-2">
+              <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-2.5 text-xs font-mono text-[#3FB950] flex items-center gap-2">
                 <Volume2 className="size-3.5 shrink-0" />
                 <span>
                   Audio will speak aloud: "{walkInBarber} Bhai! Naya walk-in customer {walkInName || 'Guest'} chair par baith gaya hai."
@@ -5162,14 +4111,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               <button
                 type="button"
                 onClick={() => setIsWalkInModalOpen(false)}
-                className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 py-2 text-xs font-mono text-[#8B949E] hover:text-[#F0F6FC]"
+                className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 py-2 text-xs font-mono text-[#8B949E] hover:text-[#F0F6FC]"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveWalkIn}
-                className="min-h-[44px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 py-2 text-xs font-mono font-bold uppercase transition active:scale-95 flex items-center gap-2 shadow-lg"
+                className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 py-2 text-xs font-mono font-bold uppercase transition active:scale-95 flex items-center gap-2"
               >
                 <Check className="size-4" />
                 <span>Confirm Walk-In &amp; Speak Aloud →</span>
@@ -5591,20 +4540,35 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-2.5 text-xs font-mono">
               <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#161B22] border border-[#30363D]">
                 <span className="text-[#F0F6FC] font-bold">Monday – Thursday:</span>
-                <span className="text-[#06B6D4]">11:00 AM – 11:00 PM</span>
+                <span className="text-[#06B6D4]">
+                  {salonHours.monThuClosed
+                    ? 'Closed'
+                    : `${salonHours.monThuOpen} – ${salonHours.monThuClose}`}
+                </span>
               </div>
               <div className="flex flex-col p-2.5 rounded-xl bg-[#3B2E0B]/30 border border-[#9E6A03] space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="text-[#D29922] font-bold">Friday (Jummah Schedule):</span>
-                  <span className="text-[#D29922]">11:00 AM – 11:30 PM</span>
+                  <span className="text-[#D29922]">
+                    {salonHours.fridayClosed
+                      ? 'Closed'
+                      : `${salonHours.fridayOpen} – ${salonHours.fridayClose}`}
+                  </span>
                 </div>
-                <span className="text-[10px] text-[#F85149] font-sans">
-                  ⚠️ Friday Prayer Break: Closed 1:00 PM – 2:30 PM
-                </span>
+                {!salonHours.fridayClosed && (
+                  <span className="text-[10px] text-[#F85149] font-sans">
+                    ⚠️ Friday Prayer Break: Closed {salonHours.fridayBreakStart} –{' '}
+                    {salonHours.fridayBreakEnd}
+                  </span>
+                )}
               </div>
               <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#161B22] border border-[#30363D]">
                 <span className="text-[#F0F6FC] font-bold">Saturday &amp; Sunday:</span>
-                <span className="text-[#3FB950]">10:30 AM – 11:30 PM</span>
+                <span className="text-[#3FB950]">
+                  {salonHours.satSunClosed
+                    ? 'Closed'
+                    : `${salonHours.satSunOpen} – ${salonHours.satSunClose}`}
+                </span>
               </div>
             </div>
 

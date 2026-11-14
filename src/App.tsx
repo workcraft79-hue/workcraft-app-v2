@@ -20,6 +20,7 @@ import {
   Globe,
   ChevronDown,
   Megaphone,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 import { TabName } from './types/workcraft';
@@ -55,6 +56,7 @@ export default function App() {
 
   // Founder Command Center Workspace Navigation
   const [activeTab, setActiveTab] = useState<TabName>('Overview');
+  const [salonOwnerSection, setSalonOwnerSection] = useState<'LIVE' | 'MANAGE'>('LIVE');
 
   // Query 1: Detect WhatsApp direct remote agent enrollment link (/enroll or ?id=...&pin=...)
   const [initialEnrollAgentData, setInitialEnrollAgentData] = useState<{
@@ -401,31 +403,61 @@ export default function App() {
 
           {/* Main Nav Items */}
           <nav className="mt-3 flex flex-col gap-1.5" aria-label="Main navigation">
-            {navItems.map(([name, Icon]) => {
-              const isActive = activeTab === name;
-              return (
-                <button
-                  key={name}
-                  onClick={() => handleTabChange(name)}
-                  className={`flex min-h-[48px] items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-[12px] font-mono transition ${
-                    isActive
-                      ? 'bg-[#21262D] text-[#F0F6FC] border border-[#06B6D4]/50 font-bold'
-                      : 'text-[#8B949E] hover:bg-[#21262D]/60 hover:text-[#F0F6FC] border border-transparent'
-                  }`}
-                >
-                  <Icon className={`size-[17px] shrink-0 ${isActive ? 'text-[#06B6D4]' : 'text-[#D29922]'}`} />
-                  <span>{name}</span>
-                  {name === 'Voice' && (
-                    <span className="ml-auto rounded-full bg-[#06B6D4]/15 border border-[#06B6D4]/40 px-2 py-0.5 text-[9px] font-bold text-cyan-400">
-                      2 unread
-                    </span>
-                  )}
-                  {name === 'Revenue' && (
-                    <span className="ml-auto size-2 rounded-full bg-[#D29922]" />
-                  )}
-                </button>
-              );
-            })}
+            {activeRole === 'SALON_OWNER' && hasCompletedSalonOnboarding ? (
+              <>
+                {[
+                  { id: 'LIVE' as const, label: 'Live Floor', Icon: Scissors },
+                  { id: 'MANAGE' as const, label: 'Manage', Icon: SlidersHorizontal },
+                ].map(({ id, label, Icon }) => {
+                  const isActive = salonOwnerSection === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab('Salon Owner Dashboard');
+                        setSalonOwnerSection(id);
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`flex min-h-[48px] items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-[12px] font-mono transition ${
+                        isActive
+                          ? 'bg-[#21262D] text-[#F0F6FC] border border-[#06B6D4]/50 font-bold'
+                          : 'text-[#8B949E] hover:bg-[#21262D]/60 hover:text-[#F0F6FC] border border-transparent'
+                      }`}
+                    >
+                      <Icon className={`size-[17px] shrink-0 ${isActive ? 'text-[#06B6D4]' : 'text-[#D29922]'}`} />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </>
+            ) : (
+              navItems.map(([name, Icon]) => {
+                const isActive = activeTab === name;
+                return (
+                  <button
+                    key={name}
+                    onClick={() => handleTabChange(name)}
+                    className={`flex min-h-[48px] items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-[12px] font-mono transition ${
+                      isActive
+                        ? 'bg-[#21262D] text-[#F0F6FC] border border-[#06B6D4]/50 font-bold'
+                        : 'text-[#8B949E] hover:bg-[#21262D]/60 hover:text-[#F0F6FC] border border-transparent'
+                    }`}
+                  >
+                    <Icon className={`size-[17px] shrink-0 ${isActive ? 'text-[#06B6D4]' : 'text-[#D29922]'}`} />
+                    <span>{name}</span>
+                    {name === 'Voice' && (
+                      <span className="ml-auto rounded-full bg-[#06B6D4]/15 border border-[#06B6D4]/40 px-2 py-0.5 text-[9px] font-bold text-cyan-400">
+                        2 unread
+                      </span>
+                    )}
+                    {name === 'Revenue' && (
+                      <span className="ml-auto size-2 rounded-full bg-[#D29922]" />
+                    )}
+                  </button>
+                );
+              })
+            )}
           </nav>
 
           {/* Plain-English System Line Status (Query 5: Green Healthy vs Red Issue) */}
@@ -676,110 +708,112 @@ export default function App() {
 
           {/* Body Content Container */}
           <div className="mx-auto max-w-[1440px] w-full p-4 sm:p-7 pb-28 lg:pb-10 flex-1 overflow-x-hidden">
-            {/* View Mode Header & Status Bar */}
-            <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
-              <div>
-                {/* QUERY 5: GREEN HEALTHY vs RED ISSUE WHATSAPP HEALTH BOX + QUERY 2 COUNTRY PAUSE PILLS */}
-                <div className="flex flex-wrap items-center gap-2 mb-2 font-mono">
-                  <div
-                    className={`inline-flex items-center gap-2.5 rounded-xl border px-3.5 py-2 text-xs font-mono font-bold transition ${
-                      whatsAppHealth === 'ISSUE'
-                        ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149]'
-                        : 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
-                    }`}
-                  >
-                    <span className="relative flex size-2.5 shrink-0">
-                      <span
-                        className={`absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping ${
-                          whatsAppHealth === 'ISSUE' ? 'bg-[#F85149]' : 'bg-[#3FB950]'
-                        }`}
-                      />
-                      <span
-                        className={`relative inline-flex rounded-full size-2.5 ${
-                          whatsAppHealth === 'ISSUE'
-                            ? 'bg-[#F85149]'
-                            : 'bg-[#3FB950]'
-                        }`}
-                      />
-                    </span>
-                    <span>
-                      {whatsAppHealth === 'ISSUE'
-                        ? 'WhatsApp Line Issue: Disconnected / Blocked'
-                        : 'WhatsApp Line: Connected & Healthy'}
-                    </span>
-                  </div>
-
-                  {activeRole === 'FOUNDER' && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setWhatsAppHealth((prev) => (prev === 'HEALTHY' ? 'ISSUE' : 'HEALTHY'))
-                      }
-                      className="min-h-[40px] rounded-xl border border-[#30363D] bg-[#161B22] hover:bg-[#21262D] px-3 py-1.5 text-[10px] text-[#8B949E] hover:text-[#F0F6FC] transition"
-                      title="Preview Green Healthy vs Red Issue alert state"
+            {/* View Mode Header & Status Bar (Kept compact for onboarded Salon Owners so Top Status Strip leads immediately) */}
+            {!(activeRole === 'SALON_OWNER' && hasCompletedSalonOnboarding) && (
+              <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div>
+                  {/* QUERY 5: GREEN HEALTHY vs RED ISSUE WHATSAPP HEALTH BOX + QUERY 2 COUNTRY PAUSE PILLS */}
+                  <div className="flex flex-wrap items-center gap-2 mb-2 font-mono">
+                    <div
+                      className={`inline-flex items-center gap-2.5 rounded-xl border px-3.5 py-2 text-xs font-mono font-bold transition ${
+                        whatsAppHealth === 'ISSUE'
+                          ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149]'
+                          : 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
+                      }`}
                     >
-                      {whatsAppHealth === 'HEALTHY' ? 'Test Red Issue' : 'Restore Green Healthy'}
-                    </button>
-                  )}
-
-                  {isGlobalPaused && (
-                    <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3 py-1.5 text-[11px] font-bold text-[#D29922]">
-                      <Pause className="size-3" />
-                      <span>All Countries Paused</span>
-                    </div>
-                  )}
-
-                  {!isGlobalPaused && activePausedCountryList.length > 0 && (
-                    <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3 py-1.5 text-[11px] font-bold text-[#D29922] max-w-full overflow-hidden">
-                      <span className="break-words [overflow-wrap:break-word]">
-                        Paused: {activePausedCountryList.map((c) => `${c.flag} ${c.label}`).join(', ')} (Others Active)
+                      <span className="relative flex size-2.5 shrink-0">
+                        <span
+                          className={`absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping ${
+                            whatsAppHealth === 'ISSUE' ? 'bg-[#F85149]' : 'bg-[#3FB950]'
+                          }`}
+                        />
+                        <span
+                          className={`relative inline-flex rounded-full size-2.5 ${
+                            whatsAppHealth === 'ISSUE'
+                              ? 'bg-[#F85149]'
+                              : 'bg-[#3FB950]'
+                          }`}
+                        />
+                      </span>
+                      <span>
+                        {whatsAppHealth === 'ISSUE'
+                          ? 'WhatsApp Line Issue: Disconnected / Blocked'
+                          : 'WhatsApp Line: Connected & Healthy'}
                       </span>
                     </div>
-                  )}
+
+                    {activeRole === 'FOUNDER' && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setWhatsAppHealth((prev) => (prev === 'HEALTHY' ? 'ISSUE' : 'HEALTHY'))
+                        }
+                        className="min-h-[40px] rounded-xl border border-[#30363D] bg-[#161B22] hover:bg-[#21262D] px-3 py-1.5 text-[10px] text-[#8B949E] hover:text-[#F0F6FC] transition"
+                        title="Preview Green Healthy vs Red Issue alert state"
+                      >
+                        {whatsAppHealth === 'HEALTHY' ? 'Test Red Issue' : 'Restore Green Healthy'}
+                      </button>
+                    )}
+
+                    {isGlobalPaused && (
+                      <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3 py-1.5 text-[11px] font-bold text-[#D29922]">
+                        <Pause className="size-3" />
+                        <span>All Countries Paused</span>
+                      </div>
+                    )}
+
+                    {!isGlobalPaused && activePausedCountryList.length > 0 && (
+                      <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3 py-1.5 text-[11px] font-bold text-[#D29922] max-w-full overflow-hidden">
+                        <span className="break-words [overflow-wrap:break-word]">
+                          Paused: {activePausedCountryList.map((c) => `${c.flag} ${c.label}`).join(', ')} (Others Active)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <h2 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl text-[#F0F6FC]">
+                    {activeTab === 'Agent Hub / Onboarding'
+                      ? 'Field Agent Command Hub'
+                      : activeTab === 'Salon Owner Dashboard'
+                      ? activeRole === 'FOUNDER'
+                        ? 'Salon Health & Package View'
+                        : 'Salon Owner Dashboard'
+                      : activeTab === 'Marketing'
+                      ? 'Founder Marketing & Social Campaigns'
+                      : activeTab === 'Overview'
+                      ? 'Founder Daily Overview'
+                      : activeTab}
+                  </h2>
+                  <p className="mt-1 text-sm text-[#8B949E] font-sans">
+                    {activeTab === 'Agent Hub / Onboarding'
+                      ? 'Manage field agents by country, track agent commissions, and repair salon connections.'
+                      : activeTab === 'Salon Owner Dashboard'
+                      ? activeRole === 'FOUNDER'
+                        ? 'Read-only view of each salon package, 5th-of-month payment status, and onboarding language.'
+                        : 'Complete setup steps to activate your live WhatsApp salon portal.'
+                      : activeTab === 'Marketing'
+                      ? 'Broadcast new features to all registered salons and share social signup ad links.'
+                      : activeTab === 'Voice'
+                      ? 'Listen to salon owner voice messages and reply automatically in their language.'
+                      : activeTab === 'Settings'
+                      ? 'All system protections run automatically and report directly to your Founder WhatsApp number.'
+                      : 'Your daily business snapshot: online salons, pending dues, agent cash, and unread voice messages.'}
+                  </p>
                 </div>
 
-                <h2 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl text-[#F0F6FC]">
-                  {activeTab === 'Agent Hub / Onboarding'
-                    ? 'Field Agent Command Hub'
-                    : activeTab === 'Salon Owner Dashboard'
-                    ? activeRole === 'FOUNDER'
-                      ? 'Salon Health & Package View'
-                      : 'Salon Owner Dashboard'
-                    : activeTab === 'Marketing'
-                    ? 'Founder Marketing & Social Campaigns'
-                    : activeTab === 'Overview'
-                    ? 'Founder Daily Overview'
-                    : activeTab}
-                </h2>
-                <p className="mt-1 text-sm text-[#8B949E] font-sans">
-                  {activeTab === 'Agent Hub / Onboarding'
-                    ? 'Manage field agents by country, track agent commissions, and repair salon connections.'
-                    : activeTab === 'Salon Owner Dashboard'
-                    ? activeRole === 'FOUNDER'
-                      ? 'Read-only view of each salon package, 5th-of-month payment status, and onboarding language.'
-                      : 'Live queue, hands-free voice alerts, rate editor, upgrades, video deals, and window poster PDF.'
-                    : activeTab === 'Marketing'
-                    ? 'Broadcast new features to all registered salons and share social signup ad links.'
-                    : activeTab === 'Voice'
-                    ? 'Listen to salon owner voice messages and reply automatically in their language.'
-                    : activeTab === 'Settings'
-                    ? 'All system protections run automatically and report directly to your Founder WhatsApp number.'
-                    : 'Your daily business snapshot: online salons, pending dues, agent cash, and unread voice messages.'}
-                </p>
+                {activeTab === 'Overview' && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIsReportModalOpen(true)}
+                      className="min-h-[48px] items-center gap-2 rounded-xl bg-[#06B6D4] px-5 py-2.5 text-xs font-mono font-bold text-[#0D1117] uppercase flex hover:bg-[#22D3EE] transition active:scale-95"
+                    >
+                      <span>View reports</span>
+                      <ArrowRight className="size-4" />
+                    </button>
+                  </div>
+                )}
               </div>
-
-              {activeTab === 'Overview' && (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setIsReportModalOpen(true)}
-                    className="min-h-[48px] items-center gap-2 rounded-xl bg-[#06B6D4] px-5 py-2.5 text-xs font-mono font-bold text-[#0D1117] uppercase flex hover:bg-[#22D3EE] transition active:scale-95"
-                  >
-                    <span>View reports</span>
-                    <ArrowRight className="size-4" />
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
 
             {/* Dynamic Unified Content Wrapped in Silent Auto-Recovery Error Boundaries */}
             {activeTab === 'Agent Hub / Onboarding' ? (
@@ -823,6 +857,8 @@ export default function App() {
                     salonCategory={completedOnboardingData?.salonCategory}
                     onboardedData={completedOnboardingData}
                     isFounderInspector={activeRole === 'FOUNDER'}
+                    sectionMode={salonOwnerSection}
+                    onSectionModeChange={setSalonOwnerSection}
                     onClose={activeRole === 'FOUNDER' ? () => handleTabChange('Overview') : undefined}
                   />
                 )}
@@ -869,23 +905,58 @@ export default function App() {
         className="fixed inset-x-3 bottom-3 z-40 flex items-center justify-around rounded-2xl border border-[#30363D] bg-[#161B22]/95 p-1.5 backdrop-blur-md lg:hidden"
         aria-label="Quick navigation"
       >
-        {mobileNavItems.map(([name, Icon, label]) => {
-          const isActive = activeTab === name;
-          return (
+        {activeRole === 'SALON_OWNER' && hasCompletedSalonOnboarding ? (
+          <>
             <button
-              key={name}
-              onClick={() => handleTabChange(name)}
-              className={`flex min-h-[48px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[9px] font-mono font-bold transition ${
-                isActive
+              type="button"
+              onClick={() => {
+                setActiveTab('Salon Owner Dashboard');
+                setSalonOwnerSection('LIVE');
+              }}
+              className={`flex min-h-[48px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-[10px] font-mono font-bold transition ${
+                salonOwnerSection === 'LIVE'
                   ? 'text-[#06B6D4] bg-[#21262D]'
                   : 'text-[#8B949E] hover:text-[#F0F6FC]'
               }`}
             >
-              <Icon className="size-4" />
-              <span>{label}</span>
+              <Scissors className="size-4" />
+              <span>Live Floor</span>
             </button>
-          );
-        })}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('Salon Owner Dashboard');
+                setSalonOwnerSection('MANAGE');
+              }}
+              className={`flex min-h-[48px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-[10px] font-mono font-bold transition ${
+                salonOwnerSection === 'MANAGE'
+                  ? 'text-[#06B6D4] bg-[#21262D]'
+                  : 'text-[#8B949E] hover:text-[#F0F6FC]'
+              }`}
+            >
+              <SlidersHorizontal className="size-4" />
+              <span>Manage</span>
+            </button>
+          </>
+        ) : (
+          mobileNavItems.map(([name, Icon, label]) => {
+            const isActive = activeTab === name;
+            return (
+              <button
+                key={name}
+                onClick={() => handleTabChange(name)}
+                className={`flex min-h-[48px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[9px] font-mono font-bold transition ${
+                  isActive
+                    ? 'text-[#06B6D4] bg-[#21262D]'
+                    : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                }`}
+              >
+                <Icon className="size-4" />
+                <span>{label}</span>
+              </button>
+            );
+          })
+        )}
       </nav>
 
       {/* Global / Country Broadcast Pause Alert */}
