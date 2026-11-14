@@ -4,17 +4,40 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
+  addChairLock,
   completeAppointmentAndRecordVisit,
   getSalonConciergeState,
+  listSalonsForAgent,
   processWhatsAppWebhook,
+  removeChairLock,
   resolveOwnerAlert,
   runBirthdayCron,
   runPostServiceReviewCron,
   runWinBackCron,
+  setCounterSleepState,
   startConciergeSchedulers,
+  syncSalonBarbers,
   updateRetentionSettings,
   upsertClientProfile,
 } from './server/conciergeEngine';
+import {
+  AuthenticatedRequest,
+  clearSessionCookie,
+  createOtpChallenge,
+  createWebhookRateLimiter,
+  extractAuthUserFromRequest,
+  findUserById,
+  getDevTestAccounts,
+  registerSalonAssignment,
+  requireAuth,
+  requireRole,
+  requireSalonTenantAccess,
+  requireWebhookSecret,
+  sanitizePlainText,
+  setSessionCookie,
+  signSessionToken,
+  verifyOtpChallenge,
+} from './server/security';
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -207,11 +230,120 @@ function detectInputLanguage(text: string): 'en' | 'ur' | 'ar' {
 
 async function startServer() {
   const app = express();
-  app.use(express.json());
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '1mb' }));
 
-  app.post('/api/translate-service', async (req, res) => {
+  const webhookRateLimiter = createWebhookRateLimiter({
+    windowMs: 60_000,
+    maxPerPhone: 15,
+    maxPerIp: 60,
+  });
+
+  // ===========================================================================
+  // AUTHENTICATION & SESSION MANAGEMENT (JWT HttpOnly Cookie + OTP Flow)
+  // ===========================================================================
+  app.get('/api/auth/session', (req, res) => {
+    const user = extractAuthUserFromRequest(req);
+    if (!user) {
+      return res.json({ authenticated: false, user: null });
+    }
+    return res.json({ authenticated: true, user });
+  });
+
+  app.post('/api/auth/request-otp', (req, res) => {
+    const identifier = sanitizePlainText(req.body?.identifier, 120);
+    if (!identifier) {
+      return res.status(400).json({ error: 'Email or WhatsApp phone number is required.' });
+    }
+    const result = createOtpChallenge(identifier);
+    if (!result.ok) {
+      return res.status(404).json({ error: result.error });
+    }
+    return res.json({
+      ok: true,
+      maskedTarget: result.maskedTarget,
+      displayName: result.user.displayName,
+      userRole: result.user.userRole,
+      ...(result.devOtpPreview ? { devOtpPreview: result.devOtpPreview } : {}),
+    });
+  });
+
+  app.post('/api/auth/verify-otp', (req, res) => {
+    const identifier = sanitizePlainText(req.body?.identifier, 120);
+    const otp = sanitizePlainText(req.body?.otp, 12);
+    if (!identifier || !otp) {
+      return res.status(400).json({ error: 'Identifier and 6-digit OTP code are required.' });
+    }
+    const verified = verifyOtpChallenge(identifier, otp);
+    if (!verified.ok) {
+      return res.status(401).json({ error: verified.error });
+    }
+    const token = signSessionToken(verified.user);
+    setSessionCookie(res, token, req);
+    return res.json({ authenticated: true, user: verified.user });
+  });
+
+  app.post('/api/auth/logout', (_req, res) => {
+    clearSessionCookie(res);
+    return res.json({ ok: true });
+  });
+
+  // Strict Development-Only Quick Switch Test Account Endpoints
+  app.get('/api/auth/dev-accounts', (_req, res) => {
+    if (process.env.NODE_ENV !== 'development') {
+      return res.status(404).json({ error: 'Not found.' });
+    }
+    return res.json({ accounts: getDevTestAccounts() });
+  });
+
+  app.post('/api/auth/dev-login', (req, res) => {
+    if (process.env.NODE_ENV !== 'development') {
+      return res.status(403).json({ error: 'Dev account switching is disabled in production.' });
+    }
+    const userId = sanitizePlainText(req.body?.userId, 60);
+    const found = findUserById(userId);
+    if (!found) {
+      return res.status(404).json({ error: 'Test account not found.' });
+    }
+    const user = {
+      userId: found.userId,
+      userRole: found.userRole,
+      displayName: found.displayName,
+      email: found.email,
+      phone: found.phone,
+      salonId: found.salonId,
+      agentId: found.agentId,
+      salonName: found.salonName,
+    };
+    const token = signSessionToken(user);
+    setSessionCookie(res, token, req);
+    return res.json({ authenticated: true, user });
+  });
+
+  // Agent & Founder Scoped Salon Directory
+  app.get('/api/agent/salons', requireAuth, requireRole('FOUNDER', 'AGENT'), (req: AuthenticatedRequest, res) => {
+    const user = req.authUser!;
+    const salons = listSalonsForAgent(user.agentId, user.userRole === 'FOUNDER');
+    return res.json({ salons });
+  });
+
+  app.post('/api/agent/salons', requireAuth, requireRole('FOUNDER', 'AGENT'), (req: AuthenticatedRequest, res) => {
+    const user = req.authUser!;
+    const salonName = sanitizePlainText(req.body?.salonName, 100);
+    const ownerName = sanitizePlainText(req.body?.ownerName, 80);
+    const whatsappPhone = sanitizePlainText(req.body?.whatsappPhone, 24);
+    if (!salonName || !whatsappPhone) {
+      return res.status(400).json({ error: 'salonName and whatsappPhone are required.' });
+    }
+    const newId = `salon-${Date.now().toString(36)}`;
+    registerSalonAssignment(newId, user.agentId || 'agent-pk-1');
+    const state = getSalonConciergeState(newId, { salonName, ownerName, whatsappPhone });
+    return res.status(201).json({ salonId: newId, state });
+  });
+
+  app.post('/api/translate-service', requireAuth, async (req, res) => {
     try {
-      const rawText = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      const rawText = sanitizePlainText(req.body?.text, 180);
       const targetLang: 'ur' | 'ar' | 'en' =
         req.body?.targetLang === 'ur' || req.body?.targetLang === 'ar' || req.body?.targetLang === 'en'
           ? req.body.targetLang
@@ -295,13 +427,11 @@ async function startServer() {
     }
   });
 
-  app.post('/api/translate-voice', async (req, res) => {
+  app.post('/api/translate-voice', requireAuth, async (req, res) => {
     try {
-      const rawText = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      const rawText = sanitizePlainText(req.body?.text, 800);
       const targetDialect =
-        typeof req.body?.targetDialect === 'string' && req.body.targetDialect.trim()
-          ? req.body.targetDialect.trim()
-          : 'Roman Urdu (Lahori)';
+        sanitizePlainText(req.body?.targetDialect, 60) || 'Roman Urdu (Lahori)';
 
       if (!rawText) {
         return res.status(400).json({ error: 'Message text is required.' });
@@ -483,91 +613,115 @@ async function startServer() {
   });
 
   // ===========================================================================
-  // WHATSAPP CONCIERGE & RETENTION AUTOMATION ENDPOINTS (4 FINAL MODULES)
+  // WHATSAPP CONCIERGE & RETENTION AUTOMATION ENDPOINTS (TENANT-ISOLATED)
   // ===========================================================================
-  app.get('/api/salons/:salonId/concierge-state', (req, res) => {
-    try {
-      const { salonId } = req.params;
-      const salonName = typeof req.query.salonName === 'string' ? req.query.salonName : undefined;
-      const ownerName = typeof req.query.ownerName === 'string' ? req.query.ownerName : undefined;
-      const whatsappPhone = typeof req.query.whatsappPhone === 'string' ? req.query.whatsappPhone : undefined;
-      const state = getSalonConciergeState(salonId, { salonName, ownerName, whatsappPhone });
-      return res.json(state);
-    } catch (err) {
-      console.error('Failed to get concierge state:', err);
-      return res.status(500).json({ error: 'Failed to load concierge state.' });
-    }
-  });
-
-  app.put('/api/salons/:salonId/retention-settings', (req, res) => {
-    try {
-      const { salonId } = req.params;
-      const updated = updateRetentionSettings(salonId, req.body || {});
-      return res.json(updated);
-    } catch (err) {
-      console.error('Failed to save retention settings:', err);
-      return res.status(500).json({ error: 'Failed to save retention settings.' });
-    }
-  });
-
-  app.post('/api/salons/:salonId/clients', (req, res) => {
-    try {
-      const { salonId } = req.params;
-      const { phone, name, birthDate, preferredLanguage } = req.body || {};
-      if (!phone || typeof phone !== 'string') {
-        return res.status(400).json({ error: 'Client phone is required.' });
+  app.get(
+    '/api/salons/:salonId/concierge-state',
+    requireAuth,
+    requireSalonTenantAccess(true),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const salonName =
+          typeof req.query.salonName === 'string' ? sanitizePlainText(req.query.salonName, 100) : undefined;
+        const ownerName =
+          typeof req.query.ownerName === 'string' ? sanitizePlainText(req.query.ownerName, 80) : undefined;
+        const whatsappPhone =
+          typeof req.query.whatsappPhone === 'string' ? sanitizePlainText(req.query.whatsappPhone, 24) : undefined;
+        const state = getSalonConciergeState(salonId, { salonName, ownerName, whatsappPhone });
+        return res.json(state);
+      } catch (err) {
+        console.error('Failed to get concierge state:', err);
+        return res.status(500).json({ error: 'Failed to load concierge state.' });
       }
-      const client = upsertClientProfile(salonId, {
-        phone,
-        name,
-        birthDate,
-        preferredLanguage,
-      });
-      return res.json({ client, state: getSalonConciergeState(salonId) });
-    } catch (err) {
-      console.error('Failed to upsert client profile:', err);
-      return res.status(500).json({ error: 'Failed to save client profile.' });
     }
-  });
+  );
 
-  app.post('/api/salons/:salonId/appointments/complete', (req, res) => {
-    try {
-      const { salonId } = req.params;
-      const {
-        appointmentId,
-        clientName,
-        clientPhone,
-        barberName,
-        service,
-        price,
-        timeSlot,
-        birthDate,
-        preferredLanguage,
-      } = req.body || {};
-
-      if (!appointmentId || !clientPhone) {
-        return res.status(400).json({ error: 'appointmentId and clientPhone are required.' });
+  app.put(
+    '/api/salons/:salonId/retention-settings',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const updated = updateRetentionSettings(salonId, req.body || {});
+        return res.json(updated);
+      } catch (err) {
+        console.error('Failed to save retention settings:', err);
+        return res.status(500).json({ error: 'Failed to save retention settings.' });
       }
-
-      const result = completeAppointmentAndRecordVisit(salonId, {
-        appointmentId: String(appointmentId),
-        clientName: String(clientName || 'Salon Client'),
-        clientPhone: String(clientPhone),
-        barberName: String(barberName || 'Master Barber'),
-        service: String(service || 'Salon Service'),
-        price: Number(price || 0),
-        timeSlot: String(timeSlot || 'Completed'),
-        birthDate: typeof birthDate === 'string' ? birthDate : undefined,
-        preferredLanguage,
-      });
-      return res.json(result);
-    } catch (err) {
-      console.error('Failed to complete appointment:', err);
-      return res.status(500).json({ error: 'Failed to mark appointment completed.' });
     }
-  });
+  );
 
-  app.post('/api/whatsapp/webhook', (req, res) => {
+  app.post(
+    '/api/salons/:salonId/clients',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const { phone, name, birthDate, preferredLanguage } = req.body || {};
+        if (!phone || typeof phone !== 'string') {
+          return res.status(400).json({ error: 'Client phone is required.' });
+        }
+        const client = upsertClientProfile(salonId, {
+          phone,
+          name,
+          birthDate,
+          preferredLanguage,
+        });
+        return res.json({ client, state: getSalonConciergeState(salonId) });
+      } catch (err) {
+        console.error('Failed to upsert client profile:', err);
+        return res.status(500).json({ error: 'Failed to save client profile.' });
+      }
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/appointments/complete',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const {
+          appointmentId,
+          clientName,
+          clientPhone,
+          barberName,
+          service,
+          price,
+          timeSlot,
+          birthDate,
+          preferredLanguage,
+        } = req.body || {};
+
+        if (!appointmentId || !clientPhone) {
+          return res.status(400).json({ error: 'appointmentId and clientPhone are required.' });
+        }
+
+        const result = completeAppointmentAndRecordVisit(salonId, {
+          appointmentId: String(appointmentId),
+          clientName: String(clientName || 'Salon Client'),
+          clientPhone: String(clientPhone),
+          barberName: String(barberName || 'Master Barber'),
+          service: String(service || 'Salon Service'),
+          price: Number(price || 0),
+          timeSlot: String(timeSlot || 'Completed'),
+          birthDate: typeof birthDate === 'string' ? birthDate : undefined,
+          preferredLanguage,
+        });
+        return res.json(result);
+      } catch (err) {
+        console.error('Failed to complete appointment:', err);
+        return res.status(500).json({ error: 'Failed to mark appointment completed.' });
+      }
+    }
+  );
+
+  // External WhatsApp Gateway Webhook: Protected by x-workcraft-webhook-secret + Per-Number Rate Limiter
+  app.post('/api/whatsapp/webhook', requireWebhookSecret, webhookRateLimiter, (req, res) => {
     try {
       const { salonId, fromPhone, messageText, clientName, appointmentIdForReview, forceLanguagePrompt } =
         req.body || {};
@@ -575,12 +729,14 @@ async function startServer() {
         return res.status(400).json({ error: 'salonId, fromPhone, and messageText are required.' });
       }
       const outcome = processWhatsAppWebhook({
-        salonId: String(salonId),
-        fromPhone: String(fromPhone),
-        messageText,
-        clientName: typeof clientName === 'string' ? clientName : undefined,
+        salonId: sanitizePlainText(String(salonId), 60),
+        fromPhone: sanitizePlainText(String(fromPhone), 24),
+        messageText: sanitizePlainText(messageText, 500),
+        clientName: typeof clientName === 'string' ? sanitizePlainText(clientName, 80) : undefined,
         appointmentIdForReview:
-          typeof appointmentIdForReview === 'string' ? appointmentIdForReview : undefined,
+          typeof appointmentIdForReview === 'string'
+            ? sanitizePlainText(appointmentIdForReview, 60)
+            : undefined,
         forceLanguagePrompt: Boolean(forceLanguagePrompt),
       });
       return res.json(outcome);
@@ -590,9 +746,10 @@ async function startServer() {
     }
   });
 
-  app.post('/api/salons/:salonId/cron/run', (req, res) => {
+  // External Cron Trigger: Protected by x-workcraft-webhook-secret
+  app.post('/api/salons/:salonId/cron/run', requireWebhookSecret, (req, res) => {
     try {
-      const { salonId } = req.params;
+      const salonId = sanitizePlainText(req.params.salonId, 60);
       const { job, force, appointmentId } = req.body || {};
       const shouldForce = force !== false;
 
@@ -610,7 +767,7 @@ async function startServer() {
         reviewDispatched = runPostServiceReviewCron(
           salonId,
           shouldForce,
-          typeof appointmentId === 'string' ? appointmentId : undefined
+          typeof appointmentId === 'string' ? sanitizePlainText(appointmentId, 60) : undefined
         ).dispatchedCount;
       }
 
@@ -626,16 +783,178 @@ async function startServer() {
     }
   });
 
-  app.post('/api/salons/:salonId/alerts/:alertId/resolve', (req, res) => {
-    try {
-      const { salonId, alertId } = req.params;
-      const state = resolveOwnerAlert(salonId, alertId);
-      return res.json(state);
-    } catch (err) {
-      console.error('Resolve alert error:', err);
-      return res.status(500).json({ error: 'Failed to resolve alert.' });
+  // Authenticated In-App Concierge Simulator & Manual Cron Proxy (zero webhook secret in browser JS)
+  app.post(
+    '/api/salons/:salonId/concierge/simulate',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    webhookRateLimiter,
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const { fromPhone, messageText, clientName, appointmentIdForReview, forceLanguagePrompt } =
+          req.body || {};
+        if (!fromPhone || typeof messageText !== 'string') {
+          return res.status(400).json({ error: 'fromPhone and messageText are required.' });
+        }
+        const outcome = processWhatsAppWebhook({
+          salonId,
+          fromPhone: sanitizePlainText(String(fromPhone), 24),
+          messageText: sanitizePlainText(messageText, 500),
+          clientName: typeof clientName === 'string' ? sanitizePlainText(clientName, 80) : undefined,
+          appointmentIdForReview:
+            typeof appointmentIdForReview === 'string'
+              ? sanitizePlainText(appointmentIdForReview, 60)
+              : undefined,
+          forceLanguagePrompt: Boolean(forceLanguagePrompt),
+        });
+        return res.json(outcome);
+      } catch (err) {
+        console.error('Authenticated concierge simulation error:', err);
+        return res.status(500).json({ error: 'Simulation failed.' });
+      }
     }
-  });
+  );
+
+  app.post(
+    '/api/salons/:salonId/concierge/trigger-cron',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const { job, force, appointmentId } = req.body || {};
+        const shouldForce = force !== false;
+
+        let birthdayDispatched = 0;
+        let winbackDispatched = 0;
+        let reviewDispatched = 0;
+
+        if (job === 'birthday_9am' || job === 'all' || !job) {
+          birthdayDispatched = runBirthdayCron(salonId, shouldForce).dispatchedCount;
+        }
+        if (job === 'winback_30d' || job === 'all' || !job) {
+          winbackDispatched = runWinBackCron(salonId, shouldForce).dispatchedCount;
+        }
+        if (job === 'review_t2h' || job === 'all' || !job) {
+          reviewDispatched = runPostServiceReviewCron(
+            salonId,
+            shouldForce,
+            typeof appointmentId === 'string' ? sanitizePlainText(appointmentId, 60) : undefined
+          ).dispatchedCount;
+        }
+
+        return res.json({
+          birthdayDispatched,
+          winbackDispatched,
+          reviewDispatched,
+          state: getSalonConciergeState(salonId),
+        });
+      } catch (err) {
+        console.error('Manual cron trigger error:', err);
+        return res.status(500).json({ error: 'Cron trigger failed.' });
+      }
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/alerts/:alertId/resolve',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId, alertId } = req.params;
+        const state = resolveOwnerAlert(salonId, sanitizePlainText(alertId, 60));
+        return res.json(state);
+      } catch (err) {
+        console.error('Resolve alert error:', err);
+        return res.status(500).json({ error: 'Failed to resolve alert.' });
+      }
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/chair-locks',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const body = req.body || {};
+        if (!body.barberName || !body.startTimeSlot || !body.endTimeSlot) {
+          return res
+            .status(400)
+            .json({ error: 'barberName, startTimeSlot, and endTimeSlot are required.' });
+        }
+        const result = addChairLock(salonId, {
+          barberName: String(body.barberName),
+          chairLabel: typeof body.chairLabel === 'string' ? body.chairLabel : undefined,
+          startTimeSlot: String(body.startTimeSlot),
+          endTimeSlot: String(body.endTimeSlot),
+          startMinutes: Number(body.startMinutes ?? 0),
+          endMinutes: Number(body.endMinutes ?? 30),
+          durationMins: Number(body.durationMins ?? 30),
+          source: body.source === 'VOICE' ? 'VOICE' : 'QUICK_PILL',
+          transcript: typeof body.transcript === 'string' ? body.transcript : undefined,
+          barbers: Array.isArray(body.barbers) ? body.barbers : undefined,
+        });
+        return res.json(result);
+      } catch (err) {
+        console.error('Add chair lock error:', err);
+        return res.status(500).json({ error: 'Failed to create chair lock.' });
+      }
+    }
+  );
+
+  app.delete(
+    '/api/salons/:salonId/chair-locks/:lockId',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId, lockId } = req.params;
+        const state = removeChairLock(salonId, sanitizePlainText(lockId, 60));
+        return res.json(state);
+      } catch (err) {
+        console.error('Delete chair lock error:', err);
+        return res.status(500).json({ error: 'Failed to remove chair lock.' });
+      }
+    }
+  );
+
+  app.put(
+    '/api/salons/:salonId/barbers',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const barbers = Array.isArray(req.body?.barbers) ? req.body.barbers : [];
+        const state = syncSalonBarbers(salonId, barbers);
+        return res.json(state);
+      } catch (err) {
+        console.error('Sync barbers error:', err);
+        return res.status(500).json({ error: 'Failed to sync barbers.' });
+      }
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/counter-sleep',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const sleeping = Boolean(req.body?.sleeping);
+        const state = setCounterSleepState(salonId, sleeping);
+        return res.json(state);
+      } catch (err) {
+        console.error('Counter sleep toggle error:', err);
+        return res.status(500).json({ error: 'Failed to update counter sleep state.' });
+      }
+    }
+  );
 
   startConciergeSchedulers();
 

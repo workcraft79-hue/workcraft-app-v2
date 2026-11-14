@@ -9,6 +9,8 @@ export interface LanguageMenuOption {
   dir: 'ltr' | 'rtl';
 }
 
+export type SalonPackageTier = 'STARTER' | 'PRO' | 'PRO++';
+
 export interface RetentionSettings {
   salonId: string;
   salonName: string;
@@ -18,6 +20,8 @@ export interface RetentionSettings {
   timezoneOffsetHours: number;
   currency: string;
   currencySymbol: string;
+  packageTier?: SalonPackageTier;
+  counterSleptAt?: string | null;
 
   // Module 2: Automated 9:00 AM Birthday & Special Event Offers
   birthdayEnabled: boolean;
@@ -39,6 +43,19 @@ export interface RetentionSettings {
   updatedAt: string;
 }
 
+export interface PendingBarberReroute {
+  requestedBarber: string;
+  requestedTimeSlot: string;
+  requestedMinutes: number;
+  services: string;
+  alternatives: Array<{
+    index: string;
+    type: 'ALT_BARBER' | 'NEXT_SLOT';
+    barberName: string;
+    timeSlot: string;
+  }>;
+}
+
 export interface ConciergeClientProfile {
   id: string;
   salonId: string;
@@ -52,6 +69,7 @@ export interface ConciergeClientProfile {
   lastWinbackSentAt: string | null;
   awaitingWinbackRebook: boolean;
   awaitingReviewAppointmentId: string | null;
+  pendingReroute?: PendingBarberReroute | null;
 }
 
 export interface ConciergeAppointment {
@@ -64,6 +82,11 @@ export interface ConciergeAppointment {
   service: string;
   price: number;
   timeSlot: string;
+  durationMins?: number;
+  scheduledEndMs?: number;
+  flagged?: boolean;
+  canceled?: boolean;
+  sourceType?: 'WHATSAPP_BOT' | 'WALK_IN_BUSY';
   status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED';
   scheduledForIso: string;
   completedAt: string | null;
@@ -71,6 +94,21 @@ export interface ConciergeAppointment {
   rating: number | null;
   ratingComment: string | null;
   reviewRoutedStatus: 'PENDING' | 'PROMPT_SENT' | 'PUBLIC_GOOGLE_SENT' | 'OWNER_INTERVENTION_NEEDED';
+}
+
+export interface ChairLock {
+  id: string;
+  salonId: string;
+  barberName: string;
+  chairLabel?: string;
+  startTimeSlot: string;
+  endTimeSlot: string;
+  startMinutes: number;
+  endMinutes: number;
+  durationMins: number;
+  source: 'VOICE' | 'QUICK_PILL';
+  transcript?: string;
+  createdAt: string;
 }
 
 export interface OwnerInterventionAlert {
@@ -104,7 +142,9 @@ export interface WhatsAppMessageLog {
       | 'APPOINTMENT_CONFIRMED'
       | 'REMINDER_REPLY_CONFIRMED'
       | 'REMINDER_REPLY_LATE'
-      | 'REMINDER_REPLY_RESCHEDULE';
+      | 'REMINDER_REPLY_RESCHEDULE'
+      | 'BARBER_BUSY_REROUTED'
+      | 'URGENT_BRIDAL_GROOM';
     barberName?: string;
     services?: string;
     timeSlot?: string;
@@ -119,6 +159,8 @@ export interface SalonConciergeStateResponse {
   settings: RetentionSettings;
   clients: ConciergeClientProfile[];
   appointments: ConciergeAppointment[];
+  chairLocks: ChairLock[];
+  barbers: string[];
   alerts: OwnerInterventionAlert[];
   logs: WhatsAppMessageLog[];
 }

@@ -45,13 +45,19 @@ import {
   PhoneCall,
   Save,
   Zap,
+  Mic,
+  MicOff,
+  Moon,
+  Sun,
+  Flag,
 } from 'lucide-react';
 import { PortalCard } from './PortalCard';
 import { BroadcastTab } from './Tabs/BroadcastTab';
 import { SalonWindowPosterPdf } from './SalonWindowPosterPdf';
 import { SalonRetentionSettingsPanel } from './SalonRetentionSettingsPanel';
 import { Contact, SalonProfile } from '../types';
-import type { SalonConciergeStateResponse } from '../types/concierge';
+import type { AuthUser } from '../types/auth';
+import type { SalonConciergeStateResponse, SalonPackageTier } from '../types/concierge';
 import { generate214Contacts } from '../data/mockData';
 import type { OnboardedSalonPayload } from './FieldAgentHub';
 
@@ -64,8 +70,23 @@ interface BookingRecord {
   price: number;
   timeSlot: string;
   durationMins?: number;
+  scheduledEndMs?: number;
+  flagged?: boolean;
+  canceled?: boolean;
+  sourceType?: 'WHATSAPP_BOT' | 'WALK_IN_BUSY';
   chairLabel?: string;
   status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED';
+}
+
+interface OvernightQueueItem {
+  id: string;
+  clientName: string;
+  barberName: string;
+  services: string;
+  timeSlot: string;
+  eventType: string;
+  receivedAt: string;
+  summary: string;
 }
 
 interface PendingDepositAlert {
@@ -113,6 +134,145 @@ function parseTimeSlotMinutes(slot: string): number {
   if (meridiem === 'PM' && hour < 12) hour += 12;
   if (meridiem === 'AM' && hour === 12) hour = 0;
   return hour * 60 + mins;
+}
+
+function formatTimeFromMinutes(totalMins: number): string {
+  const wrapped = ((Math.round(totalMins) % 1440) + 1440) % 1440;
+  const h24 = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
+  const meridiem = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${String(h12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${meridiem}`;
+}
+
+const BARBER_SCRIPT_ALIASES: Record<string, string[]> = {
+  hamza: ['hamza', 'حمزہ', 'حمزة'],
+  aslam: ['aslam', 'اسلم'],
+  tariq: ['tariq', 'طارق'],
+  ali: ['ali', 'علی'],
+  bilal: ['bilal', 'بلال'],
+  ayesha: ['ayesha', 'عائشہ', 'عائشة'],
+  fatima: ['fatima', 'فاطمہ', 'فاطمة'],
+  hina: ['hina', 'حنا'],
+  sara: ['sara', 'سارہ', 'سارة'],
+};
+
+function normalizeSpokenHour(rawHour: number, explicitMeridiem?: string): number {
+  if (explicitMeridiem) {
+    const mer = explicitMeridiem.toUpperCase();
+    if (mer.startsWith('P') && rawHour < 12) return rawHour + 12;
+    if (mer.startsWith('A') && rawHour === 12) return 0;
+    return rawHour;
+  }
+  // Salon hours heuristic: 1..10 without AM/PM defaults to afternoon/evening PM (e.g. "7 to 8" -> 7:00 PM to 8:00 PM)
+  if (rawHour >= 1 && rawHour <= 10) return rawHour + 12;
+  return rawHour;
+}
+
+function parseVoiceChairIntent(
+  rawTranscript: string,
+  barbers: string[]
+): {
+  barberName: string;
+  startTimeSlot: string;
+  endTimeSlot: string;
+  startMinutes: number;
+  endMinutes: number;
+  durationMins: number;
+} {
+  const transcript = rawTranscript.trim();
+  const lower = transcript.toLowerCase();
+
+  // 1. Match active barber from roster (supports English, Roman Urdu, Urdu script, Arabic script)
+  let matchedBarber = barbers[0] || 'Master Aslam';
+  for (const b of barbers) {
+    const bLower = b.toLowerCase();
+    const cleanedTokens = bLower
+      .replace(/\bmaster\b/g, '')
+      .trim()
+      .split(/\s+/)
+      .filter((t) => t.length >= 3);
+    if (lower.includes(bLower)) {
+      matchedBarber = b;
+      break;
+    }
+    const tokenHit = cleanedTokens.some((tok) => {
+      if (lower.includes(tok)) return true;
+      const aliases = BARBER_SCRIPT_ALIASES[tok];
+      return aliases ? aliases.some((al) => transcript.includes(al) || lower.includes(al)) : false;
+    });
+    if (tokenHit) {
+      matchedBarber = b;
+      break;
+    }
+  }
+
+  // Fallback check if spoken name wasn't first word in default roster (e.g. "Hamza" matches "Hamza" or first barber if not present)
+  if (matchedBarber === (barbers[0] || 'Master Aslam')) {
+    for (const [key, aliases] of Object.entries(BARBER_SCRIPT_ALIASES)) {
+      if (aliases.some((al) => lower.includes(al) || transcript.includes(al))) {
+        const foundInRoster = barbers.find((b) => b.toLowerCase().includes(key));
+        if (foundInRoster) {
+          matchedBarber = foundInRoster;
+          break;
+        }
+      }
+    }
+  }
+
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+  // 2. Match explicit time range: "7 to 8", "7 se 8", "5:30 to 6:30", "7 pm to 8 pm", "7 سے 8", "من 7 إلى 8"
+  const rangeRegex =
+    /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:to|-|–|se|tak|بجے\s*سے|سے|إلى|حتى)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
+  const rangeMatch = transcript.match(rangeRegex);
+  if (rangeMatch) {
+    const startH = normalizeSpokenHour(parseInt(rangeMatch[1], 10), rangeMatch[3] || rangeMatch[6]);
+    const startM = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : 0;
+    let endH = normalizeSpokenHour(parseInt(rangeMatch[4], 10), rangeMatch[6] || rangeMatch[3]);
+    const endM = rangeMatch[5] ? parseInt(rangeMatch[5], 10) : 0;
+    let startMinutes = startH * 60 + startM;
+    let endMinutes = endH * 60 + endM;
+    if (endMinutes <= startMinutes) {
+      endMinutes += 12 * 60;
+    }
+    const durationMins = Math.max(15, endMinutes - startMinutes);
+    return {
+      barberName: matchedBarber,
+      startTimeSlot: formatTimeFromMinutes(startMinutes),
+      endTimeSlot: formatTimeFromMinutes(endMinutes),
+      startMinutes,
+      endMinutes,
+      durationMins,
+    };
+  }
+
+  // 3. Match durations: "30 minutes", "45 mins", "1 hour", "ek ghanta", "aadha ghanta", "ساعة", "نصف ساعة"
+  let durationMins = 30;
+  const hourMatch = lower.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ghant[ae]|ساعة|ساعات|گھنٹہ|گھنٹے)/i);
+  const minMatch = lower.match(/(\d+)\s*(?:minutes?|mins?|min|منٹ|دقيقة|دقائق)/i);
+
+  if (/(aadha|half|نصف|آدھا)\s*(?:ghant|hour|ساعة|گھنٹ)/i.test(transcript)) {
+    durationMins = 30;
+  } else if (/(ek|one|aik|ایک)\s*(?:ghant|hour|ساعة|گھنٹ)/i.test(transcript) || /\bساعة\b/.test(transcript)) {
+    durationMins = 60;
+  } else if (hourMatch) {
+    durationMins = Math.max(15, Math.round(parseFloat(hourMatch[1]) * 60));
+  } else if (minMatch) {
+    durationMins = Math.max(10, parseInt(minMatch[1], 10));
+  }
+
+  const startMinutes = nowMinutes;
+  const endMinutes = startMinutes + durationMins;
+  return {
+    barberName: matchedBarber,
+    startTimeSlot: formatTimeFromMinutes(startMinutes),
+    endTimeSlot: formatTimeFromMinutes(endMinutes),
+    startMinutes,
+    endMinutes,
+    durationMins,
+  };
 }
 
 export interface ClientSalon {
@@ -790,6 +950,9 @@ export const CLIENT_SALONS = INITIAL_CLIENT_SALONS;
 interface SalonOwnerDashboardProps {
   salonName?: string;
   selectedSalonName?: string;
+  lockedSalonId?: string | null;
+  authUser?: AuthUser | null;
+  onLogout?: () => void;
   ownerName?: string;
   phone?: string;
   salonCategory?: 'MENS' | 'LADIES';
@@ -803,6 +966,9 @@ interface SalonOwnerDashboardProps {
 
 export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   selectedSalonName,
+  lockedSalonId,
+  authUser,
+  onLogout,
   salonCategory,
   onboardedData,
   isFounderInspector = false,
@@ -830,8 +996,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     return [customEntry, ...filtered];
   });
   const [selectedSalonId, setSelectedSalonId] = useState<string>(
-    onboardedData ? 'onboarded-live' : '1'
+    lockedSalonId || (onboardedData ? 'onboarded-live' : '1')
   );
+
+  useEffect(() => {
+    if (lockedSalonId && !isFounderInspector) {
+      setSelectedSalonId(lockedSalonId);
+    }
+  }, [lockedSalonId, isFounderInspector]);
 
   useEffect(() => {
     if (!onboardedData) return;
@@ -851,12 +1023,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       customEntry,
       ...prev.filter((s) => s.id !== 'onboarded-live' && s.name.toLowerCase() !== onboardedData.salonName.trim().toLowerCase()),
     ]);
-    setSelectedSalonId('onboarded-live');
-  }, [onboardedData]);
+    if (!lockedSalonId) {
+      setSelectedSalonId('onboarded-live');
+    }
+  }, [onboardedData, lockedSalonId]);
 
   // Query 3: Match exact clicked salon when Founder inspects from Overview or Clients
   useEffect(() => {
-    if (onboardedData) return;
+    if (onboardedData || lockedSalonId) return;
     const targetName = selectedSalonName?.trim().toLowerCase();
     if (!targetName) return;
     const exactOrPartial = salonsState.find((s) => {
@@ -867,7 +1041,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     if (exactOrPartial) {
       setSelectedSalonId(exactOrPartial.id);
     }
-  }, [selectedSalonName, salonsState, onboardedData]);
+  }, [selectedSalonName, salonsState, onboardedData, lockedSalonId]);
 
   const currentSalon = salonsState.find((s) => s.id === selectedSalonId) || salonsState[0];
   const regionConfig = getRegionFromPhone(currentSalon.phone, currentSalon.location);
@@ -978,19 +1152,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     timestamp: string;
   } | null>(null);
 
-  // Query 2 (Self-Service Owner Re-Login): Instant WhatsApp OTP reconnect without physical agent or Founder
-  const [isOwnerLoggedOut, setIsOwnerLoggedOut] = useState<boolean>(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      return params.get('relogin') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // Query 2 (Self-Service Owner Re-Login): Real server-verified session logout/re-auth
+  const [isOwnerLoggedOut, setIsOwnerLoggedOut] = useState<boolean>(false);
   const [reLoginStep, setReLoginStep] = useState<'PHONE' | 'OTP'>('PHONE');
   const [reLoginPhoneInput, setReLoginPhoneInput] = useState<string>(currentSalon.phone);
   const [reLoginOtpInput, setReLoginOtpInput] = useState<string>('');
-  const [reLoginGeneratedOtp, setReLoginGeneratedOtp] = useState<string>('849201');
+  const [reLoginGeneratedOtp, setReLoginGeneratedOtp] = useState<string>('');
   const [reLoginError, setReLoginError] = useState<string | null>(null);
   const [reLoginMatchedSalonId, setReLoginMatchedSalonId] = useState<string>(currentSalon.id);
 
@@ -1002,6 +1169,16 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [wakeLockNote, setWakeLockNote] = useState<string | null>(null);
   const [currentlySpeakingText, setCurrentlySpeakingText] = useState<string | null>(null);
   const wakeLockRef = useRef<{ release?: () => Promise<void> } | null>(null);
+  const speakDelayTimerRef = useRef<number | null>(null);
+
+  // Sleep-Window Mode & Overnight Queue (Silent when sleeping, Catch-up Replay when woken)
+  const [isCounterSleeping, setIsCounterSleeping] = useState(false);
+  const [counterSleptAt, setCounterSleptAt] = useState<string | null>(null);
+  const [overnightQueue, setOvernightQueue] = useState<OvernightQueueItem[]>([]);
+  const isCounterSleepingRef = useRef(isCounterSleeping);
+  useEffect(() => {
+    isCounterSleepingRef.current = isCounterSleeping;
+  }, [isCounterSleeping]);
 
   // Rush-Hour Loudspeaker / Bluetooth Speaker Boost (ON by default so floor alerts cut through noise)
   const [isLoudspeakerBoostActive, setIsLoudspeakerBoostActive] = useState(true);
@@ -1012,15 +1189,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   // Stylist / Barber Top Services Breakdown Selection
   const [selectedBarberForServices, setSelectedBarberForServices] = useState<string>('ALL');
 
-  // Interactive Walk-In Quick Modal (Multi-Service Support)
-  const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
-  const [walkInName, setWalkInName] = useState('Walk-in Client');
-  const [walkInBarber, setWalkInBarber] = useState('Master Aslam');
-  const [walkInSelectedServiceIds, setWalkInSelectedServiceIds] = useState<string[]>(['s1']);
-  const [walkInPrice, setWalkInPrice] = useState(800);
-  const [walkInPhone, setWalkInPhone] = useState('');
-  const [walkInBirthDate, setWalkInBirthDate] = useState('');
-  const [walkInImmediateChair, setWalkInImmediateChair] = useState(false);
+  // $0.00 Zero-Cost Browser Voice Chair Blocker + 2-Tap Quick Duration Pills
+  const [isListeningMic, setIsListeningMic] = useState(false);
+  const [micElapsedSecs, setMicElapsedSecs] = useState(0);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [armedQuickPill, setArmedQuickPill] = useState<{
+    barber: string;
+    durationMins: number;
+  } | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const micTimerRef = useRef<number | null>(null);
+  const latestTranscriptRef = useRef<string>('');
 
   const [voiceLogs, setVoiceLogs] = useState<VoiceEventLog[]>([
     {
@@ -1175,63 +1354,56 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }
   };
 
-  const speakHandsFree = (text: string, lang: VoiceLang = ownerLang, romanUrduFallback?: string) => {
-    if (!isVoiceEnabled || isFounderInspector) return;
+  // Strict Localized Bluetooth/AUX Voice Engine: Speaks strictly in ur-PK, ar-SA, or en-US
+  // Plays Bluetooth wake-up chime + 320ms pre-speech buffer so external speakers don't clip opening words
+  const speakHandsFree = (text: string, lang: VoiceLang = ownerLang) => {
+    if (!isVoiceEnabled || isFounderInspector || isCounterSleepingRef.current) return;
     playFreeNotificationChime(isLoudspeakerBoostActive);
     setCurrentlySpeakingText(text);
 
-    try {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        
-        const voices = window.speechSynthesis.getVoices() || [];
-        let chosenVoice: SpeechSynthesisVoice | undefined;
-        let textToSpeak = text;
-        let voiceLangCode = 'en-US';
+    if (speakDelayTimerRef.current) {
+      window.clearTimeout(speakDelayTimerRef.current);
+    }
 
-        if (lang === 'ar') {
-          voiceLangCode = 'ar-SA';
-          chosenVoice = voices.find((v) => v.lang.startsWith('ar'));
-        } else if (lang === 'ur') {
-          // Look for native Urdu voice first
-          chosenVoice = voices.find((v) => v.lang.startsWith('ur'));
-          if (chosenVoice) {
-            voiceLangCode = chosenVoice.lang;
-          } else {
-            // Find Hindi / Hindustani voice which shares natural Urdu phonetics
-            const hiVoice = voices.find((v) => v.lang.startsWith('hi'));
-            if (hiVoice) {
-              chosenVoice = hiVoice;
-              voiceLangCode = hiVoice.lang;
-              if (romanUrduFallback) textToSpeak = romanUrduFallback;
-            } else if (romanUrduFallback) {
-              textToSpeak = romanUrduFallback;
-              voiceLangCode = 'en-US';
-            }
-          }
+    const strictLangCode = lang === 'ur' ? 'ur-PK' : lang === 'ar' ? 'ar-SA' : 'en-US';
+    const strictPrefix = lang === 'ur' ? 'ur' : lang === 'ar' ? 'ar' : 'en';
+
+    speakDelayTimerRef.current = window.setTimeout(() => {
+      try {
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const voices = window.speechSynthesis.getVoices() || [];
+          const matchedVoice = voices.find((v) =>
+            v.lang.toLowerCase().startsWith(strictPrefix)
+          );
+
+          const utterance = new SpeechSynthesisUtterance(text);
+          if (matchedVoice) utterance.voice = matchedVoice;
+          // Strictly preserve owner's selected language (never downgrade ur-PK / ar-SA to en-US)
+          utterance.lang = strictLangCode;
+          utterance.rate = isLoudspeakerBoostActive ? 0.92 : 0.96;
+          utterance.pitch = 1.0;
+          utterance.volume = 1.0;
+          utterance.onend = () => setCurrentlySpeakingText(null);
+          utterance.onerror = () => setCurrentlySpeakingText(null);
+          window.speechSynthesis.speak(utterance);
+          setTimeout(() => {
+            setCurrentlySpeakingText((prev) => (prev === text ? null : prev));
+          }, 12000);
+        } else {
+          setTimeout(() => setCurrentlySpeakingText(null), 5000);
         }
-
-        const utterance = new SpeechSynthesisUtterance(textToSpeak);
-        if (chosenVoice) utterance.voice = chosenVoice;
-        utterance.lang = voiceLangCode;
-        utterance.rate = isLoudspeakerBoostActive ? 0.90 : 0.96;
-        utterance.pitch = 1.0;
-        utterance.volume = 1.0;
-        utterance.onend = () => setCurrentlySpeakingText(null);
-        utterance.onerror = () => setCurrentlySpeakingText(null);
-        window.speechSynthesis.speak(utterance);
-        setTimeout(() => {
-          setCurrentlySpeakingText((prev) => (prev === text ? null : prev));
-        }, 8000);
-      } else {
+      } catch {
         setTimeout(() => setCurrentlySpeakingText(null), 5000);
       }
-    } catch {
-      setTimeout(() => setCurrentlySpeakingText(null), 5000);
-    }
+    }, 320);
   };
 
   const stopSpeaking = () => {
+    if (speakDelayTimerRef.current) {
+      window.clearTimeout(speakDelayTimerRef.current);
+      speakDelayTimerRef.current = null;
+    }
     try {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
@@ -1494,53 +1666,64 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }, 700);
   };
 
-  // Live Queue State
-  const [bookings, setBookings] = useState<BookingRecord[]>([
-    {
-      id: 'BK-101',
-      clientName: 'Bilal Ahmed',
-      barberName: 'Master Aslam',
-      phone: '+92 300 1234567',
-      service: 'Master Haircut & Skin Fade',
-      price: 1200,
-      timeSlot: '03:30 PM',
-      durationMins: 40,
-      status: 'CONFIRMED',
-    },
-    {
-      id: 'BK-102',
-      clientName: 'Hamza Malik',
-      barberName: 'Tariq Mehmood',
-      phone: '+92 321 9876543',
-      service: 'Royal Beard Sculpt & Ozone Steam',
-      price: 800,
-      timeSlot: '04:15 PM',
-      durationMins: 30,
-      status: 'IN_CHAIR',
-    },
-    {
-      id: 'BK-103',
-      clientName: 'Dr. Usman Qureshi',
-      barberName: 'Master Aslam',
-      phone: '+92 333 4567890',
-      service: 'Charcoal Deep Detox Facial',
-      price: 2500,
-      timeSlot: '05:00 PM',
-      durationMins: 45,
-      status: 'CONFIRMED',
-    },
-    {
-      id: 'BK-104',
-      clientName: 'Saad Farooq',
-      barberName: 'Bilal Tariq',
-      phone: '+92 345 6789012',
-      service: 'Haircut + Beard Styling Combo',
-      price: 1800,
-      timeSlot: '05:45 PM',
-      durationMins: 50,
-      status: 'COMPLETED',
-    },
-  ]);
+  // Live Queue State (scheduledEndMs set in near future so initial slots stay active until 15m post-end)
+  const [bookings, setBookings] = useState<BookingRecord[]>(() => {
+    const now = Date.now();
+    return [
+      {
+        id: 'BK-101',
+        clientName: 'Bilal Ahmed',
+        barberName: 'Master Aslam',
+        phone: '+92 300 1234567',
+        service: 'Master Haircut & Skin Fade',
+        price: 1200,
+        timeSlot: '03:30 PM',
+        durationMins: 40,
+        scheduledEndMs: now + 45 * 60 * 1000,
+        sourceType: 'WHATSAPP_BOT',
+        status: 'CONFIRMED',
+      },
+      {
+        id: 'BK-102',
+        clientName: 'Hamza Malik',
+        barberName: 'Tariq Mehmood',
+        phone: '+92 321 9876543',
+        service: 'Royal Beard Sculpt & Ozone Steam',
+        price: 800,
+        timeSlot: '04:15 PM',
+        durationMins: 30,
+        scheduledEndMs: now + 20 * 60 * 1000,
+        sourceType: 'WHATSAPP_BOT',
+        status: 'IN_CHAIR',
+      },
+      {
+        id: 'BK-103',
+        clientName: 'Dr. Usman Qureshi',
+        barberName: 'Master Aslam',
+        phone: '+92 333 4567890',
+        service: 'Charcoal Deep Detox Facial',
+        price: 2500,
+        timeSlot: '05:00 PM',
+        durationMins: 45,
+        scheduledEndMs: now + 90 * 60 * 1000,
+        sourceType: 'WHATSAPP_BOT',
+        status: 'CONFIRMED',
+      },
+      {
+        id: 'BK-104',
+        clientName: 'Saad Farooq',
+        barberName: 'Bilal Tariq',
+        phone: '+92 345 6789012',
+        service: 'Haircut + Beard Styling Combo',
+        price: 1800,
+        timeSlot: '05:45 PM',
+        durationMins: 50,
+        scheduledEndMs: now - 30 * 60 * 1000,
+        sourceType: 'WHATSAPP_BOT',
+        status: 'COMPLETED',
+      },
+    ];
+  });
 
   const isLadies =
     onboardedData?.salonCategory === 'LADIES' ||
@@ -1646,17 +1829,26 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         };
       });
       setServices(mapped);
-      const firstActive = mapped.find((s) => s.active);
-      if (firstActive) {
-        setWalkInSelectedServiceIds([firstActive.id]);
-        setWalkInPrice(firstActive.price);
-      }
     }
     if (onboardedData.barbers && onboardedData.barbers.length > 0) {
       setBarbersList(onboardedData.barbers);
-      setWalkInBarber(onboardedData.barbers[0]);
     }
   }, [onboardedData]);
+
+  // Sync salon barber list to backend for automatic WhatsApp busy-rerouting
+  const syncBarbersToServer = (nextBarbers: string[]) => {
+    fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/barbers`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ barbers: nextBarbers }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((state) => {
+        if (state) setConciergeState(state);
+      })
+      .catch(() => {});
+  };
+
   const [newBarberDashboardInput, setNewBarberDashboardInput] = useState('');
   const [newBarberChairInput, setNewBarberChairInput] = useState('');
   const [editingBarberIndex, setEditingBarberIndex] = useState<number | null>(null);
@@ -1678,6 +1870,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       localStorage.setItem('wcl_salon_barbers', JSON.stringify(updated));
       localStorage.setItem('wcl_salon_barber_chairs', JSON.stringify(nextChairs));
     } catch {}
+    syncBarbersToServer(updated);
     setMaintToast(`✓ ${name} assigned to ${chairLabel} & synced with queue.`);
     setTimeout(() => setMaintToast(null), 4000);
   };
@@ -1701,6 +1894,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       localStorage.setItem('wcl_salon_barbers', JSON.stringify(updated));
       localStorage.setItem('wcl_salon_barber_chairs', JSON.stringify(nextChairs));
     } catch {}
+    syncBarbersToServer(updated);
     setMaintToast(`✓ Updated ${nextName} (${nextChair}).`);
     setTimeout(() => setMaintToast(null), 4000);
   };
@@ -1715,6 +1909,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       localStorage.setItem('wcl_salon_barbers', JSON.stringify(updated));
       localStorage.setItem('wcl_salon_barber_chairs', JSON.stringify(nextChairs));
     } catch {}
+    syncBarbersToServer(updated);
     setMaintToast(`✓ Barber "${name}" removed from salon roster.`);
     setTimeout(() => setMaintToast(null), 4000);
   };
@@ -1738,13 +1933,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setTimeout(() => setMaintToast(null), 4000);
   };
 
-  // Hands-Free Loudspeaker Engine for Incoming Appointment Confirmations & Reminder Replies
+  // Hands-Free Loudspeaker Engine (Sleep-Window Aware + Strictly Localized ur-PK / ar-SA / en-US)
   const announceInboundEventLoudly = (params: {
     eventType:
       | 'APPOINTMENT_CONFIRMED'
       | 'REMINDER_REPLY_CONFIRMED'
       | 'REMINDER_REPLY_LATE'
-      | 'REMINDER_REPLY_RESCHEDULE';
+      | 'REMINDER_REPLY_RESCHEDULE'
+      | 'BARBER_BUSY_REROUTED'
+      | 'URGENT_BRIDAL_GROOM';
     clientName: string;
     clientPhone: string;
     clientLang: ClientChatLang;
@@ -1756,11 +1953,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     const { eventType, clientName, clientPhone, clientLang, barberName, servicesText, timeSlot, rawBody } =
       params;
     const isUrgent =
-      eventType === 'REMINDER_REPLY_LATE' || eventType === 'REMINDER_REPLY_RESCHEDULE';
+      eventType === 'REMINDER_REPLY_LATE' ||
+      eventType === 'REMINDER_REPLY_RESCHEDULE' ||
+      eventType === 'URGENT_BRIDAL_GROOM';
 
     const speechByLang: Record<VoiceLang, string> = {
       en:
-        eventType === 'APPOINTMENT_CONFIRMED'
+        eventType === 'URGENT_BRIDAL_GROOM'
+          ? `Urgent Bridal or Groom alert! ${clientName} booked ${servicesText} with ${barberName} at ${timeSlot}.`
+          : eventType === 'BARBER_BUSY_REROUTED'
+          ? `Busy reroute sent! ${clientName} asked for ${barberName} at ${timeSlot}, and WhatsApp bot offered free alternative barbers.`
+          : eventType === 'APPOINTMENT_CONFIRMED'
           ? `Attention! Appointment confirmed. ${clientName} wants barber ${barberName}. Services: ${servicesText}, for ${timeSlot}.`
           : eventType === 'REMINDER_REPLY_CONFIRMED'
           ? `Reminder reply! ${clientName} confirmed coming at ${timeSlot} with barber ${barberName}.`
@@ -1768,37 +1971,45 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           ? `Urgent arrival update! ${clientName} replied they are running 15 minutes late for ${timeSlot} with ${barberName}.`
           : `Urgent schedule update! ${clientName} cannot make ${timeSlot} and requested to reschedule.`,
       ur:
-        eventType === 'APPOINTMENT_CONFIRMED'
+        eventType === 'URGENT_BRIDAL_GROOM'
+          ? `اہم برائیڈل یا گروم الرٹ! ${clientName} نے ${barberName} کے ساتھ ${timeSlot} پر ${servicesText} کی بکنگ کی ہے۔`
+          : eventType === 'BARBER_BUSY_REROUTED'
+          ? `خودکار ری راؤٹ! ${clientName} نے ${timeSlot} پر ${barberName} مانگا، بوٹ نے متبادل خالی باربرز بھیج دیے ہیں۔`
+          : eventType === 'APPOINTMENT_CONFIRMED'
           ? `توجہ فرمائیں! ${clientName} کی اپائنٹمنٹ باربر ${barberName} کے ساتھ ${timeSlot} پر کنفرم ہو گئی ہے۔ سروسز: ${servicesText}۔`
           : eventType === 'REMINDER_REPLY_CONFIRMED'
           ? `ریمائنڈر کا جواب! ${clientName} نے ${timeSlot} پر باربر ${barberName} کے پاس آنے کی تصدیق کر دی ہے۔`
           : eventType === 'REMINDER_REPLY_LATE'
-          ? `ضروری اطلاع! ${clientName} نے ریمائنڈر پر جواب دیا ہے کہ وہ ${timeSlot} پر تھوڑی دیر سے پہنچیں گے۔`
+          ? `ضروری اطلاع! ${clientName} نے ریمائنڈر پر جواب دیا ہے کہ وہ ${timeSlot} پر پندرہ منٹ دیر سے پہنچیں گے۔`
           : `اہم اطلاع! ${clientName} آج ${timeSlot} پر نہیں آ سکیں گے اور نیا وقت مانگا ہے۔`,
       ar:
-        eventType === 'APPOINTMENT_CONFIRMED'
+        eventType === 'URGENT_BRIDAL_GROOM'
+          ? `تنبيه حجز زفاف عاجل! حجز ${clientName} باقة ${servicesText} مع الحلاق ${barberName} الساعة ${timeSlot}.`
+          : eventType === 'BARBER_BUSY_REROUTED'
+          ? `تحويل تلقائي! طلب ${clientName} الحلاق ${barberName} الساعة ${timeSlot} وتم إرسال الحلاقين المتاحين.`
+          : eventType === 'APPOINTMENT_CONFIRMED'
           ? `تنبيه! تم تأكيد موعد جديد. ${clientName} يريد الحلاق ${barberName}. الخدمات: ${servicesText} الساعة ${timeSlot}.`
           : eventType === 'REMINDER_REPLY_CONFIRMED'
           ? `رد التذكير! أكد ${clientName} حضوره الساعة ${timeSlot} مع الحلاق ${barberName}.`
           : eventType === 'REMINDER_REPLY_LATE'
-          ? `تحديث وصول عاجل! أرسل ${clientName} أنه سيتأخر عن موعد ${timeSlot}.`
+          ? `تحديث وصول عاجل! أرسل ${clientName} أنه سيتأخر خمس عشرة دقيقة عن موعد ${timeSlot}.`
           : `تنبيه جدول عاجل! طلب ${clientName} تأجيل موعد ${timeSlot}.`,
-    };
-
-    const romanUrduByEvent: Record<typeof eventType, string> = {
-      APPOINTMENT_CONFIRMED: `Tawajjo farmayein! ${clientName} ki appointment barber ${barberName} kay sath ${timeSlot} par confirm ho gayi hai. Services: ${servicesText}.`,
-      REMINDER_REPLY_CONFIRMED: `Reminder jawab: ${clientName} nay ${timeSlot} par barber ${barberName} kay paas aane ki tasdeeq kar di hai.`,
-      REMINDER_REPLY_LATE: `Zaroori itlaa: ${clientName} nay reminder par jawab diya hai ke woh ${timeSlot} par late pohanchein gay.`,
-      REMINDER_REPLY_RESCHEDULE: `Ahem itlaa: ${clientName} aaj ${timeSlot} par nahi aa sakein gay aur naya time manga hai.`,
     };
 
     const spokenText = speechByLang[ownerLang];
     const logType: VoiceEventLog['type'] =
-      eventType === 'APPOINTMENT_CONFIRMED'
+      eventType === 'APPOINTMENT_CONFIRMED' || eventType === 'BARBER_BUSY_REROUTED'
         ? 'BOOKING'
         : isUrgent
         ? 'REPLY_URGENT'
         : 'REPLY_CONFIRMED';
+
+    const summaryLabel =
+      eventType === 'APPOINTMENT_CONFIRMED' || eventType === 'URGENT_BRIDAL_GROOM'
+        ? `${eventType === 'URGENT_BRIDAL_GROOM' ? 'URGENT Bridal/Groom' : 'Confirmed'} ${timeSlot} · Barber: ${barberName} · ${servicesText}`
+        : eventType === 'BARBER_BUSY_REROUTED'
+        ? `Bot Auto-Rerouted ${timeSlot} · Requested ${barberName} (Busy)`
+        : `Reminder Reply (${timeSlot}) · ${clientName}: "${rawBody}"`;
 
     setVoiceLogs((prev) => [
       {
@@ -1807,10 +2018,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         clientName,
         clientLang,
         ownerVoiceLang: ownerLang,
-        summary:
-          eventType === 'APPOINTMENT_CONFIRMED'
-            ? `Confirmed ${timeSlot} · Barber: ${barberName} · ${servicesText}`
-            : `Reminder Reply (${timeSlot}) · ${clientName}: "${rawBody}"`,
+        summary: summaryLabel,
         spokenText,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isUrgent,
@@ -1818,7 +2026,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       ...prev,
     ]);
 
-    if (eventType === 'APPOINTMENT_CONFIRMED') {
+    if (eventType === 'APPOINTMENT_CONFIRMED' || eventType === 'URGENT_BRIDAL_GROOM') {
       const hash = `SHA256:${Math.random().toString(36).substring(2, 6).toUpperCase()}...${Math.random()
         .toString(36)
         .substring(2, 6)
@@ -1841,9 +2049,128 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       ]);
     }
 
-    if (voiceFilter === 'ALL' || isUrgent || eventType === 'APPOINTMENT_CONFIRMED') {
-      speakHandsFree(spokenText, ownerLang, romanUrduByEvent[eventType]);
+    // Sleep-Window Rule: Queue silently when Counter Sleep is active (zero sound / chimes)
+    if (isCounterSleepingRef.current) {
+      setOvernightQueue((prev) => [
+        {
+          id: `ov-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+          clientName,
+          barberName,
+          services: servicesText,
+          timeSlot,
+          eventType,
+          receivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          summary: summaryLabel,
+        },
+        ...prev,
+      ]);
+      return;
     }
+
+    if (voiceFilter === 'ALL' || isUrgent || eventType === 'APPOINTMENT_CONFIRMED') {
+      speakHandsFree(spokenText, ownerLang);
+    }
+  };
+
+  // Toggle Counter Sleep <-> Keep Counter Awake (With Bluetooth/AUX Catch-Up Replay)
+  const handleToggleCounterSleep = async () => {
+    if (!isCounterSleeping) {
+      const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      isCounterSleepingRef.current = true;
+      setIsCounterSleeping(true);
+      setCounterSleptAt(nowTime);
+      stopSpeaking();
+      try {
+        await wakeLockRef.current?.release?.();
+      } catch {}
+      wakeLockRef.current = null;
+      setIsWakeLockActive(false);
+
+      fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/counter-sleep`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sleeping: true }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((s) => {
+          if (s) setConciergeState(s);
+        })
+        .catch(() => {});
+
+      setMaintToast(`🌙 Counter Sleep ON (${nowTime}): All overnight WhatsApp alerts queued silently.`);
+      setTimeout(() => setMaintToast(null), 5000);
+      return;
+    }
+
+    // Waking up Counter -> Re-enable wake lock & replay queued overnight summary aloud!
+    isCounterSleepingRef.current = false;
+    setIsCounterSleeping(false);
+    const queuedSnapshot = [...overnightQueue];
+    setOvernightQueue([]);
+    setCounterSleptAt(null);
+
+    try {
+      const nav = navigator as Navigator & {
+        wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> };
+      };
+      if (nav.wakeLock) {
+        wakeLockRef.current = await nav.wakeLock.request('screen');
+      }
+    } catch {}
+    setIsWakeLockActive(true);
+
+    fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/counter-sleep`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sleeping: false }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => {
+        if (s) setConciergeState(s);
+      })
+      .catch(() => {});
+
+    const ownerFirst = currentSalon.owner.split(' ')[0] || 'Sahab';
+    if (queuedSnapshot.length > 0) {
+      const topItems = queuedSnapshot.slice(0, 3);
+      const summaryText: Record<VoiceLang, string> = {
+        ur: `صبح بخیر ${ownerFirst} صاحب! کاؤنٹر جاگ گیا ہے۔ رات بھر میں ${queuedSnapshot.length} واٹس ایپ پیغامات موصول ہوئے: ${topItems
+          .map((item) => `${item.clientName}، باربر ${item.barberName}، ${item.timeSlot}`)
+          .join('۔ ')}۔`,
+        ar: `صباح الخير يا ${ownerFirst}! تم استيقاظ الكاونتر. لديك ${queuedSnapshot.length} رسائل واتساب خلال فترة النوم: ${topItems
+          .map((item) => `${item.clientName} مع ${item.barberName} الساعة ${item.timeSlot}`)
+          .join('، ')}.`,
+        en: `Good morning ${ownerFirst}! Counter is awake. While sleeping, you received ${queuedSnapshot.length} WhatsApp messages: ${topItems
+          .map((item) => `${item.clientName} with ${item.barberName} at ${item.timeSlot}`)
+          .join('. ')}.`,
+      };
+      const catchUpMsg = summaryText[ownerLang];
+      speakHandsFree(catchUpMsg, ownerLang);
+      setVoiceLogs((prev) => [
+        {
+          id: `vlog-wake-${Date.now()}`,
+          type: 'BOOKING',
+          clientName: `${queuedSnapshot.length} Overnight Items`,
+          clientLang: ownerLang,
+          ownerVoiceLang: ownerLang,
+          summary: `Morning Catch-Up Replay · Cleared ${queuedSnapshot.length} queued overnight message(s)`,
+          spokenText: catchUpMsg,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isUrgent: false,
+        },
+        ...prev,
+      ]);
+      setMaintToast(`☀️ Counter Awake! Played & cleared ${queuedSnapshot.length} overnight WhatsApp message(s).`);
+    } else {
+      const awakePing: Record<VoiceLang, string> = {
+        ur: `کاؤنٹر اب جاگ گیا ہے۔ رات بھر کوئی نیا پیغام نہیں آیا۔`,
+        ar: `الكاونتر نشط الآن. لا توجد رسائل متراكمة خلال فترة النوم.`,
+        en: `Counter is now awake and listening for WhatsApp bookings.`,
+      };
+      speakHandsFree(awakePing[ownerLang], ownerLang);
+      setMaintToast(`☀️ Keep Counter Awake active! Listening hands-free in ${ownerLang.toUpperCase()}.`);
+    }
+    setTimeout(() => setMaintToast(null), 6000);
   };
 
   // Process incoming concierge state updates (both from 6s polling and Retention Settings simulator)
@@ -1872,7 +2199,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             service: a.service,
             price: a.price,
             timeSlot: a.timeSlot,
-            durationMins: 35,
+            durationMins: a.durationMins || 35,
+            scheduledEndMs: a.scheduledEndMs || Date.now() + (a.durationMins || 35) * 60000,
+            sourceType: a.sourceType || 'WHATSAPP_BOT',
             chairLabel: barberChairs[a.barberName],
             status: a.status,
           }));
@@ -1918,13 +2247,45 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     return () => clearInterval(interval);
   });
 
+  // Auto-Completion Rule: Automatically mark active bookings COMPLETED 15 mins after scheduled end time (unless Flagged or Canceled)
+  useEffect(() => {
+    if (isFounderInspector || isOwnerLoggedOut) return;
+    const checkAutoComplete = () => {
+      const nowMs = Date.now();
+      const fifteenMinsMs = 15 * 60 * 1000;
+      const dueBookings = bookings.filter(
+        (b) =>
+          b.status !== 'COMPLETED' &&
+          !b.flagged &&
+          !b.canceled &&
+          typeof b.scheduledEndMs === 'number' &&
+          nowMs >= b.scheduledEndMs + fifteenMinsMs
+      );
+      if (dueBookings.length === 0) return;
+
+      dueBookings.forEach((due) => {
+        handleUpdateStatus(due.id, 'COMPLETED', true);
+      });
+    };
+
+    const timer = window.setInterval(checkAutoComplete, 20000);
+    return () => window.clearInterval(timer);
+  });
+
   const handleTriggerSimulatedVoiceWebhook = async (
-    kind: 'CONFIRMATION' | 'REMINDER_LATE' | 'REMINDER_COMING'
+    kind: 'CONFIRMATION' | 'REMINDER_LATE' | 'REMINDER_COMING' | 'BRIDAL_URGENT'
   ) => {
     setIsTestingLoudAlert(true);
     try {
       const payload =
-        kind === 'CONFIRMATION'
+        kind === 'BRIDAL_URGENT'
+          ? {
+              salonId: currentSalon.id,
+              fromPhone: '+92 333 9911220',
+              clientName: 'Sana Bridal VIP',
+              messageText: 'Urgent Bridal Package & Groom booking with barber Hamza at 6:00 PM',
+            }
+          : kind === 'CONFIRMATION'
           ? {
               salonId: currentSalon.id,
               fromPhone: '+92 300 9988776',
@@ -1946,20 +2307,27 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               messageText: 'Yes I am coming at 5:00 PM with barber Tariq, confirm',
             };
 
-      const res = await fetch('/api/whatsapp/webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/concierge/simulate`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
       if (!res.ok) throw new Error('Webhook failed');
       const data = (await res.json()) as { state?: SalonConciergeStateResponse };
       if (data.state) {
         processIncomingConciergeState(data.state);
       }
-      setMaintToast('🔊 Incoming WhatsApp message received & announced loudly!');
+      setMaintToast(
+        isCounterSleeping
+          ? '🌙 Overnight message queued silently while Counter Sleep is active!'
+          : '🔊 Incoming WhatsApp message received & announced loudly!'
+      );
       setTimeout(() => setMaintToast(null), 4500);
     } catch {
-      setMaintToast('Could not trigger loud announcement test.');
+      setMaintToast('Could not trigger announcement test.');
     } finally {
       setIsTestingLoudAlert(false);
     }
@@ -1973,13 +2341,21 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setServices((prev) => prev.map((s) => (s.id === id ? { ...s, price: newPrice } : s)));
   };
 
-  const handleUpdateStatus = (id: string, status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED') => {
+  const handleUpdateStatus = (
+    id: string,
+    status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED',
+    isAutoCompleted = false
+  ) => {
     const targetBooking = bookings.find((b) => b.id === id);
     setBookings((prev) =>
       prev.map((b) => {
         if (b.id === id) {
           if (status === 'COMPLETED') {
-            setMaintToast(`✓ Chair freed! ${b.clientName}'s visit saved & T+2h Google Review prompt scheduled.`);
+            setMaintToast(
+              isAutoCompleted
+                ? `⏱ Auto-Done (+15m past end): ${b.clientName}'s chair freed automatically.`
+                : `✓ Done! ${b.clientName}'s chair freed & visit recorded.`
+            );
             setTimeout(() => setMaintToast(null), 4500);
           } else if (status === 'IN_CHAIR') {
             setMaintToast(`💈 ${b.clientName} is now In-Chair with ${b.barberName}.`);
@@ -2013,89 +2389,255 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }
   };
 
-  const handleToggleWalkInService = (svcId: string) => {
-    setWalkInSelectedServiceIds((prev) => {
-      const exists = prev.includes(svcId);
-      const next = exists ? prev.filter((id) => id !== svcId) : [...prev, svcId];
-      const nextTotal = services
-        .filter((s) => next.includes(s.id))
-        .reduce((sum, s) => sum + s.price, 0);
-      setWalkInPrice(nextTotal);
-      return next;
-    });
+  const handleToggleFlagBooking = (id: string) => {
+    setBookings((prev) =>
+      prev.map((b) => {
+        if (b.id !== id) return b;
+        const nextFlagged = !b.flagged;
+        setMaintToast(
+          nextFlagged
+            ? `🚩 Flagged ${b.clientName}: Excluded from 15m auto-completion.`
+            : `✓ Unflagged ${b.clientName}: Normal 15m auto-completion restored.`
+        );
+        setTimeout(() => setMaintToast(null), 3500);
+        return { ...b, flagged: nextFlagged };
+      })
+    );
   };
 
-  const handleSaveWalkIn = () => {
-    const id = `WLK-${Date.now().toString().slice(-4)}`;
-    const timeSlot = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const chosenServices = services.filter((s) => walkInSelectedServiceIds.includes(s.id));
-    const serviceLabel =
-      chosenServices.length > 0
-        ? chosenServices.map((s) => s.name).join(' + ')
-        : services[0]?.name || 'Master Haircut';
-    const totalDuration =
-      chosenServices.length > 0
-        ? chosenServices.reduce((sum, s) => sum + (s.durationMins || 35), 0)
-        : 35;
-    const assignedBarber = barbersList.includes(walkInBarber) ? walkInBarber : barbersList[0] || walkInBarber;
-    const newBooking: BookingRecord = {
-      id,
-      clientName: walkInName.trim() || 'Walk-in Client',
-      barberName: assignedBarber,
-      phone: walkInPhone.trim() || '+92 300 0000000',
-      service: serviceLabel,
-      price: walkInPrice,
-      timeSlot,
-      durationMins: totalDuration,
-      chairLabel: barberChairs[assignedBarber],
-      status: walkInImmediateChair ? 'IN_CHAIR' : 'CONFIRMED',
+  // $0.00 Local Chair Lock Executor (Used by both Browser Voice Intent Parser & 2-Tap Quick Pills)
+  const executeChairLock = async (params: {
+    barberName: string;
+    startTimeSlot: string;
+    endTimeSlot: string;
+    startMinutes: number;
+    endMinutes: number;
+    durationMins: number;
+    source: 'VOICE' | 'QUICK_PILL';
+    transcript?: string;
+    silent?: boolean;
+  }) => {
+    const {
+      barberName,
+      startTimeSlot,
+      endTimeSlot,
+      startMinutes,
+      endMinutes,
+      durationMins,
+      source,
+      transcript,
+      silent = false,
+    } = params;
+
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/chair-locks`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            barberName,
+            chairLabel: barberChairs[barberName],
+            startTimeSlot,
+            endTimeSlot,
+            startMinutes,
+            endMinutes,
+            durationMins,
+            source,
+            transcript,
+            barbers: barbersList,
+          }),
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.lock?.id) seenApptIdsRef.current.add(data.lock.id);
+        if (data?.state) setConciergeState(data.state);
+      }
+    } catch {}
+
+    const lockBooking: BookingRecord = {
+      id: `WLK-${Date.now().toString().slice(-4)}`,
+      clientName:
+        source === 'VOICE'
+          ? `Walk-In · Voice Lock (${durationMins}m)`
+          : `Walk-In · Chair Busy (${durationMins}m)`,
+      barberName,
+      phone: currentSalon.phone,
+      service: `Chair Blocked (${startTimeSlot} – ${endTimeSlot})`,
+      price: 0,
+      timeSlot: startTimeSlot,
+      durationMins,
+      scheduledEndMs: Date.now() + durationMins * 60000,
+      sourceType: 'WALK_IN_BUSY',
+      chairLabel: barberChairs[barberName],
+      status: 'IN_CHAIR',
+    };
+    setBookings((prev) => [lockBooking, ...prev]);
+
+    const voiceConfirmation: Record<VoiceLang, string> = {
+      ur: `${barberName} کی کرسی ${startTimeSlot} سے ${endTimeSlot} تک واک اِن کے لیے لاک کر دی گئی ہے۔ اس وقت کے واٹس ایپ کسٹمرز کو خودکار طور پر دیگر خالی باربرز دکھائے جائیں گے۔`,
+      ar: `تم حجز كرسي ${barberName} من ${startTimeSlot} إلى ${endTimeSlot} لعميل الحضور المباشر. سيتم تحويل طلبات واتساب تلقائياً للحلاقين المتاحين.`,
+      en: `Chair locked for ${barberName} from ${startTimeSlot} to ${endTimeSlot}. Incoming WhatsApp requests during this window will automatically reroute to free barbers.`,
     };
 
-    setBookings((prev) => [newBooking, ...prev]);
-    setIsWalkInModalOpen(false);
-
-    fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/clients`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: newBooking.clientName,
-        phone: newBooking.phone,
-        birthDate: walkInBirthDate.trim(),
-      }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data?.state) setConciergeState(data.state);
-      })
-      .catch(() => {});
-    setWalkInBirthDate('');
-
-    // Speak aloud in Owner's preferred language with Roman Urdu fallback for high-fidelity audio
-    const urduScript = `${assignedBarber} بھائی! نیا واک اِن کسٹمر ${newBooking.clientName} ${walkInImmediateChair ? 'کرسی پر بیٹھ گیا ہے' : 'قطار میں شامل ہو گیا ہے'}۔ سروس: ${serviceLabel}۔`;
-    const romanUrdu = `${assignedBarber} Bhai! Naya walk-in customer ${newBooking.clientName} ${walkInImmediateChair ? 'chair par baith gaya hai' : 'queue mein shamil ho gaya hai'}. Service: ${serviceLabel}.`;
-    const englishSpeech = `Barber ${assignedBarber}, new walk-in client ${newBooking.clientName} is ${walkInImmediateChair ? 'seated in chair' : 'in waiting queue'} for ${serviceLabel}.`;
-    const arabicSpeech = `الحلاق ${assignedBarber}! عميل جديد ${newBooking.clientName} ${walkInImmediateChair ? 'في الكرسي' : 'في الانتظار'}، الخدمة: ${serviceLabel}.`;
-
-    const speechText = ownerLang === 'ur' ? urduScript : ownerLang === 'ar' ? arabicSpeech : englishSpeech;
-    speakHandsFree(speechText, ownerLang, romanUrdu);
+    if (!silent) {
+      speakHandsFree(voiceConfirmation[ownerLang], ownerLang);
+    }
 
     setVoiceLogs((prev) => [
       {
-        id: `vlog-wlk-${Date.now()}`,
+        id: `vlog-lck-${Date.now()}`,
         type: 'BOOKING',
-        clientName: newBooking.clientName,
+        clientName: `${barberName} (${source === 'VOICE' ? 'Voice Lock' : 'Quick Pill'})`,
         clientLang: ownerLang,
         ownerVoiceLang: ownerLang,
-        summary: `Walk-In ${timeSlot} · Barber: ${assignedBarber} · ${serviceLabel}`,
-        spokenText: speechText,
-        time: timeSlot,
+        summary: `Chair Locked ${startTimeSlot}–${endTimeSlot} (${durationMins}m) · Auto WhatsApp Busy-Reroute Active`,
+        spokenText: voiceConfirmation[ownerLang],
+        time: startTimeSlot,
         isUrgent: false,
       },
       ...prev,
     ]);
 
-    setMaintToast(`💈 Walk-in ${newBooking.clientName} added! Queue updated & voice alert dispatched.`);
-    setTimeout(() => setMaintToast(null), 4500);
+    setMaintToast(
+      `🔒 ${barberName} locked (${startTimeSlot} – ${endTimeSlot}). WhatsApp bot now marks ${barberName} Busy & reroutes!`
+    );
+    setTimeout(() => setMaintToast(null), 5000);
+  };
+
+  const handleReleaseChairLock = async (lockId: string, barberName: string) => {
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/chair-locks/${encodeURIComponent(lockId)}`,
+        { method: 'DELETE' }
+      );
+      if (res.ok) {
+        const nextState = (await res.json()) as SalonConciergeStateResponse;
+        setConciergeState(nextState);
+      }
+    } catch {}
+    setMaintToast(`✓ ${barberName}'s chair unlocked and open for WhatsApp bookings.`);
+    setTimeout(() => setMaintToast(null), 3500);
+  };
+
+  const handleQuickPillTap = (barber: string, durationMins: number) => {
+    if (armedQuickPill && armedQuickPill.barber === barber && armedQuickPill.durationMins === durationMins) {
+      setArmedQuickPill(null);
+      const now = new Date();
+      const startMinutes = now.getHours() * 60 + now.getMinutes();
+      const endMinutes = startMinutes + durationMins;
+      executeChairLock({
+        barberName: barber,
+        startTimeSlot: formatTimeFromMinutes(startMinutes),
+        endTimeSlot: formatTimeFromMinutes(endMinutes),
+        startMinutes,
+        endMinutes,
+        durationMins,
+        source: 'QUICK_PILL',
+        silent: true, // Silent instant locking during loud rush hours
+      });
+      return;
+    }
+
+    setArmedQuickPill({ barber, durationMins });
+    window.setTimeout(() => {
+      setArmedQuickPill((curr) =>
+        curr && curr.barber === barber && curr.durationMins === durationMins ? null : curr
+      );
+    }, 4000);
+  };
+
+  const stopHoldToSpeakMic = () => {
+    if (micTimerRef.current) {
+      window.clearInterval(micTimerRef.current);
+      micTimerRef.current = null;
+    }
+    try {
+      recognitionRef.current?.stop?.();
+    } catch {}
+    setIsListeningMic(false);
+    setMicElapsedSecs(0);
+
+    const captured = latestTranscriptRef.current.trim();
+    if (captured) {
+      latestTranscriptRef.current = '';
+      const intent = parseVoiceChairIntent(captured, barbersList);
+      executeChairLock({
+        ...intent,
+        source: 'VOICE',
+        transcript: captured,
+        silent: false,
+      });
+    }
+  };
+
+  const startHoldToSpeakMic = () => {
+    if (isListeningMic) return;
+    const SpeechRec =
+      (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any })
+        .SpeechRecognition ||
+      (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any })
+        .webkitSpeechRecognition;
+
+    latestTranscriptRef.current = '';
+    setVoiceTranscript('');
+
+    if (!SpeechRec) {
+      setMaintToast(
+        'Native SpeechRecognition unavailable in this browser preview. Use Quick Voice Command bar or +30m/+1h pills.'
+      );
+      setTimeout(() => setMaintToast(null), 5000);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRec();
+      recognition.lang = ownerLang === 'ur' ? 'ur-PK' : ownerLang === 'ar' ? 'ar-SA' : 'en-US';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      recognition.onresult = (event: any) => {
+        let combined = '';
+        for (let i = 0; i < event.results.length; i++) {
+          combined += event.results[i][0].transcript + ' ';
+        }
+        latestTranscriptRef.current = combined.trim();
+        setVoiceTranscript(combined.trim());
+      };
+
+      recognition.onerror = () => {
+        stopHoldToSpeakMic();
+      };
+
+      recognition.onend = () => {
+        if (micTimerRef.current) {
+          window.clearInterval(micTimerRef.current);
+          micTimerRef.current = null;
+        }
+        setIsListeningMic(false);
+        setMicElapsedSecs(0);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsListeningMic(true);
+      setMicElapsedSecs(0);
+
+      micTimerRef.current = window.setInterval(() => {
+        setMicElapsedSecs((prev) => {
+          if (prev + 1 >= 30) {
+            stopHoldToSpeakMic();
+            return 30;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch {
+      setIsListeningMic(false);
+      setMaintToast('Could not access browser microphone. Use Quick Voice Command or +30m/+1h pills.');
+      setTimeout(() => setMaintToast(null), 4000);
+    }
   };
 
   const BARBER_SERVICE_STATS: Record<
@@ -2286,7 +2828,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 {getFounderNoticeForOwner(currentSalon.onboardingLanguage)}
               </div>
               <p className="text-[11px] font-mono text-[#6E7681] break-words [overflow-wrap:break-word]">
-                Today's Live Queue, Salon Strategy Matrix Boxes, Multi-Service Carts, and Voice Concierge belong exclusively inside the Salon Owner Dashboard (`?role=salon_owner`).
+                Today&apos;s Live Queue, Salon Strategy Matrix Boxes, Multi-Service Carts, and Voice Concierge belong exclusively inside the authenticated Salon Owner session.
               </p>
             </div>
           </div>
@@ -2589,20 +3131,74 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   }
 
   // ============================================================================
-  // COMPUTED OPERATIONAL METRICS FOR LIVE STATUS STRIP & TIMELINE
+  // COMPUTED OPERATIONAL METRICS FOR LIVE STATUS STRIP, PACKAGE TIER & TIMELINE
   // ============================================================================
+  const packageTier: SalonPackageTier =
+    currentSalon.planId === 'STARTER'
+      ? 'STARTER'
+      : currentSalon.planId === 'GROWTH'
+      ? 'PRO'
+      : 'PRO++';
+
   const sortedBookings = [...bookings].sort(
     (a, b) => parseTimeSlotMinutes(a.timeSlot) - parseTimeSlotMinutes(b.timeSlot)
   );
   const todayTotalRevenue = bookings.reduce((sum, b) => sum + b.price, 0);
-  const unverifiedDeposits = pendingDeposits.filter((d) => !d.verified);
+  // Package Tier Gating: STARTER hides Bridal/Deposit SLA Locks & Google Rating Booster Alerts
+  const unverifiedDeposits =
+    packageTier === 'STARTER' ? [] : pendingDeposits.filter((d) => !d.verified);
   const pendingDepositsTotal = unverifiedDeposits.reduce((sum, d) => sum + d.amount, 0);
-  const activeReviewAlerts = (conciergeState?.alerts || []).filter(
-    (a) => a.status === 'OWNER_INTERVENTION_NEEDED'
-  );
+  const activeReviewAlerts =
+    packageTier === 'STARTER'
+      ? []
+      : (conciergeState?.alerts || []).filter((a) => a.status === 'OWNER_INTERVENTION_NEEDED');
   const openHandovers = handoverRequests.filter((h) => !h.handled);
   const totalUrgentCount =
     activeReviewAlerts.length + unverifiedDeposits.length + openHandovers.length;
+  const activeChairLocks = conciergeState?.chairLocks || [];
+
+  // Top Booked Services paired with most-requested stylist & share %
+  const topServicesWithStylists = isLadies
+    ? [
+        {
+          service: 'Signature Party Makeup & Styling',
+          stylist: barbersList[0] || 'Ayesha',
+          pct: 61,
+          bookingsCount: 19,
+        },
+        {
+          service: 'Hydra-Facial & Skin Polish',
+          stylist: barbersList[1] || barbersList[0] || 'Hina',
+          pct: 55,
+          bookingsCount: 14,
+        },
+        {
+          service: 'Keratin Hair Protein Treatment',
+          stylist: barbersList[2] || barbersList[0] || 'Sara',
+          pct: 49,
+          bookingsCount: 9,
+        },
+      ]
+    : [
+        {
+          service: 'Master Haircut & Skin Fade',
+          stylist: barbersList[0] || 'Master Aslam',
+          pct: 64,
+          bookingsCount: 24,
+        },
+        {
+          service: 'Classic Beard Trim & Sculpt',
+          stylist: barbersList[1] || barbersList[0] || 'Tariq Mehmood',
+          pct: 58,
+          bookingsCount: 18,
+        },
+        {
+          service: 'Charcoal Deep Detox Facial',
+          stylist: barbersList[2] || barbersList[0] || 'Ali Raza',
+          pct: 52,
+          bookingsCount: 11,
+        },
+      ];
 
   // ============================================================================
   // SALON OWNER FULL PWA DASHBOARD (MATTE OBSIDIAN · LIVE FLOOR + MANAGE)
@@ -2614,10 +3210,23 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       {/* ========================================================================= */}
       <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 space-y-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2.5">
-          {/* WhatsApp Gateway Connection Badge (#3FB950 on #0D3822) */}
-          <div className="inline-flex items-center gap-2 rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950]">
-            <span className="size-2 rounded-full bg-[#3FB950]" />
-            <span>WhatsApp Gateway · Connected</span>
+          {/* WhatsApp Gateway Connection Badge (#3FB950 on #0D3822) + Strict Tier Badge */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950]">
+              <span className="size-2 rounded-full bg-[#3FB950]" />
+              <span>WhatsApp Gateway · Connected</span>
+            </div>
+            <span
+              className={`rounded-xl border px-2.5 py-1.5 text-[11px] font-mono font-bold ${
+                packageTier === 'STARTER'
+                  ? 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
+                  : packageTier === 'PRO'
+                  ? 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
+                  : 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
+              }`}
+            >
+              TIER: {packageTier}
+            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
@@ -2649,10 +3258,55 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               </button>
             </div>
 
+            {/* Strict Owner Voice Language Selector (ur-PK / ar-SA / en-US) */}
+            <select
+              aria-label="Owner Voice Language"
+              value={ownerLang}
+              onChange={(e) => setOwnerLang(e.target.value as VoiceLang)}
+              className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-2.5 text-sm font-mono font-bold text-[#06B6D4] focus:border-[#06B6D4] focus:outline-none"
+            >
+              <option value="ur">اردو (ur-PK)</option>
+              <option value="ar">العربية (ar-SA)</option>
+              <option value="en">English (en-US)</option>
+            </select>
+
+            {/* Counter Sleep / Keep Counter Awake Toggle */}
+            <button
+              type="button"
+              onClick={handleToggleCounterSleep}
+              className={`min-h-[48px] rounded-xl border px-3 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                isCounterSleeping
+                  ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
+                  : 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
+              }`}
+              title={
+                isCounterSleeping
+                  ? 'Tap in the morning to replay overnight WhatsApp queue aloud'
+                  : 'Tap at closing time to silence & queue overnight WhatsApp alerts'
+              }
+            >
+              {isCounterSleeping ? (
+                <>
+                  <Sun className="size-4 shrink-0" />
+                  <span>Keep Counter Awake</span>
+                  {overnightQueue.length > 0 && (
+                    <span className="rounded bg-[#0D1117] px-1.5 py-0.5 text-[10px] text-[#D29922]">
+                      {overnightQueue.length}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Moon className="size-4 shrink-0" />
+                  <span>Counter Sleep</span>
+                </>
+              )}
+            </button>
+
             <button
               type="button"
               onClick={toggleScreenWakeLock}
-              className={`min-h-[40px] rounded-xl border px-2.5 text-[11px] font-mono font-bold transition flex items-center gap-1.5 ${
+              className={`min-h-[48px] rounded-xl border px-2.5 text-[11px] font-mono font-bold transition flex items-center gap-1.5 ${
                 isWakeLockActive
                   ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
                   : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
@@ -2670,26 +3324,26 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 setIsLoudspeakerBoostActive(next);
                 setMaintToast(
                   next
-                    ? '📢 Rush-Hour Loudspeaker Boost ON: Loud 3-tone chime + clear speech cadence active.'
+                    ? '📢 Bluetooth/AUX Boost ON: Multi-tone wake chime + pre-speech buffer active.'
                     : '📢 Loudspeaker Boost set to normal volume.'
                 );
                 setTimeout(() => setMaintToast(null), 3500);
               }}
-              className={`min-h-[40px] rounded-xl border px-2.5 text-[11px] font-mono font-bold transition flex items-center gap-1.5 ${
+              className={`min-h-[48px] rounded-xl border px-2.5 text-[11px] font-mono font-bold transition flex items-center gap-1.5 ${
                 isLoudspeakerBoostActive
                   ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
                   : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
               }`}
-              title="Boost chime & speech clarity for noisy salon hours"
+              title="Boost chime & Bluetooth speaker clarity for noisy salon hours"
             >
               <BellRing className="size-3.5 shrink-0" />
-              <span className="hidden sm:inline">{isLoudspeakerBoostActive ? 'Boost ON' : 'Boost'}</span>
+              <span className="hidden sm:inline">{isLoudspeakerBoostActive ? 'AUX Boost' : 'Boost'}</span>
             </button>
 
             <button
               type="button"
               onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
-              className={`min-h-[40px] min-w-[40px] rounded-xl border px-2.5 grid place-items-center transition ${
+              className={`min-h-[48px] min-w-[48px] rounded-xl border px-2.5 grid place-items-center transition ${
                 isVoiceEnabled
                   ? 'border-[#30363D] bg-[#0D1117] text-[#06B6D4]'
                   : 'border-[#30363D] bg-[#0D1117] text-[#6E7681]'
@@ -2703,13 +3357,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             <button
               type="button"
               onClick={() => {
+                if (onLogout) {
+                  onLogout();
+                  return;
+                }
                 setReLoginPhoneInput(currentSalon.phone);
                 setReLoginMatchedSalonId(currentSalon.id);
                 setReLoginStep('PHONE');
                 setIsOwnerLoggedOut(true);
               }}
-              className="min-h-[40px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] px-3 text-xs font-mono font-bold text-[#8B949E] hover:text-[#D29922] transition flex items-center gap-1.5"
-              title="Log out"
+              className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#F85149] px-3 text-xs font-mono font-bold text-[#8B949E] hover:text-[#F85149] transition flex items-center gap-1.5"
+              title="Sign out"
             >
               <LogOut className="size-3.5" />
               <span className="hidden sm:inline">Log Out</span>
@@ -2719,7 +3377,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="min-h-[40px] min-w-[40px] rounded-xl border border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] grid place-items-center transition"
+                className="min-h-[48px] min-w-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] grid place-items-center transition"
                 title="Close Portal"
               >
                 <X className="size-4" />
@@ -2728,7 +3386,35 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           </div>
         </div>
 
-        {/* Salon Title + Today's Total Revenue & Pending Deposits (#D29922 Gold Highlight) */}
+        {/* Salon Switcher: Strictly hidden for tenant-locked SALON_OWNER sessions; visible only for Founder preview */}
+        {!onboardedData && !lockedSalonId && authUser?.userRole === 'FOUNDER' && (
+          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#21262D]">
+            <span className="text-[10px] font-mono font-bold uppercase text-[#8B949E]">
+              Active Shop / Tier:
+            </span>
+            {salonsState.map((s) => {
+              const sTier: SalonPackageTier =
+                s.planId === 'STARTER' ? 'STARTER' : s.planId === 'GROWTH' ? 'PRO' : 'PRO++';
+              const active = s.id === currentSalon.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setSelectedSalonId(s.id)}
+                  className={`min-h-[36px] rounded-lg border px-2.5 py-1 text-[11px] font-mono font-bold transition ${
+                    active
+                      ? 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
+                      : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
+                  }`}
+                >
+                  {s.name.split(' ')[0]} ({sTier})
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Salon Title + Today's Total Revenue & Tier-Gated Secondary Metric */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-[#21262D]">
           <div className="min-w-0">
             <h1 className="text-lg sm:text-xl font-black text-[#F0F6FC] truncate">
@@ -2749,24 +3435,64 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 {todayTotalRevenue.toLocaleString()}
               </span>
             </div>
-            <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[#8B949E] block">
-                Pending Deposits
-              </span>
-              <span className="text-base sm:text-lg font-black font-mono tabular-nums text-[#D29922]">
-                {regionConfig.symbol}
-                {pendingDepositsTotal.toLocaleString()}
-              </span>
-            </div>
+            {packageTier === 'STARTER' ? (
+              <div className="rounded-xl border border-[#116329] bg-[#0D3822] px-3.5 py-2">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-[#3FB950] block">
+                  24h / 2h Reminders
+                </span>
+                <span className="text-base sm:text-lg font-black font-mono tabular-nums text-[#3FB950]">
+                  Active ✓
+                </span>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-[#8B949E] block">
+                  Pending Deposits
+                </span>
+                <span className="text-base sm:text-lg font-black font-mono tabular-nums text-[#D29922]">
+                  {regionConfig.symbol}
+                  {pendingDepositsTotal.toLocaleString()}
+                </span>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Counter Sleep Standby Banner */}
+        {isCounterSleeping && (
+          <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3.5 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 text-xs text-[#F0F6FC]">
+              <Moon className="size-4 text-[#D29922] shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-[#D29922] font-mono">
+                  Counter Sleep Active since {counterSleptAt || 'Closing'} · Audio Silenced
+                </p>
+                <p className="text-[#F0F6FC]/90 font-sans mt-0.5">
+                  {overnightQueue.length} overnight WhatsApp message(s) queued quietly. Tap &ldquo;Keep Counter Awake&rdquo; in the morning to replay aloud.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleCounterSleep}
+              className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-black uppercase shrink-0 transition"
+            >
+              Keep Counter Awake ({overnightQueue.length})
+            </button>
+          </div>
+        )}
 
         {/* Active Speaking Indicator or Toast */}
         {currentlySpeakingText && (
           <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs font-mono text-[#06B6D4] min-w-0">
               <Radio className="size-4 shrink-0" />
-              <span className="font-sans text-[#F0F6FC] truncate">&ldquo;{currentlySpeakingText}&rdquo;</span>
+              <span
+                dir={ownerLang === 'ur' || ownerLang === 'ar' ? 'rtl' : 'ltr'}
+                className="font-sans text-[#F0F6FC] truncate"
+              >
+                &ldquo;{currentlySpeakingText}&rdquo;
+              </span>
             </div>
             <button
               type="button"
@@ -2837,7 +3563,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       {/* ========================================================================= */}
       {currentSectionMode === 'LIVE' && (
         <div className="space-y-4">
-          {/* 1. URGENT ALERTS CARD (TOP PRIORITY) */}
+          {/* 1. URGENT ALERTS CARD (TOP PRIORITY · GATED BY PACKAGE TIER) */}
           {totalUrgentCount > 0 && (
             <section
               aria-label="Urgent Floor Alerts"
@@ -2856,7 +3582,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               </div>
 
               <div className="space-y-2.5">
-                {/* A. OWNER_INTERVENTION_NEEDED (1–3 Star Feedback Alerts) */}
+                {/* A. OWNER_INTERVENTION_NEEDED (1–3 Star Feedback Alerts - PRO / PRO++ ONLY) */}
                 {activeReviewAlerts.map((alert) => (
                   <div
                     key={alert.id}
@@ -2888,7 +3614,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   </div>
                 ))}
 
-                {/* B. Unverified Raast / EasyPaisa Deposit Screenshots */}
+                {/* B. Unverified Raast / EasyPaisa Deposit Screenshots (PRO / PRO++ ONLY) */}
                 {unverifiedDeposits.map((dep) => {
                   const isExpanded = expandedDepositReceiptId === dep.id;
                   return (
@@ -3006,7 +3732,163 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             </section>
           )}
 
-          {/* 2. TODAY'S LIVE SCHEDULE & CHAIR TIMELINE */}
+          {/* 2. QUICK CHAIR LOCK ($0.00 ZERO-COST VOICE BLOCKER + 2-TAP PILLS + WHATSAPP BUSY-REROUTE) */}
+          <section
+            aria-label="Quick Chair Lock"
+            className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-4"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#30363D] pb-3.5">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Lock className="size-4 text-[#58A6FF] shrink-0" />
+                  <h2 className="text-base sm:text-lg font-black text-[#F0F6FC]">
+                    Quick Chair Lock · $0.00 Local Voice &amp; 2-Tap Pills
+                  </h2>
+                </div>
+                <p className="text-xs text-[#8B949E] font-sans mt-0.5">
+                  Block walk-in chairs hands-free with native browser SpeechRecognition ({ownerLang === 'ur' ? 'ur-PK' : ownerLang === 'ar' ? 'ar-SA' : 'en-US'}) or silent 2-tap duration pills. WhatsApp automatically marks busy barbers &amp; reroutes clients.
+                </p>
+              </div>
+
+              {/* Hold-to-Speak Mic Button (min-h-[48px], up to 30s continuous capture) */}
+              <button
+                type="button"
+                onPointerDown={startHoldToSpeakMic}
+                onPointerUp={stopHoldToSpeakMic}
+                onPointerCancel={stopHoldToSpeakMic}
+                onClick={() => {
+                  if (isListeningMic) stopHoldToSpeakMic();
+                }}
+                className={`min-h-[48px] rounded-xl px-5 py-2.5 text-xs font-mono font-black uppercase transition flex items-center justify-center gap-2 shrink-0 select-none ${
+                  isListeningMic
+                    ? 'bg-[#F85149] text-[#0D1117]'
+                    : 'bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117]'
+                }`}
+              >
+                {isListeningMic ? (
+                  <>
+                    <MicOff className="size-4" />
+                    <span className="tabular-nums">
+                      Listening 00:{String(micElapsedSecs).padStart(2, '0')} / 00:30 · Release to Lock
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Mic className="size-4" />
+                    <span>Hold to Speak Chair Lock (30s)</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Live Transcript / $0.00 Local JS Intent Parser Input Bar */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!voiceTranscript.trim()) return;
+                const intent = parseVoiceChairIntent(voiceTranscript, barbersList);
+                executeChairLock({
+                  ...intent,
+                  source: 'VOICE',
+                  transcript: voiceTranscript.trim(),
+                  silent: false,
+                });
+                setVoiceTranscript('');
+              }}
+              className="flex flex-col sm:flex-row gap-2"
+            >
+              <input
+                type="text"
+                value={voiceTranscript}
+                onChange={(e) => setVoiceTranscript(e.target.value)}
+                placeholder='Say or type e.g. "Hamza 7 to 8 PM" or "Aslam 30 minutes"'
+                className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-[#F0F6FC] placeholder:text-[#484F58] focus:border-[#06B6D4] focus:outline-none"
+              />
+              <button
+                type="submit"
+                className="min-h-[48px] rounded-xl border border-[#1F6FEB] bg-[#0D2138] hover:bg-[#132e4d] px-4 py-2 text-xs font-mono font-bold text-[#58A6FF] shrink-0 transition"
+              >
+                Parse &amp; Lock Chair
+              </button>
+            </form>
+
+            {/* Barber Chair Cards with 2-Tap Silent Quick Duration Pills (+30m / +1h) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {barbersList.map((barber, idx) => {
+                const chairName = barberChairs[barber] || `Chair #${idx + 1}`;
+                const activeLock = activeChairLocks.find(
+                  (l) => l.barberName.toLowerCase() === barber.toLowerCase()
+                );
+                const isArmed30 =
+                  armedQuickPill?.barber === barber && armedQuickPill.durationMins === 30;
+                const isArmed60 =
+                  armedQuickPill?.barber === barber && armedQuickPill.durationMins === 60;
+
+                return (
+                  <div
+                    key={barber}
+                    className={`rounded-xl border p-3.5 flex flex-col justify-between gap-2.5 ${
+                      activeLock
+                        ? 'border-[#1F6FEB] bg-[#0D2138]'
+                        : 'border-[#30363D] bg-[#0D1117]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[#F0F6FC] truncate">{barber}</p>
+                        <p className="text-[11px] font-mono text-[#8B949E] truncate">{chairName}</p>
+                      </div>
+                      {activeLock ? (
+                        <span className="rounded-md border border-[#1F6FEB] bg-[#0D1117] px-2 py-0.5 text-[10px] font-mono font-bold text-[#58A6FF] shrink-0">
+                          BUSY {activeLock.startTimeSlot}–{activeLock.endTimeSlot}
+                        </span>
+                      ) : (
+                        <span className="rounded-md border border-[#116329] bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950] shrink-0">
+                          FREE NOW
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickPillTap(barber, 30)}
+                        className={`flex-1 min-h-[48px] rounded-xl border px-3 py-2 text-xs font-mono font-bold transition ${
+                          isArmed30
+                            ? 'border-[#D29922] bg-[#3B2E0B] text-[#D29922]'
+                            : 'border-[#30363D] bg-[#161B22] hover:border-[#58A6FF] text-[#F0F6FC]'
+                        }`}
+                      >
+                        {isArmed30 ? 'Tap Again: Confirm +30m' : '+30m Busy'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickPillTap(barber, 60)}
+                        className={`flex-1 min-h-[48px] rounded-xl border px-3 py-2 text-xs font-mono font-bold transition ${
+                          isArmed60
+                            ? 'border-[#D29922] bg-[#3B2E0B] text-[#D29922]'
+                            : 'border-[#30363D] bg-[#161B22] hover:border-[#58A6FF] text-[#F0F6FC]'
+                        }`}
+                      >
+                        {isArmed60 ? 'Tap Again: Confirm +1h' : '+1h Busy'}
+                      </button>
+                      {activeLock && (
+                        <button
+                          type="button"
+                          onClick={() => handleReleaseChairLock(activeLock.id, barber)}
+                          className="min-h-[48px] rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-2 text-xs font-mono font-bold text-[#3FB950] transition"
+                        >
+                          Free Chair
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* 3. TODAY'S LIVE SCHEDULE & CHAIR TIMELINE (AUTO-COMPLETE +15M & SOURCE BADGES) */}
           <section
             aria-label="Today's Live Schedule and Chair Timeline"
             className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-4"
@@ -3021,18 +3903,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 </div>
                 <p className="text-xs text-[#8B949E] font-mono mt-0.5 tabular-nums">
                   {sortedBookings.length} scheduled ·{' '}
-                  {sortedBookings.filter((b) => b.status === 'COMPLETED').length} completed
+                  {sortedBookings.filter((b) => b.status === 'COMPLETED').length} completed · Auto-done +15m after end
                 </p>
               </div>
-
-              <button
-                type="button"
-                onClick={() => setIsWalkInModalOpen(true)}
-                className="min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 py-2.5 text-xs font-mono font-black uppercase transition active:scale-95 shrink-0"
-              >
-                <Plus className="size-4" />
-                <span>+ Walk-In</span>
-              </button>
+              <span className="rounded-lg border border-[#30363D] bg-[#0D1117] px-3 py-1.5 text-[11px] font-mono text-[#8B949E]">
+                Unflagged entries clear automatically
+              </span>
             </div>
 
             <div className="space-y-2.5">
@@ -3042,6 +3918,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   barberChairs[booking.barberName] ||
                   `Chair #${Math.max(1, barbersList.indexOf(booking.barberName) + 1)}`;
                 const duration = booking.durationMins || 35;
+                const isWalkInBusy = booking.sourceType === 'WALK_IN_BUSY';
 
                 return (
                   <div
@@ -3064,6 +3941,18 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           <span className="text-sm font-bold text-[#F0F6FC]">
                             {booking.clientName}
                           </span>
+                          {/* Distinct Source Badge: Green [WhatsApp Bot] vs Blue [Walk-In / Busy] */}
+                          {isWalkInBusy ? (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-[#0D2138] border border-[#1F6FEB] px-2 py-0.5 text-[10px] font-mono font-bold text-[#58A6FF]">
+                              <Lock className="size-3" />
+                              <span>[Walk-In / Busy]</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
+                              <MessageSquare className="size-3" />
+                              <span>[WhatsApp Bot]</span>
+                            </span>
+                          )}
                           <span className="rounded-md bg-[#21262D] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono text-[#06B6D4]">
                             {chairTag} · {booking.barberName}
                           </span>
@@ -3078,6 +3967,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           >
                             {booking.status === 'IN_CHAIR' ? 'IN CHAIR' : booking.status}
                           </span>
+                          {booking.flagged && (
+                            <span className="rounded-md border border-[#9E6A03] bg-[#3B2E0B] px-2 py-0.5 text-[10px] font-mono font-bold text-[#D29922]">
+                              Flagged · Held
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-[#8B949E] font-sans">{booking.service}</p>
                         <p className="text-[11px] font-mono text-[#6E7681]" dir="ltr">
@@ -3087,10 +3981,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between md:justify-end gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-[#21262D] shrink-0">
-                      <span className="text-sm font-mono font-black text-[#D29922] tabular-nums mr-1">
-                        {regionConfig.symbol}
-                        {booking.price.toLocaleString()}
-                      </span>
+                      {booking.price > 0 && (
+                        <span className="text-sm font-mono font-black text-[#D29922] tabular-nums mr-1">
+                          {regionConfig.symbol}
+                          {booking.price.toLocaleString()}
+                        </span>
+                      )}
 
                       <div className="flex items-center gap-2">
                         <button
@@ -3098,12 +3994,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           onClick={() => {
                             const ownerFirst = currentSalon.owner.split(' ')[0] || 'Hamza';
                             const urduText = `${ownerFirst} صاحب، آپ کے باربر ${booking.barberName} کے پاس ${booking.clientName} کی ${booking.timeSlot} پر بکنگ ہے۔ سروس: ${booking.service}۔`;
-                            const romanUrdu = `${ownerFirst} Sahab! Aap kay barber ${booking.barberName} kay paas ${booking.clientName} ki ${booking.timeSlot} par booking hai. Service: ${booking.service}.`;
                             const arText = `${ownerFirst}، الحلاق ${booking.barberName} لديه موعد مع ${booking.clientName} في ${booking.timeSlot}. الخدمة: ${booking.service}.`;
                             const enText = `${ownerFirst}, your barber ${booking.barberName} has ${booking.clientName} at ${booking.timeSlot}: ${booking.service}.`;
                             const text =
                               ownerLang === 'ur' ? urduText : ownerLang === 'ar' ? arText : enText;
-                            speakHandsFree(text, ownerLang, romanUrdu);
+                            speakHandsFree(text, ownerLang);
                           }}
                           className="min-h-[48px] min-w-[48px] grid place-items-center rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] text-[#06B6D4] transition"
                           title="Speak booking aloud"
@@ -3111,6 +4006,26 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         >
                           <Volume2 className="size-4" />
                         </button>
+
+                        {booking.status !== 'COMPLETED' && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleFlagBooking(booking.id)}
+                            className={`min-h-[48px] min-w-[48px] grid place-items-center rounded-xl border transition ${
+                              booking.flagged
+                                ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
+                                : 'border-[#30363D] bg-[#161B22] text-[#8B949E] hover:text-[#D29922]'
+                            }`}
+                            title={
+                              booking.flagged
+                                ? 'Flagged (excluded from 15m auto-done)'
+                                : 'Flag to prevent 15m auto-completion'
+                            }
+                            aria-label="Toggle flag"
+                          >
+                            <Flag className="size-4" />
+                          </button>
+                        )}
 
                         {booking.status === 'CONFIRMED' && (
                           <button
@@ -3128,12 +4043,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             onClick={() => handleUpdateStatus(booking.id, 'COMPLETED')}
                             className="min-h-[48px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/60 px-3.5 py-2 text-xs font-mono font-bold text-[#3FB950] transition active:scale-95"
                           >
-                            Mark Completed ✓
+                            Mark Done ✓
                           </button>
                         ) : (
                           <span className="min-h-[48px] inline-flex items-center gap-1.5 rounded-xl border border-[#116329] bg-[#0D3822]/50 px-3 py-2 text-[11px] font-mono font-bold text-[#3FB950]">
                             <CheckCircle2 className="size-3.5" />
-                            <span>T+2h Review Queued</span>
+                            <span>
+                              {packageTier === 'STARTER' ? 'Done ✓' : 'T+2h Review Queued'}
+                            </span>
                           </span>
                         )}
                       </div>
@@ -3143,6 +4060,86 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               })}
             </div>
           </section>
+
+          {/* 4. TOP BOOKED SERVICES + STYLIST / BARBER BREAKDOWN & 24H/2H REMINDERS */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <section
+              aria-label="Top Booked Services with Stylist Breakdown"
+              className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="size-4 text-[#D29922] shrink-0" />
+                  <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
+                    Top Booked Services · Stylist Breakdown
+                  </h2>
+                </div>
+                <span className="text-[10px] font-mono text-[#8B949E] uppercase">
+                  Most Requested
+                </span>
+              </div>
+
+              <div className="space-y-2.5">
+                {topServicesWithStylists.map((item, idx) => (
+                  <div
+                    key={item.service}
+                    className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-[#F0F6FC]">
+                        #{idx + 1} · {item.service}
+                      </span>
+                      <span className="text-xs font-mono font-bold text-[#D29922] tabular-nums shrink-0">
+                        {item.pct}% share
+                      </span>
+                    </div>
+                    <p className="text-xs font-mono text-[#06B6D4]">
+                      {item.pct}% booked with {item.stylist} ({item.bookingsCount} slots)
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* 24h / 2h Automated Pre-Appointment Reminders (Included in STARTER, PRO, PRO++) */}
+            <section
+              aria-label="24h and 2h WhatsApp Reminders"
+              className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Clock className="size-4 text-[#3FB950] shrink-0" />
+                  <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
+                    24h &amp; 2h Automated Reminders
+                  </h2>
+                </div>
+                <span className="rounded-md border border-[#116329] bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
+                  ACTIVE
+                </span>
+              </div>
+
+              <div className="space-y-2.5 text-xs">
+                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="font-bold text-[#F0F6FC]">24-Hour Advance Reminder</p>
+                    <p className="text-[11px] text-[#8B949E] font-sans">
+                      Sent automatically day prior in client&apos;s locked language
+                    </p>
+                  </div>
+                  <span className="font-mono font-bold text-[#3FB950] shrink-0">T-24h ✓</span>
+                </div>
+                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="font-bold text-[#F0F6FC]">2-Hour Chair Arrival Ping</p>
+                    <p className="text-[11px] text-[#8B949E] font-sans">
+                      Confirms arrival or announces 15m late replies aloud
+                    </p>
+                  </div>
+                  <span className="font-mono font-bold text-[#3FB950] shrink-0">T-2h ✓</span>
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
       )}
 
@@ -3736,6 +4733,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 salonName={currentSalon.name}
                 ownerName={currentSalon.owner}
                 salonPhone={currentSalon.phone}
+                packageTier={packageTier}
                 conciergeState={conciergeState}
                 onStateUpdated={processIncomingConciergeState}
                 onShowToast={(msg) => {
@@ -3810,6 +4808,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           className="min-h-[44px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-3 py-1.5 text-xs font-mono font-bold text-[#D29922] transition disabled:opacity-50"
                         >
                           🔊 Test: Reminder Reply (15m Late)
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isTestingLoudAlert}
+                          onClick={() => handleTriggerSimulatedVoiceWebhook('BRIDAL_URGENT')}
+                          className="min-h-[44px] rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#5e2223] px-3 py-1.5 text-xs font-mono font-bold text-[#F85149] transition disabled:opacity-50"
+                        >
+                          🔊 Test: Urgent Bridal/Groom Alert
                         </button>
                       </div>
                     </div>
@@ -3978,15 +4984,26 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                       </div>
                     </div>
 
-                    <BroadcastTab
-                      salon={activeSalonProfile}
-                      contacts={salonContacts}
-                      ownerLang={ownerLang}
-                      onShowToast={(msg) => {
-                        setMaintToast(msg);
-                        setTimeout(() => setMaintToast(null), 6000);
-                      }}
-                    />
+                    {packageTier === 'STARTER' ? (
+                      <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B] p-4 space-y-2">
+                        <p className="text-xs font-mono font-bold uppercase text-[#D29922]">
+                          Video Broadcast Deals Locked on STARTER Tier
+                        </p>
+                        <p className="text-xs text-[#F0F6FC] font-sans">
+                          Upgrade to PRO or PRO++ (VIP) to unlock Video QA Deal uploads, Google Maps Rating Booster, and Bridal Deposit SLA locks.
+                        </p>
+                      </div>
+                    ) : (
+                      <BroadcastTab
+                        salon={activeSalonProfile}
+                        contacts={salonContacts}
+                        ownerLang={ownerLang}
+                        onShowToast={(msg) => {
+                          setMaintToast(msg);
+                          setTimeout(() => setMaintToast(null), 6000);
+                        }}
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -4018,195 +5035,6 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               />
             </PortalCard>
           )}
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* QUICK ADD WALK-IN CLIENT MODAL WITH LOUD OWNER-LANGUAGE DISPATCH          */}
-      {/* ========================================================================= */}
-      {isWalkInModalOpen && (
-        <div
-          className="fixed inset-0 z-[95] flex items-center justify-center bg-[#0D1117]/85 p-4 backdrop-blur-md"
-          onClick={() => setIsWalkInModalOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 shadow-2xl max-h-[92vh] overflow-y-auto space-y-4"
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-[#21262D] pb-3">
-              <div>
-                <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#D29922]">
-                  INSTANT QUEUE ENTRY · 0-TAP SPEECH DISPATCH
-                </span>
-                <h3 className="text-lg font-black text-[#F0F6FC] mt-0.5">
-                  Add Walk-In Client to Chair
-                </h3>
-                <p className="text-xs text-[#8B949E] font-sans">
-                  Quickly seat physical off-the-street clients. System will announce aloud in {ownerLang.toUpperCase()} and route to selected barber.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsWalkInModalOpen(false)}
-                className="min-h-[40px] min-w-[40px] rounded-xl border border-[#30363D] bg-[#0D1117] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC]"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-sm">
-              <div>
-                <label className="block text-xs font-mono text-[#8B949E] mb-1">
-                  Client Name / Label:
-                </label>
-                <input
-                  type="text"
-                  value={walkInName}
-                  onChange={(e) => setWalkInName(e.target.value)}
-                  placeholder="e.g. Walk-in Guest, Usman, Bilal"
-                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-mono text-[#8B949E] mb-1">
-                    Assign Barber / Stylist:
-                  </label>
-                  <select
-                    value={barbersList.includes(walkInBarber) ? walkInBarber : barbersList[0] || ''}
-                    onChange={(e) => setWalkInBarber(e.target.value)}
-                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
-                  >
-                    {barbersList.map((b) => (
-                      <option key={b} value={b}>
-                        {b} {barberChairs[b] ? `(${barberChairs[b]})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono text-[#8B949E] mb-1">
-                    Phone (Optional for WhatsApp Ticket):
-                  </label>
-                  <input
-                    type="tel"
-                    value={walkInPhone}
-                    onChange={(e) => setWalkInPhone(e.target.value)}
-                    placeholder="+92 300 0000000"
-                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#F0F6FC] font-mono focus:outline-none focus:border-[#06B6D4]"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono text-[#8B949E] mb-1">
-                  Client Birth Date (Day/Month, Optional for 9:00 AM Birthday Offer):
-                </label>
-                <input
-                  type="text"
-                  value={walkInBirthDate}
-                  onChange={(e) => setWalkInBirthDate(e.target.value)}
-                  placeholder="DD/MM (e.g. 14/11)"
-                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#D29922] font-mono focus:outline-none focus:border-[#06B6D4]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono text-[#8B949E] mb-1.5">
-                  Select Services (Multi-Service Auto Total):
-                </label>
-                <div className="max-h-44 overflow-y-auto space-y-1.5 rounded-xl border border-[#30363D] bg-[#0D1117] p-2">
-                  {services
-                    .filter((s) => s.active)
-                    .map((s) => {
-                      const checked = walkInSelectedServiceIds.includes(s.id);
-                      return (
-                        <label
-                          key={s.id}
-                          className={`min-h-[44px] flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 cursor-pointer border transition ${
-                            checked
-                              ? 'border-[#06B6D4] bg-[#161B22]'
-                              : 'border-transparent hover:bg-[#161B22]/60'
-                          }`}
-                        >
-                          <span className="flex items-center gap-2 min-w-0">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => handleToggleWalkInService(s.id)}
-                              className="size-4 accent-[#06B6D4] shrink-0"
-                            />
-                            <span className="text-xs font-bold text-[#F0F6FC] truncate">{s.name}</span>
-                            <span className="text-[10px] font-mono text-[#8B949E] shrink-0">
-                              {s.durationMins}m
-                            </span>
-                          </span>
-                          <span className="text-xs font-mono font-bold text-[#D29922] tabular-nums shrink-0">
-                            {regionConfig.symbol}
-                            {s.price.toLocaleString()}
-                          </span>
-                        </label>
-                      );
-                    })}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono text-[#8B949E] mb-1">
-                  Final Total Price ({regionConfig.currency}):
-                </label>
-                <input
-                  type="number"
-                  value={walkInPrice}
-                  onChange={(e) => setWalkInPrice(Number(e.target.value) || 0)}
-                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#D29922] font-mono font-bold focus:outline-none focus:border-[#06B6D4]"
-                />
-              </div>
-
-              <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Scissors className="size-4 text-[#D29922]" />
-                  <div>
-                    <p className="text-xs font-bold text-[#F0F6FC]">Seat Immediately in Chair?</p>
-                    <p className="text-[11px] text-[#8B949E]">Skip waiting queue and begin cutting now</p>
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={walkInImmediateChair}
-                  onChange={(e) => setWalkInImmediateChair(e.target.checked)}
-                  className="size-4 accent-[#D29922] cursor-pointer"
-                />
-              </div>
-
-              <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-2.5 text-xs font-mono text-[#3FB950] flex items-center gap-2">
-                <Volume2 className="size-3.5 shrink-0" />
-                <span>
-                  Audio will speak aloud: &ldquo;{walkInBarber} Bhai! Naya walk-in customer {walkInName || 'Guest'} {walkInImmediateChair ? 'chair par baith gaya hai' : 'queue mein shamil ho gaya hai'}.&rdquo;
-                </span>
-              </div>
-            </div>
-
-            <div className="pt-2 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsWalkInModalOpen(false)}
-                className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 py-2 text-xs font-mono text-[#8B949E] hover:text-[#F0F6FC]"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveWalkIn}
-                className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 py-2 text-xs font-mono font-bold uppercase transition active:scale-95 flex items-center gap-2"
-              >
-                <Check className="size-4" />
-                <span>Confirm Walk-In &amp; Speak Aloud →</span>
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
