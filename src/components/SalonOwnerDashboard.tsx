@@ -977,21 +977,27 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   onClose,
 }) => {
   const [salonsState, setSalonsState] = useState<ClientSalon[]>(() => {
-    if (!onboardedData) return INITIAL_CLIENT_SALONS;
+    const dynamicId =
+      lockedSalonId && !INITIAL_CLIENT_SALONS.some((s) => s.id === lockedSalonId)
+        ? lockedSalonId
+        : null;
+    if (!onboardedData && !dynamicId) return INITIAL_CLIENT_SALONS;
+
+    const entryId = dynamicId || 'onboarded-live';
     const customEntry: ClientSalon = {
-      id: 'onboarded-live',
-      name: onboardedData.salonName,
-      owner: onboardedData.ownerName,
-      phone: onboardedData.phone,
-      location: onboardedData.location,
-      planId: onboardedData.planId,
-      plan: onboardedData.planName,
-      maint: onboardedData.monthlyMaint,
-      language: onboardedData.language,
-      onboardingLanguage: onboardedData.language,
+      id: entryId,
+      name: onboardedData?.salonName || authUser?.salonName || selectedSalonName || 'My Salon',
+      owner: onboardedData?.ownerName || authUser?.displayName || 'Salon Owner',
+      phone: onboardedData?.phone || authUser?.phone || '+92 300 0000000',
+      location: onboardedData?.location || 'Local Salon Branch',
+      planId: onboardedData?.planId || 'GROWTH',
+      plan: onboardedData?.planName || 'Growth Automation',
+      maint: onboardedData?.monthlyMaint ?? 2000,
+      language: onboardedData?.language || 'en',
+      onboardingLanguage: onboardedData?.language || 'en',
     };
     const filtered = INITIAL_CLIENT_SALONS.filter(
-      (s) => s.name.toLowerCase() !== onboardedData.salonName.trim().toLowerCase()
+      (s) => s.id !== entryId && s.name.toLowerCase() !== customEntry.name.trim().toLowerCase()
     );
     return [customEntry, ...filtered];
   });
@@ -1002,13 +1008,30 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   useEffect(() => {
     if (lockedSalonId && !isFounderInspector) {
       setSelectedSalonId(lockedSalonId);
+      setSalonsState((prev) => {
+        if (prev.some((s) => s.id === lockedSalonId)) return prev;
+        const fallbackEntry: ClientSalon = {
+          id: lockedSalonId,
+          name: authUser?.salonName || selectedSalonName || 'My Salon',
+          owner: authUser?.displayName || 'Salon Owner',
+          phone: authUser?.phone || '+92 300 0000000',
+          location: 'Local Salon Branch',
+          planId: 'GROWTH',
+          plan: 'Growth Automation',
+          maint: 2000,
+          language: 'en',
+          onboardingLanguage: 'en',
+        };
+        return [fallbackEntry, ...prev];
+      });
     }
-  }, [lockedSalonId, isFounderInspector]);
+  }, [lockedSalonId, isFounderInspector, authUser?.salonName, authUser?.displayName, authUser?.phone, selectedSalonName]);
 
   useEffect(() => {
     if (!onboardedData) return;
+    const entryId = lockedSalonId || 'onboarded-live';
     const customEntry: ClientSalon = {
-      id: 'onboarded-live',
+      id: entryId,
       name: onboardedData.salonName,
       owner: onboardedData.ownerName,
       phone: onboardedData.phone,
@@ -1021,10 +1044,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     };
     setSalonsState((prev) => [
       customEntry,
-      ...prev.filter((s) => s.id !== 'onboarded-live' && s.name.toLowerCase() !== onboardedData.salonName.trim().toLowerCase()),
+      ...prev.filter(
+        (s) =>
+          s.id !== entryId &&
+          s.id !== 'onboarded-live' &&
+          s.name.toLowerCase() !== onboardedData.salonName.trim().toLowerCase()
+      ),
     ]);
     if (!lockedSalonId) {
-      setSelectedSalonId('onboarded-live');
+      setSelectedSalonId(entryId);
     }
   }, [onboardedData, lockedSalonId]);
 
@@ -1278,6 +1306,28 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           data.appointments.forEach((a) => seenApptIdsRef.current.add(a.id));
           hasHydratedConciergeRef.current = true;
           setConciergeState(data);
+          if (data.settings?.salonId) {
+            setSalonsState((prev) =>
+              prev.map((s) => {
+                if (s.id !== data.settings.salonId) return s;
+                const mappedPlanId: ClientSalon['planId'] =
+                  data.settings.packageTier === 'PRO++'
+                    ? 'VIP'
+                    : data.settings.packageTier === 'PRO'
+                    ? 'GROWTH'
+                    : data.settings.packageTier === 'STARTER'
+                    ? 'STARTER'
+                    : s.planId;
+                return {
+                  ...s,
+                  name: data.settings.salonName || s.name,
+                  owner: data.settings.ownerName || s.owner,
+                  phone: data.settings.whatsappPhone || s.phone,
+                  planId: mappedPlanId,
+                };
+              })
+            );
+          }
         }
       })
       .catch(() => {});

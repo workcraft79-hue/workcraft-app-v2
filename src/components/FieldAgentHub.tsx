@@ -5170,7 +5170,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           dir="ltr"
                           className="p-2 rounded bg-[#0D1117] border border-[#30363D] text-[11px] text-[#06B6D4] break-all font-mono text-left"
                         >
-                          https://portal.workcraft.local/?role=salon_owner&amp;paired=true
+                          https://portal.workcraft.local/
                         </div>
                       </div>
                     </div>

@@ -21,7 +21,12 @@ import {
   ChevronDown,
   Megaphone,
   SlidersHorizontal,
+  LogOut,
+  ArrowLeft,
 } from 'lucide-react';
+
+import type { AuthUser } from './types/auth';
+import { AuthLoginScreen, type PostInstallChallenge } from './components/AuthLoginScreen';
 
 import { TabName } from './types/workcraft';
 import { WATERMARK_URL } from './data/portalData';
@@ -58,7 +63,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabName>('Overview');
   const [salonOwnerSection, setSalonOwnerSection] = useState<'LIVE' | 'MANAGE'>('LIVE');
 
-  // Query 1: Detect WhatsApp direct remote agent enrollment link (/enroll or ?id=...&pin=...)
+  // Verified Server-Side JWT Session State (Zero URL role switchers / zero open bypasses)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [initialEnrollAgentData, setInitialEnrollAgentData] = useState<{
     id?: string;
     pin?: string;
@@ -67,84 +74,156 @@ export default function App() {
     city?: string;
   } | null>(null);
 
-  // Pure 3-Role Isolation Architecture:
-  // - FOUNDER: Central Command, Fleet Dossier, Salons Health, 3-Way Ledger, Founder Marketing
-  // - FIELD_AGENT: Strictly Field Agent Hub / Enrollment / Commission Ledger / Node Repair
-  // - SALON_OWNER: Social Ad Links land in Onboarding First -> Then Private Salon Owner Dashboard Only
-  const [activeRole, setActiveRole] = useState<'FOUNDER' | 'FIELD_AGENT' | 'SALON_OWNER'>('FOUNDER');
+  // Pure 3-Role Isolation Architecture driven strictly by verified session `user_role`
+  const [activeRole, setActiveRole] = useState<'FOUNDER' | 'FIELD_AGENT' | 'SALON_OWNER'>('SALON_OWNER');
   const [socialCampaignSource, setSocialCampaignSource] = useState<string | null>(null);
+  const [isPublicOnboardingOpen, setIsPublicOnboardingOpen] = useState(false);
+  const [isSubmittingPublicOnboarding, setIsSubmittingPublicOnboarding] = useState(false);
+  const [publicOnboardingError, setPublicOnboardingError] = useState<string | null>(null);
+  const [postInstallChallenge, setPostInstallChallenge] = useState<PostInstallChallenge | null>(null);
+  const [authExternalNotice, setAuthExternalNotice] = useState<string | null>(null);
 
+  // Benign social campaign UTM arrival opens ONLY the zero-privilege 4-step self-onboarding & install flow (never sets any role/session)
   useEffect(() => {
-    try {
-      const search = window.location.search;
-      const path = window.location.pathname;
-      const hash = window.location.hash;
-      const params = new URLSearchParams(search);
+    const params = new URLSearchParams(window.location.search);
+    const refParam = (params.get('ref') || '').trim().toLowerCase();
+    const utmSource = (params.get('utm_source') || '').trim().toLowerCase();
+    const sourceKey = refParam || utmSource;
+    if (!sourceKey) return;
 
-      // Social Media Campaign / Direct Signup Link Detection (Queries 1 & 2):
-      // Detect Facebook, Instagram, TikTok, or custom campaign sources
-      const ref = params.get('ref');
-      const utmSource = params.get('utm_source');
-      const isSocialCampaign =
-        ref === 'fb' || ref === 'facebook' ||
-        ref === 'ig' || ref === 'instagram' ||
-        ref === 'tiktok' || ref === 'tt' ||
-        ref === 'social' ||
-        utmSource === 'facebook' || utmSource === 'instagram' || utmSource === 'tiktok';
-
-      const isSalonDirectRoute =
-        path.includes('/onboard') ||
-        path.includes('/salon') ||
-        hash.includes('onboard') ||
-        params.has('onboard') ||
-        params.has('salon_signup') ||
-        params.get('role') === 'salon_owner' ||
-        isSocialCampaign;
-
-      if (isSalonDirectRoute) {
-        const isAlreadyPaired = params.get('paired') === 'true';
-        const customName = params.get('salon') || params.get('salon_name') || undefined;
-        if (customName) setOnboardedSalonName(customName);
-
-        if (isSocialCampaign) {
-          const sourceLabel =
-            ref === 'fb' || utmSource === 'facebook' ? 'Facebook Ads Campaign'
-            : ref === 'ig' || utmSource === 'instagram' ? 'Instagram Reels Campaign'
-            : ref === 'tiktok' || utmSource === 'tiktok' ? 'TikTok Viral Campaign'
-            : ref ? `${ref.toUpperCase()} Social Campaign`
-            : 'Social Ad Campaign';
-          setSocialCampaignSource(sourceLabel);
-        }
-
-        setHasCompletedSalonOnboarding(isAlreadyPaired);
-        setActiveRole('SALON_OWNER');
-        setActiveTab('Salon Owner Dashboard');
-        return;
-      }
-
-      // Agent Remote Enrollment Link Detection (/enroll, ?id=...&pin=...)
-      const isEnrollRoute =
-        path.includes('/enroll') ||
-        hash.includes('enroll') ||
-        params.has('enroll') ||
-        params.get('role') === 'agent' ||
-        (params.has('id') && (params.has('pin') || params.has('auth')));
-
-      if (isEnrollRoute) {
-        const id = params.get('id') || undefined;
-        const pin = params.get('pin') || params.get('auth') || undefined;
-        const phone = params.get('phone') || undefined;
-        const name = params.get('name') || undefined;
-        const city = params.get('city') || undefined;
-
-        setInitialEnrollAgentData({ id, pin, phone, name, city });
-        setActiveRole('FIELD_AGENT');
-        setActiveTab('Agent Hub / Onboarding');
-      }
-    } catch {
-      // Ignore URL parsing errors
+    const sourceMap: Record<string, string> = {
+      fb: 'Facebook Ads Campaign',
+      facebook: 'Facebook Ads Campaign',
+      ig: 'Instagram Ads Campaign',
+      instagram: 'Instagram Ads Campaign',
+      tiktok: 'TikTok Ads Campaign',
+      tt: 'TikTok Ads Campaign',
+      social: 'Social Media Campaign',
+    };
+    if (sourceMap[sourceKey]) {
+      setSocialCampaignSource(sourceMap[sourceKey]);
+      setIsPublicOnboardingOpen(true);
     }
   }, []);
+
+  const applyVerifiedSession = (user: AuthUser) => {
+    setAuthUser(user);
+    setFounderPreviewMode('NONE');
+    setIsPublicOnboardingOpen(false);
+    setPostInstallChallenge(null);
+    setAuthExternalNotice(null);
+    if (user.userRole === 'FOUNDER') {
+      setActiveRole('FOUNDER');
+      setActiveTab('Overview');
+      setHasCompletedSalonOnboarding(true);
+      setOnboardedSalonName(undefined);
+      setInitialEnrollAgentData(null);
+    } else if (user.userRole === 'AGENT') {
+      setActiveRole('FIELD_AGENT');
+      setActiveTab('Agent Hub / Onboarding');
+      setInitialEnrollAgentData({
+        id: user.agentId || undefined,
+        name: user.displayName,
+        phone: user.phone,
+      });
+    } else {
+      setActiveRole('SALON_OWNER');
+      setActiveTab('Salon Owner Dashboard');
+      setHasCompletedSalonOnboarding(true);
+      setOnboardedSalonName(user.salonName);
+      setInspectSalonName(user.salonName);
+      setInitialEnrollAgentData(null);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/session')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { authenticated?: boolean; user?: AuthUser | null } | null) => {
+        if (cancelled) return;
+        if (data?.authenticated && data.user) {
+          applyVerifiedSession(data.user);
+        } else {
+          setAuthUser(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAuthUser(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIsCheckingSession(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleCompletePublicOnboarding = async (payload: OnboardedSalonPayload) => {
+    if (isSubmittingPublicOnboarding) return;
+    setPublicOnboardingError(null);
+    setIsSubmittingPublicOnboarding(true);
+    try {
+      const res = await fetch('/api/onboarding/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          salonName: payload.salonName,
+          ownerName: payload.ownerName,
+          phone: payload.phone,
+          location: payload.location,
+          planId: payload.planId,
+          language: payload.language,
+          barbers: payload.barbers,
+        }),
+      });
+      const data = await res.json();
+      if (res.status === 409) {
+        setIsPublicOnboardingOpen(false);
+        setPostInstallChallenge(null);
+        setAuthExternalNotice(
+          data?.error ||
+            'This WhatsApp number is already registered. Sign in below using your 6-digit OTP.'
+        );
+        return;
+      }
+      if (!res.ok) {
+        setPublicOnboardingError(
+          data?.error || 'Could not finalize salon installation. Please check your details.'
+        );
+        return;
+      }
+      setCompletedOnboardingData(payload);
+      setOnboardedSalonName(data.salonName || payload.salonName);
+      setIsPublicOnboardingOpen(false);
+      setAuthExternalNotice(null);
+      setPostInstallChallenge({
+        identifier: data.phone || payload.phone,
+        maskedTarget: data.maskedTarget || payload.phone,
+        targetName: data.ownerName || payload.ownerName,
+        salonName: data.salonName || payload.salonName,
+        devOtpPreview: typeof data.devOtpPreview === 'string' ? data.devOtpPreview : null,
+      });
+    } catch {
+      setPublicOnboardingError('Network error while saving installation details. Try again.');
+    } finally {
+      setIsSubmittingPublicOnboarding(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    setAuthUser(null);
+    setFounderPreviewMode('NONE');
+    setIsSidebarOpen(false);
+    setInspectSalonName(undefined);
+    setOnboardedSalonName(undefined);
+    setCompletedOnboardingData(null);
+    setPostInstallChallenge(null);
+    setAuthExternalNotice(null);
+  };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -170,6 +249,7 @@ export default function App() {
   const [founderPreviewMode, setFounderPreviewMode] = useState<'NONE' | 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE'>('NONE');
 
   const handleLaunchFounderPreview = (mode: 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE') => {
+    if (authUser?.userRole !== 'FOUNDER') return;
     setFounderPreviewMode(mode);
     setIsSidebarOpen(false);
     if (mode === 'AGENT') {
@@ -192,6 +272,7 @@ export default function App() {
   };
 
   const handleExitFounderPreview = () => {
+    if (authUser?.userRole !== 'FOUNDER') return;
     setFounderPreviewMode('NONE');
     setActiveRole('FOUNDER');
     setActiveTab('Settings');
@@ -218,10 +299,10 @@ export default function App() {
       } else {
         const origin = window.location.origin;
         const dynamicManifest = {
-          id: activeRole === 'FIELD_AGENT' ? '/?role=agent' : '/?role=salon_owner&paired=true',
+          id: '/',
           name: 'WorkCraft',
           short_name: 'WorkCraft',
-          start_url: activeRole === 'FIELD_AGENT' ? '/?role=agent' : '/?role=salon_owner&paired=true',
+          start_url: '/',
           scope: '/',
           display: 'standalone',
           background_color: '#0D1117',
@@ -361,6 +442,88 @@ export default function App() {
           ['Marketing', Megaphone, 'Marketing'],
           ['Revenue', WalletCards, 'Revenue'],
         ];
+
+  if (isCheckingSession) {
+    return (
+      <main className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex items-center justify-center p-6">
+        <div className="rounded-2xl border border-[#30363D] bg-[#161B22] px-6 py-5 text-xs font-mono text-[#8B949E]">
+          Verifying secure session...
+        </div>
+      </main>
+    );
+  }
+
+  if (!authUser) {
+    if (isPublicOnboardingOpen) {
+      return (
+        <main className="min-h-screen overflow-x-hidden bg-[#0D1117] text-[#F0F6FC] font-sans pb-28">
+          <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-[#30363D] bg-[#0D1117]/95 backdrop-blur-md px-4 sm:px-7 gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setIsPublicOnboardingOpen(false);
+                setPublicOnboardingError(null);
+              }}
+              className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:bg-[#21262D] px-3.5 py-2 text-xs font-mono font-bold text-[#F0F6FC] flex items-center gap-2 transition"
+            >
+              <ArrowLeft className="size-4 text-[#06B6D4]" />
+              <span>Sign In</span>
+            </button>
+
+            <div className="flex flex-col items-center justify-center leading-none">
+              <img
+                src={WATERMARK_URL}
+                alt="WORKCRAFT"
+                className="h-auto w-[132px] object-contain opacity-95"
+              />
+              <span className="mt-1 text-[9px] font-mono font-black tracking-[0.25em] text-[#06B6D4] uppercase">
+                SALON SETUP &amp; INSTALL
+              </span>
+            </div>
+
+            <div className="inline-flex items-center gap-1 rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950]">
+              <Lock className="size-3 shrink-0" />
+              <span className="hidden sm:inline">OTP After Install</span>
+            </div>
+          </header>
+
+          <div className="mx-auto max-w-4xl w-full p-4 sm:p-6 space-y-4">
+            {publicOnboardingError && (
+              <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] px-4 py-3 text-xs font-mono font-bold text-[#F85149] break-words [overflow-wrap:break-word]">
+                {publicOnboardingError}
+              </div>
+            )}
+            <SilentSelfHealingBoundary areaName="Salon Self-Onboarding">
+              <FieldAgentHub
+                userRole="SALON_OWNER"
+                socialCampaignSource={socialCampaignSource}
+                onSalonCreated={() => {}}
+                onSalonOnboardingComplete={handleCompletePublicOnboarding}
+                onClose={() => {
+                  setIsPublicOnboardingOpen(false);
+                  setPublicOnboardingError(null);
+                }}
+              />
+            </SilentSelfHealingBoundary>
+          </div>
+        </main>
+      );
+    }
+
+    return (
+      <AuthLoginScreen
+        onAuthenticated={applyVerifiedSession}
+        onStartSelfOnboarding={() => {
+          setAuthExternalNotice(null);
+          setPublicOnboardingError(null);
+          setIsPublicOnboardingOpen(true);
+        }}
+        postInstallChallenge={postInstallChallenge}
+        onClearPostInstallChallenge={() => setPostInstallChallenge(null)}
+        externalNotice={authExternalNotice}
+      />
+    );
+  }
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#0D1117] text-[#F0F6FC] font-sans selection:bg-[#06B6D4] selection:text-[#0D1117]">
@@ -506,21 +669,32 @@ export default function App() {
             </div>
             {/* 2. Middle: Role in Cyber Cyan (#06B6D4) */}
             {/* 3. Bottom: Name in #F0F6FC */}
-            <div className="text-center">
-              <p className="text-xs font-mono font-black tracking-[0.3em] text-[#06B6D4] uppercase">
-                {activeRole === 'FOUNDER'
-                  ? 'FOUNDER'
-                  : activeRole === 'FIELD_AGENT'
-                  ? 'FIELD AGENT'
-                  : 'SALON PARTNER'}
-              </p>
-              <p className="mt-1 text-sm font-bold text-[#F0F6FC] tracking-wide">
-                {activeRole === 'FOUNDER'
-                  ? 'Farhan Abid'
-                  : activeRole === 'FIELD_AGENT'
-                  ? initialEnrollAgentData?.name || 'Authorized Agent'
-                  : onboardedSalonName || 'Private Salon Portal'}
-              </p>
+            <div className="text-center space-y-3">
+              <div>
+                <p className="text-xs font-mono font-black tracking-[0.3em] text-[#06B6D4] uppercase">
+                  {activeRole === 'FOUNDER'
+                    ? 'FOUNDER'
+                    : activeRole === 'FIELD_AGENT'
+                    ? 'FIELD AGENT'
+                    : 'SALON PARTNER'}
+                </p>
+                <p className="mt-1 text-sm font-bold text-[#F0F6FC] tracking-wide">
+                  {authUser.displayName}
+                </p>
+                {authUser.salonName && (
+                  <p className="text-[11px] font-mono text-[#8B949E] truncate">
+                    {authUser.salonName}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#F85149] hover:text-[#F85149] text-[#8B949E] text-xs font-mono font-bold transition flex items-center justify-center gap-2"
+              >
+                <LogOut className="size-3.5" />
+                <span>Sign Out</span>
+              </button>
             </div>
           </div>
         </aside>
@@ -677,10 +851,21 @@ export default function App() {
                   </div>
                 </>
               ) : (
-                <span className="inline-flex items-center gap-1 rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950]">
-                  <ShieldCheck className="size-3.5" />
-                  <span className="hidden sm:inline">Private Session</span>
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950]">
+                    <ShieldCheck className="size-3.5" />
+                    <span className="hidden sm:inline">Verified Session</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    aria-label="Sign out"
+                    title="Sign out"
+                    className="min-h-[44px] min-w-[44px] grid place-items-center rounded-xl border border-[#30363D] bg-[#161B22] text-[#8B949E] hover:border-[#F85149] hover:text-[#F85149] transition"
+                  >
+                    <LogOut className="size-4" />
+                  </button>
+                </div>
               )}
             </div>
           </header>
@@ -854,6 +1039,11 @@ export default function App() {
                 ) : (
                   <SalonOwnerDashboard
                     selectedSalonName={onboardedSalonName || inspectSalonName}
+                    lockedSalonId={
+                      authUser.userRole === 'SALON_OWNER' ? authUser.salonId : null
+                    }
+                    authUser={authUser}
+                    onLogout={handleLogout}
                     salonCategory={completedOnboardingData?.salonCategory}
                     onboardedData={completedOnboardingData}
                     isFounderInspector={activeRole === 'FOUNDER'}

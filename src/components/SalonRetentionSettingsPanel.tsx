@@ -20,6 +20,7 @@ import type {
   ClientPreferredLang,
   RetentionSettings,
   SalonConciergeStateResponse,
+  SalonPackageTier,
 } from '../types/concierge';
 
 interface SalonRetentionSettingsPanelProps {
@@ -27,6 +28,7 @@ interface SalonRetentionSettingsPanelProps {
   salonName: string;
   ownerName: string;
   salonPhone: string;
+  packageTier?: SalonPackageTier;
   conciergeState: SalonConciergeStateResponse | null;
   onStateUpdated: (nextState: SalonConciergeStateResponse) => void;
   onShowToast: (msg: string) => void;
@@ -46,6 +48,7 @@ const PREVIEW_LANG_TABS: Array<{
 export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelProps> = ({
   salonId,
   salonName,
+  packageTier = 'PRO++',
   conciergeState,
   onStateUpdated,
   onShowToast,
@@ -123,7 +126,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
 
   const handleTriggerCron = async (job: 'birthday_9am' | 'winback_30d' | 'review_t2h') => {
     try {
-      const res = await fetch(`/api/salons/${encodeURIComponent(salonId)}/cron/run`, {
+      const res = await fetch(`/api/salons/${encodeURIComponent(salonId)}/concierge/trigger-cron`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ job, force: true }),
@@ -146,11 +149,10 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
   const handleSendGreetingWebhook = async (messageText: string, forceLanguagePrompt = false) => {
     setIsWebhookBusy(true);
     try {
-      const res = await fetch('/api/whatsapp/webhook', {
+      const res = await fetch(`/api/salons/${encodeURIComponent(salonId)}/concierge/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          salonId,
           fromPhone: simClientPhone,
           clientName: simClientName,
           messageText,
@@ -181,11 +183,10 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
       const targetName = sampleClient?.name || 'Bilal Ahmed';
       const latestCompleted = conciergeState.appointments.find((a) => a.status === 'COMPLETED');
 
-      const res = await fetch('/api/whatsapp/webhook', {
+      const res = await fetch(`/api/salons/${encodeURIComponent(salonId)}/concierge/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          salonId,
           fromPhone: targetPhone,
           clientName: targetName,
           messageText: `${stars} stars`,
@@ -678,11 +679,10 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
               onClick={async () => {
                 const target = dormantClients[0];
                 if (!target) return;
-                await fetch('/api/whatsapp/webhook', {
+                await fetch(`/api/salons/${encodeURIComponent(salonId)}/concierge/simulate`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    salonId,
                     fromPhone: target.phone,
                     clientName: target.name,
                     messageText: 'REBOOK',
@@ -712,7 +712,9 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
 
       {/* ========================================================================= */}
       {/* MODULE 4: POST-SERVICE GOOGLE REVIEW & SMART REPUTATION ROUTER (T+2H)     */}
+      {/* Strictly gated: Hidden for STARTER tier (PRO / PRO++ only)                */}
       {/* ========================================================================= */}
+      {packageTier !== 'STARTER' && (
       <section className="rounded-2xl border border-[#30363D] bg-[#161B22] p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#30363D] pb-4">
           <div className="space-y-1">
@@ -834,6 +836,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           </button>
         </div>
       </section>
+      )}
 
       {/* ========================================================================= */}
       {/* CLIENT PROFILES: OPTIONAL BIRTH_DATE (DD/MM) & LAST VISIT TRACKER         */}

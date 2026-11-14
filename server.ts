@@ -29,10 +29,12 @@ import {
   findUserById,
   getDevTestAccounts,
   registerSalonAssignment,
+  registerSalonOwnerAccount,
   requireAuth,
   requireRole,
   requireSalonTenantAccess,
   requireWebhookSecret,
+  sanitizePhone,
   sanitizePlainText,
   setSessionCookie,
   signSessionToken,
@@ -330,15 +332,94 @@ async function startServer() {
   app.post('/api/agent/salons', requireAuth, requireRole('FOUNDER', 'AGENT'), (req: AuthenticatedRequest, res) => {
     const user = req.authUser!;
     const salonName = sanitizePlainText(req.body?.salonName, 100);
-    const ownerName = sanitizePlainText(req.body?.ownerName, 80);
-    const whatsappPhone = sanitizePlainText(req.body?.whatsappPhone, 24);
+    const ownerName = sanitizePlainText(req.body?.ownerName, 80) || 'Salon Owner';
+    const whatsappPhone = sanitizePhone(req.body?.whatsappPhone);
     if (!salonName || !whatsappPhone) {
       return res.status(400).json({ error: 'salonName and whatsappPhone are required.' });
     }
     const newId = `salon-${Date.now().toString(36)}`;
-    registerSalonAssignment(newId, user.agentId || 'agent-pk-1');
+    const assignedAgentId = user.agentId || 'agent-pk-1';
+    registerSalonAssignment(newId, assignedAgentId);
+    const ownerReg = registerSalonOwnerAccount({
+      salonId: newId,
+      salonName,
+      ownerName,
+      phone: whatsappPhone,
+      agentId: assignedAgentId,
+    });
+    if (!ownerReg.ok) {
+      return res.status(409).json({ error: ownerReg.error });
+    }
     const state = getSalonConciergeState(newId, { salonName, ownerName, whatsappPhone });
     return res.status(201).json({ salonId: newId, state });
+  });
+
+  // Zero-Privilege Public Self-Onboarding Completion -> Triggers Mandatory Post-Install OTP Check
+  const onboardingRateLimiter = createWebhookRateLimiter({
+    windowMs: 60_000,
+    maxPerPhone: 5,
+    maxPerIp: 20,
+  });
+
+  app.post('/api/onboarding/complete', onboardingRateLimiter, (req, res) => {
+    try {
+      const salonName = sanitizePlainText(req.body?.salonName, 100);
+      const ownerName = sanitizePlainText(req.body?.ownerName, 80) || 'Salon Owner';
+      const whatsappPhone = sanitizePhone(req.body?.phone);
+      const rawPlanId = sanitizePlainText(req.body?.planId, 20).toUpperCase();
+      const packageTier: 'STARTER' | 'PRO' | 'PRO++' =
+        rawPlanId === 'STARTER' ? 'STARTER' : rawPlanId === 'GROWTH' || rawPlanId === 'PRO' ? 'PRO' : 'PRO++';
+      const barbers = Array.isArray(req.body?.barbers)
+        ? req.body.barbers.map((b: unknown) => sanitizePlainText(b, 60)).filter(Boolean)
+        : [];
+
+      if (!salonName || !whatsappPhone) {
+        return res.status(400).json({ error: 'Salon name and WhatsApp phone number are required.' });
+      }
+
+      const newSalonId = `salon-${Date.now().toString(36)}`;
+      const reg = registerSalonOwnerAccount({
+        salonId: newSalonId,
+        salonName,
+        ownerName,
+        phone: whatsappPhone,
+        agentId: null,
+      });
+
+      if (!reg.ok) {
+        return res.status(409).json({ error: reg.error });
+      }
+
+      getSalonConciergeState(newSalonId, { salonName, ownerName, whatsappPhone });
+      updateRetentionSettings(newSalonId, {
+        salonName,
+        ownerName,
+        whatsappPhone,
+        packageTier,
+      });
+      if (barbers.length > 0) {
+        syncSalonBarbers(newSalonId, barbers);
+      }
+
+      // Immediately issue a 6-digit OTP challenge for Post-Installation Security Verification
+      // (Never sets wc_session cookie until OTP is explicitly verified)
+      const challenge = createOtpChallenge(whatsappPhone);
+      if (!challenge.ok) {
+        return res.status(500).json({ error: 'Could not issue post-install verification OTP.' });
+      }
+
+      return res.status(201).json({
+        salonId: newSalonId,
+        salonName,
+        ownerName,
+        phone: whatsappPhone,
+        maskedTarget: challenge.maskedTarget,
+        ...(challenge.devOtpPreview ? { devOtpPreview: challenge.devOtpPreview } : {}),
+      });
+    } catch (err) {
+      console.error('Public onboarding completion error:', err);
+      return res.status(500).json({ error: 'Could not complete salon setup.' });
+    }
   });
 
   app.post('/api/translate-service', requireAuth, async (req, res) => {
