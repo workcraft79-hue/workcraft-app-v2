@@ -3,6 +3,18 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
+import {
+  completeAppointmentAndRecordVisit,
+  getSalonConciergeState,
+  processWhatsAppWebhook,
+  resolveOwnerAlert,
+  runBirthdayCron,
+  runPostServiceReviewCron,
+  runWinBackCron,
+  startConciergeSchedulers,
+  updateRetentionSettings,
+  upsertClientProfile,
+} from './server/conciergeEngine';
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -469,6 +481,163 @@ async function startServer() {
       return res.status(500).json({ error: 'Voice translation failed.' });
     }
   });
+
+  // ===========================================================================
+  // WHATSAPP CONCIERGE & RETENTION AUTOMATION ENDPOINTS (4 FINAL MODULES)
+  // ===========================================================================
+  app.get('/api/salons/:salonId/concierge-state', (req, res) => {
+    try {
+      const { salonId } = req.params;
+      const salonName = typeof req.query.salonName === 'string' ? req.query.salonName : undefined;
+      const ownerName = typeof req.query.ownerName === 'string' ? req.query.ownerName : undefined;
+      const whatsappPhone = typeof req.query.whatsappPhone === 'string' ? req.query.whatsappPhone : undefined;
+      const state = getSalonConciergeState(salonId, { salonName, ownerName, whatsappPhone });
+      return res.json(state);
+    } catch (err) {
+      console.error('Failed to get concierge state:', err);
+      return res.status(500).json({ error: 'Failed to load concierge state.' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/retention-settings', (req, res) => {
+    try {
+      const { salonId } = req.params;
+      const updated = updateRetentionSettings(salonId, req.body || {});
+      return res.json(updated);
+    } catch (err) {
+      console.error('Failed to save retention settings:', err);
+      return res.status(500).json({ error: 'Failed to save retention settings.' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/clients', (req, res) => {
+    try {
+      const { salonId } = req.params;
+      const { phone, name, birthDate, preferredLanguage } = req.body || {};
+      if (!phone || typeof phone !== 'string') {
+        return res.status(400).json({ error: 'Client phone is required.' });
+      }
+      const client = upsertClientProfile(salonId, {
+        phone,
+        name,
+        birthDate,
+        preferredLanguage,
+      });
+      return res.json({ client, state: getSalonConciergeState(salonId) });
+    } catch (err) {
+      console.error('Failed to upsert client profile:', err);
+      return res.status(500).json({ error: 'Failed to save client profile.' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/appointments/complete', (req, res) => {
+    try {
+      const { salonId } = req.params;
+      const {
+        appointmentId,
+        clientName,
+        clientPhone,
+        barberName,
+        service,
+        price,
+        timeSlot,
+        birthDate,
+        preferredLanguage,
+      } = req.body || {};
+
+      if (!appointmentId || !clientPhone) {
+        return res.status(400).json({ error: 'appointmentId and clientPhone are required.' });
+      }
+
+      const result = completeAppointmentAndRecordVisit(salonId, {
+        appointmentId: String(appointmentId),
+        clientName: String(clientName || 'Salon Client'),
+        clientPhone: String(clientPhone),
+        barberName: String(barberName || 'Master Barber'),
+        service: String(service || 'Salon Service'),
+        price: Number(price || 0),
+        timeSlot: String(timeSlot || 'Completed'),
+        birthDate: typeof birthDate === 'string' ? birthDate : undefined,
+        preferredLanguage,
+      });
+      return res.json(result);
+    } catch (err) {
+      console.error('Failed to complete appointment:', err);
+      return res.status(500).json({ error: 'Failed to mark appointment completed.' });
+    }
+  });
+
+  app.post('/api/whatsapp/webhook', (req, res) => {
+    try {
+      const { salonId, fromPhone, messageText, clientName, appointmentIdForReview, forceLanguagePrompt } =
+        req.body || {};
+      if (!salonId || !fromPhone || typeof messageText !== 'string') {
+        return res.status(400).json({ error: 'salonId, fromPhone, and messageText are required.' });
+      }
+      const outcome = processWhatsAppWebhook({
+        salonId: String(salonId),
+        fromPhone: String(fromPhone),
+        messageText,
+        clientName: typeof clientName === 'string' ? clientName : undefined,
+        appointmentIdForReview:
+          typeof appointmentIdForReview === 'string' ? appointmentIdForReview : undefined,
+        forceLanguagePrompt: Boolean(forceLanguagePrompt),
+      });
+      return res.json(outcome);
+    } catch (err) {
+      console.error('WhatsApp webhook error:', err);
+      return res.status(500).json({ error: 'Webhook processing failed.' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/cron/run', (req, res) => {
+    try {
+      const { salonId } = req.params;
+      const { job, force, appointmentId } = req.body || {};
+      const shouldForce = force !== false;
+
+      let birthdayDispatched = 0;
+      let winbackDispatched = 0;
+      let reviewDispatched = 0;
+
+      if (job === 'birthday_9am' || job === 'all' || !job) {
+        birthdayDispatched = runBirthdayCron(salonId, shouldForce).dispatchedCount;
+      }
+      if (job === 'winback_30d' || job === 'all' || !job) {
+        winbackDispatched = runWinBackCron(salonId, shouldForce).dispatchedCount;
+      }
+      if (job === 'review_t2h' || job === 'all' || !job) {
+        reviewDispatched = runPostServiceReviewCron(
+          salonId,
+          shouldForce,
+          typeof appointmentId === 'string' ? appointmentId : undefined
+        ).dispatchedCount;
+      }
+
+      return res.json({
+        birthdayDispatched,
+        winbackDispatched,
+        reviewDispatched,
+        state: getSalonConciergeState(salonId),
+      });
+    } catch (err) {
+      console.error('Cron run error:', err);
+      return res.status(500).json({ error: 'Cron execution failed.' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/alerts/:alertId/resolve', (req, res) => {
+    try {
+      const { salonId, alertId } = req.params;
+      const state = resolveOwnerAlert(salonId, alertId);
+      return res.json(state);
+    } catch (err) {
+      console.error('Resolve alert error:', err);
+      return res.status(500).json({ error: 'Failed to resolve alert.' });
+    }
+  });
+
+  startConciergeSchedulers();
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

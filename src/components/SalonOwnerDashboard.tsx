@@ -36,11 +36,14 @@ import {
   UserCheck,
   LogOut,
   Key,
+  Settings2,
 } from 'lucide-react';
 import { PortalCard } from './PortalCard';
 import { BroadcastTab } from './Tabs/BroadcastTab';
 import { SalonWindowPosterPdf } from './SalonWindowPosterPdf';
+import { SalonRetentionSettingsPanel } from './SalonRetentionSettingsPanel';
 import { Contact, SalonProfile } from '../types';
+import type { SalonConciergeStateResponse } from '../types/concierge';
 import { generate214Contacts } from '../data/mockData';
 import type { OnboardedSalonPayload } from './FieldAgentHub';
 
@@ -813,10 +816,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     (p) => p.setupFee > currentPackage.setupFee
   );
 
-  // Query 6: Consolidated 5-Tab Navigation (All 8 sections preserved inside 5 mobile-friendly tabs)
+  // Query 6: Consolidated Mobile-Friendly Navigation Including Salon Settings & Retention
   const [activeTab, setActiveTab] = useState<
-    'QUEUE' | 'RATES_BOT' | 'MARKETING' | 'GROWTH_KIT' | 'BILLING_SLA'
+    'QUEUE' | 'RATES_BOT' | 'MARKETING' | 'GROWTH_KIT' | 'BILLING_SLA' | 'SETTINGS'
   >('QUEUE');
+  const [conciergeState, setConciergeState] = useState<SalonConciergeStateResponse | null>(null);
 
   // Query 1: Top-Right Upgrade Modal & Payment Details Input
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
@@ -898,6 +902,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [walkInService, setWalkInService] = useState('Master Haircut & Beard Sculpt');
   const [walkInPrice, setWalkInPrice] = useState(2000);
   const [walkInPhone, setWalkInPhone] = useState('');
+  const [walkInBirthDate, setWalkInBirthDate] = useState('');
   const [walkInImmediateChair, setWalkInImmediateChair] = useState(false);
 
   const [voiceLogs, setVoiceLogs] = useState<VoiceEventLog[]>([
@@ -952,6 +957,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [selectedCartSlot, setSelectedCartSlot] = useState<string>('04:30 PM');
   const [cartClientName, setCartClientName] = useState<string>('Ali Raza');
   const [cartClientPhone, setCartClientPhone] = useState<string>('+92 300 4411223');
+  const [cartClientBirthDate, setCartClientBirthDate] = useState<string>('');
 
   const [immutableProofs, setImmutableProofs] = useState<ImmutableProofRecord[]>([
     {
@@ -1017,7 +1023,40 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setSelectedUpgradeChannel(cfg.paymentChannels[0].id);
     setSelectedUpgradeTargetId(null);
     setEndUserLang(cfg.clientLanguages[0].id);
-  }, [currentSalon.id, currentSalon.onboardingLanguage, currentSalon.phone]);
+
+    let cancelled = false;
+    const params = new URLSearchParams({
+      salonName: currentSalon.name,
+      ownerName: currentSalon.owner,
+      whatsappPhone: currentSalon.phone,
+    });
+    fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/concierge-state?${params.toString()}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: SalonConciergeStateResponse | null) => {
+        if (!cancelled && data) setConciergeState(data);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSalon.id, currentSalon.name, currentSalon.owner, currentSalon.onboardingLanguage, currentSalon.phone]);
+
+  const handleResolveOwnerAlert = async (alertId: string) => {
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/alerts/${encodeURIComponent(alertId)}/resolve`,
+        { method: 'POST' }
+      );
+      if (!res.ok) throw new Error('Failed to resolve alert');
+      const nextState = (await res.json()) as SalonConciergeStateResponse;
+      setConciergeState(nextState);
+      setMaintToast('✓ Low-rating intervention alert marked resolved & logged.');
+      setTimeout(() => setMaintToast(null), 4000);
+    } catch {
+      setMaintToast('Could not update alert status.');
+    }
+  };
 
   // Free $0/mo Web Audio Alert Chime with Rush-Hour Loudspeaker Boost + Web Speech API Reader
   const playFreeNotificationChime = (isBoost = false) => {
@@ -1786,6 +1825,24 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       endUserLang
     );
 
+    if (cartClientPhone.trim()) {
+      fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/clients`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: cartClientName || 'WhatsApp Client',
+          phone: cartClientPhone.trim(),
+          birthDate: cartClientBirthDate.trim(),
+          preferredLanguage: endUserLang === 'ur' ? 'ur' : endUserLang === 'ar' ? 'ar' : 'en',
+        }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.state) setConciergeState(data.state);
+        })
+        .catch(() => {});
+    }
+
     setMaintToast(
       `🔒 Permanent Proof ${newProof.id} Saved (${hash}): Even if client deletes WhatsApp message, salon keeps full approval record.`
     );
@@ -2001,12 +2058,13 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   };
 
   const handleUpdateStatus = (id: string, status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED') => {
+    const targetBooking = bookings.find((b) => b.id === id);
     setBookings((prev) =>
       prev.map((b) => {
         if (b.id === id) {
           if (status === 'COMPLETED') {
-            setMaintToast(`✓ Chair freed! ${b.clientName}'s appointment marked Done & thank-you note sent.`);
-            setTimeout(() => setMaintToast(null), 4000);
+            setMaintToast(`✓ Chair freed! ${b.clientName}'s visit saved & T+2h Google Review prompt scheduled.`);
+            setTimeout(() => setMaintToast(null), 4500);
           } else if (status === 'IN_CHAIR') {
             setMaintToast(`💈 ${b.clientName} is now In-Chair with ${b.barberName}.`);
             setTimeout(() => setMaintToast(null), 4000);
@@ -2016,6 +2074,27 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         return b;
       })
     );
+
+    if (status === 'COMPLETED' && targetBooking) {
+      fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/appointments/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appointmentId: targetBooking.id,
+          clientName: targetBooking.clientName,
+          clientPhone: targetBooking.phone,
+          barberName: targetBooking.barberName,
+          service: targetBooking.service,
+          price: targetBooking.price,
+          timeSlot: targetBooking.timeSlot,
+        }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.state) setConciergeState(data.state);
+        })
+        .catch(() => {});
+    }
   };
 
   const handleSaveWalkIn = () => {
@@ -2034,6 +2113,22 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
     setBookings((prev) => [newBooking, ...prev]);
     setIsWalkInModalOpen(false);
+
+    fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/clients`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newBooking.clientName,
+        phone: newBooking.phone,
+        birthDate: walkInBirthDate.trim(),
+      }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.state) setConciergeState(data.state);
+      })
+      .catch(() => {});
+    setWalkInBirthDate('');
 
     // Speak aloud in Owner's preferred language with Roman Urdu fallback for high-fidelity audio
     const urduScript = `${walkInBarber} بھائی! نیا واک اِن کسٹمر ${newBooking.clientName} ${walkInImmediateChair ? 'کرسی پر بیٹھ گیا ہے' : 'قطار میں شامل ہو گیا ہے'}۔ سروس: ${walkInService}۔`;
@@ -2723,6 +2818,20 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
             <button
               type="button"
+              onClick={() => setActiveTab('SETTINGS')}
+              className={`min-h-[48px] flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-mono font-bold transition ${
+                activeTab === 'SETTINGS'
+                  ? 'border-[#06B6D4] bg-[#06B6D4]/20 text-[#06B6D4]'
+                  : 'border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] text-[#F0F6FC]'
+              }`}
+              title="Open Retention, Win-Back & Review Settings"
+            >
+              <Settings2 className="size-4 text-[#06B6D4]" />
+              <span>Salon Settings</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 setReLoginPhoneInput(currentSalon.phone);
                 setReLoginMatchedSalonId(currentSalon.id);
@@ -2970,6 +3079,53 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         </div>
       )}
 
+      {/* HIGH-PRIORITY PRIVATE OWNER INTERVENTION ALERTS (1–3 STAR RATINGS) */}
+      {(() => {
+        const activeAlerts = (conciergeState?.alerts || []).filter(
+          (a) => a.status === 'OWNER_INTERVENTION_NEEDED'
+        );
+        if (activeAlerts.length === 0) return null;
+        return (
+          <div className="space-y-3">
+            {activeAlerts.map((alert) => (
+              <div
+                key={alert.id}
+                className="rounded-2xl border border-[#da3633] bg-[#4C1C1D] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+              >
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="size-10 rounded-xl border border-[#da3633] bg-[#161B22] grid place-items-center text-[#F85149] shrink-0">
+                    <AlertTriangle className="size-5" />
+                  </div>
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-md bg-[#161B22] border border-[#da3633] px-2 py-0.5 text-[10px] font-mono font-bold text-[#F85149]">
+                        OWNER_INTERVENTION_NEEDED
+                      </span>
+                      <span className="text-xs font-mono font-bold text-[#D29922]">
+                        {alert.rating}★ Private Rating · Google Link Suppressed
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-bold text-[#F0F6FC]">
+                      {alert.clientName} ({alert.clientPhone}) — {alert.service}
+                    </h4>
+                    <p className="text-xs text-[#F0F6FC]/90 font-sans break-words [overflow-wrap:break-word]">
+                      Client Reply: &ldquo;{alert.feedbackText}&rdquo; · {new Date(alert.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleResolveOwnerAlert(alert.id)}
+                  className="min-h-[48px] rounded-xl bg-[#0D1117] border border-[#30363D] hover:border-[#3FB950] px-4 py-2 text-xs font-mono font-bold text-[#3FB950] shrink-0 transition"
+                >
+                  Mark Resolved &amp; Followed Up ✓
+                </button>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
       {/* ========================================================================= */}
       {/* 2. METRIC CARDS + QUERY 2 LIGHTWEIGHT STRATEGY ANALYTICS MATRIX BOXES     */}
       {/* ========================================================================= */}
@@ -3198,15 +3354,24 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. CONSOLIDATED 5-TAB MOBILE NAVIGATION (ZERO FEATURES REMOVED)           */}
+      {/* 3. CONSOLIDATED NAVIGATION (INCLUDES SETTINGS & RETENTION MODULES)         */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1.5 rounded-2xl bg-[#0D1117] border border-[#30363D]">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 p-1.5 rounded-2xl bg-[#0D1117] border border-[#30363D]">
         {[
           { id: 'QUEUE' as const, label: 'Live Queue & Voice', icon: Calendar, badge: `${bookings.length} today` },
-          { id: 'RATES_BOT' as const, label: 'Rates, Bot & Proof', icon: Scissors, badge: `${services.length} · ${immutableProofs.length} locked` },
+          { id: 'RATES_BOT' as const, label: 'Rates, Bot & Proof', icon: Scissors, badge: `${services.length} · ${immutableProofs.length}` },
           { id: 'MARKETING' as const, label: 'Video & Events', icon: Video, badge: isVipPackage ? 'Live' : 'Deals' },
           { id: 'GROWTH_KIT' as const, label: 'Growth Kit & PDF', icon: Printer, badge: 'PDF + 4.9★' },
           { id: 'BILLING_SLA' as const, label: 'Plan & Monthly Fee', icon: ShieldCheck, badge: isMaintPaid ? 'Paid ✓' : 'Due 5th' },
+          {
+            id: 'SETTINGS' as const,
+            label: 'Settings',
+            icon: Settings2,
+            badge:
+              (conciergeState?.alerts || []).filter((a) => a.status === 'OWNER_INTERVENTION_NEEDED').length > 0
+                ? `${(conciergeState?.alerts || []).filter((a) => a.status === 'OWNER_INTERVENTION_NEEDED').length} Alert`
+                : '4 Rules',
+          },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -3374,6 +3539,32 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         className="min-h-[40px] rounded-lg border border-[#116329] bg-[#0D3822] hover:bg-[#0D3822]/80 px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950] transition"
                       >
                         Mark Done ✓
+                      </button>
+                    )}
+                    {booking.status === 'COMPLETED' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/cron/run`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              job: 'review_t2h',
+                              force: true,
+                              appointmentId: booking.id,
+                            }),
+                          })
+                            .then((r) => (r.ok ? r.json() : null))
+                            .then((data) => {
+                              if (data?.state) setConciergeState(data.state);
+                              setMaintToast(`★ T+2h Review Prompt dispatched to ${booking.clientName}. Open Settings to test 1–5★ reply.`);
+                              setTimeout(() => setMaintToast(null), 5000);
+                            })
+                            .catch(() => {});
+                        }}
+                        className="min-h-[40px] rounded-lg border border-[#30363D] bg-[#161B22] hover:border-[#D29922] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#D29922] transition"
+                      >
+                        Send T+2h Review ★
                       </button>
                     )}
                   </div>
@@ -4143,13 +4334,22 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                       </div>
                     )}
 
-                    <input
-                      type="text"
-                      value={cartClientPhone}
-                      onChange={(e) => setCartClientPhone(e.target.value)}
-                      placeholder={endUserLang === 'ur' ? 'کسٹمر کا واٹس ایپ نمبر' : endUserLang === 'ar' ? 'رقم واتساب العميل' : 'Client WhatsApp Number'}
-                      className="w-full min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-xs font-mono"
-                    />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                      <input
+                        type="text"
+                        value={cartClientPhone}
+                        onChange={(e) => setCartClientPhone(e.target.value)}
+                        placeholder={endUserLang === 'ur' ? 'کسٹمر کا واٹس ایپ نمبر' : endUserLang === 'ar' ? 'رقم واتساب العميل' : 'Client WhatsApp Number'}
+                        className="w-full min-h-[48px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#F0F6FC] placeholder:text-[#484F58] text-sm font-mono"
+                      />
+                      <input
+                        type="text"
+                        value={cartClientBirthDate}
+                        onChange={(e) => setCartClientBirthDate(e.target.value)}
+                        placeholder="Birth Date (DD/MM, optional)"
+                        className="w-full min-h-[48px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[#D29922] placeholder:text-[#484F58] text-sm font-mono"
+                      />
+                    </div>
 
                     <div className="rounded-xl bg-[#161B22] border border-[#30363D] p-2.5 text-xs font-mono space-y-1">
                       <div className="flex justify-between text-[#8B949E]">
@@ -4790,6 +4990,24 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       )}
 
       {/* ========================================================================= */}
+      {/* 9. TAB 6: SALON SETTINGS · 4 WHATSAPP CONCIERGE & RETENTION MODULES       */}
+      {/* ========================================================================= */}
+      {activeTab === 'SETTINGS' && (
+        <SalonRetentionSettingsPanel
+          salonId={currentSalon.id}
+          salonName={currentSalon.name}
+          ownerName={currentSalon.owner}
+          salonPhone={currentSalon.phone}
+          conciergeState={conciergeState}
+          onStateUpdated={(next) => setConciergeState(next)}
+          onShowToast={(msg) => {
+            setMaintToast(msg);
+            setTimeout(() => setMaintToast(null), 5000);
+          }}
+        />
+      )}
+
+      {/* ========================================================================= */}
       {/* QUICK ADD WALK-IN CLIENT MODAL WITH LOUD OWNER-LANGUAGE DISPATCH          */}
       {/* ========================================================================= */}
       {isWalkInModalOpen && (
@@ -4863,9 +5081,22 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     value={walkInPhone}
                     onChange={(e) => setWalkInPhone(e.target.value)}
                     placeholder="+92 300 0000000"
-                    className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-[#F0F6FC] font-mono focus:outline-none focus:border-[#06B6D4]"
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#F0F6FC] font-mono focus:outline-none focus:border-[#06B6D4]"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono text-[#8B949E] mb-1">
+                  Client Birth Date (Day/Month, Optional for 9:00 AM Birthday Offer):
+                </label>
+                <input
+                  type="text"
+                  value={walkInBirthDate}
+                  onChange={(e) => setWalkInBirthDate(e.target.value)}
+                  placeholder="DD/MM (e.g. 14/11)"
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#D29922] font-mono focus:outline-none focus:border-[#06B6D4]"
+                />
               </div>
 
               <div>
