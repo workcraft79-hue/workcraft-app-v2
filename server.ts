@@ -40,6 +40,18 @@ import {
   setSessionCookie,
   signSessionToken,
 } from './server/security';
+import { translateAndSynthesizeVoice, resolveTargetLocale } from './server/voiceTranslator';
+import {
+  appendVoiceMessage,
+  getLiveUsageMeter,
+  getWhatsAppHeartbeatStatus,
+  listVoiceThreads,
+  markVoiceThreadRead,
+  recordAiVoiceApiUsage,
+  recordWhatsAppGatewayHeartbeat,
+  startVoiceStorageCleanupCron,
+  sweepExpiredVoiceBlobs,
+} from './server/voiceInboxStore';
 
 function resolveServerPort(): number {
   const portFlagIdx = process.argv.indexOf('--port');
@@ -254,7 +266,7 @@ function detectInputLanguage(text: string): 'en' | 'ur' | 'ar' {
 async function startServer() {
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '4mb' }));
 
   // ===========================================================================
   // DIRECT 4-ROLE SESSION & INVITE MANAGEMENT (ZERO PIN WALLS · ZERO IP LIMITS)
@@ -556,189 +568,137 @@ async function startServer() {
     }
   });
 
-  app.post('/api/translate-voice', requireAuth, async (req, res) => {
+  app.post('/api/translate-voice', async (req, res) => {
     try {
-      const rawText = sanitizePlainText(req.body?.text, 800);
-      const targetDialect =
-        sanitizePlainText(req.body?.targetDialect, 60) || 'Roman Urdu (Lahori)';
+      const rawText = sanitizePlainText(req.body?.text, 1000);
+      const audioBase64 = typeof req.body?.audioBase64 === 'string' ? req.body.audioBase64.trim() : '';
+      const audioMimeType =
+        typeof req.body?.audioMimeType === 'string'
+          ? sanitizePlainText(req.body.audioMimeType, 80)
+          : 'audio/webm;codecs=opus';
+      const targetLocaleRaw = sanitizePlainText(req.body?.targetLocale, 20);
+      const targetDialectRaw = sanitizePlainText(req.body?.targetDialect, 60);
 
-      if (!rawText) {
-        return res.status(400).json({ error: 'Message text is required.' });
+      if (!rawText && !audioBase64) {
+        return res.status(400).json({ error: 'Compressed audio recording or message text is required.' });
+      }
+      if (audioBase64.length > 3 * 1024 * 1024) {
+        return res.status(413).json({ error: 'Compressed voice note exceeds size limit.' });
       }
 
-      const detectedLanguage = detectInputLanguage(rawText);
+      const result = await translateAndSynthesizeVoice({
+        audioBase64,
+        audioMimeType,
+        text: rawText,
+        targetLocale: targetLocaleRaw || undefined,
+        targetDialect: targetDialectRaw || undefined,
+      });
 
-      // Deterministic local phrase fallback for common Founder voice notes
-      const buildVoiceFallback = (input: string, dialect: string): string => {
-        const lower = input.toLowerCase();
-        const isApproval =
-          lower.includes('approved') ||
-          lower.includes('verify') ||
-          lower.includes('verified') ||
-          lower.includes('scheduled') ||
-          lower.includes('منظور') ||
-          lower.includes('موافق');
-        const isRateReply =
-          lower.includes('rate') ||
-          lower.includes('price') ||
-          lower.includes('package') ||
-          lower.includes('discount') ||
-          lower.includes('ریٹ') ||
-          lower.includes('سعر');
-        const isWaitReply =
-          lower.includes('wait') ||
-          lower.includes('soon') ||
-          lower.includes('checking') ||
-          lower.includes('minutes') ||
-          lower.includes('انتظار') ||
-          lower.includes('دقائق');
-
-        if (dialect.includes('Gulf Arabic')) {
-          if (isApproval && lower.includes('58')) {
-            return 'تمت مراجعة فيديو العرض الترويجي الخاص بك بنجاح، ومدته 58 ثانية وتمت الموافقة عليه وجدولته للغد صباحاً.';
-          }
-          if (isApproval) {
-            return `أهلاً بك، تمت مراجعة رسالتك والموافقة على طلبك وجدولته تلقائياً عبر نظام WorkCraft: ${input}`;
-          }
-          if (isRateReply) {
-            return `تم تحديث قائمة الأسعار والباقات في حساب صالونك بنجاح وجاهزة للحجز التلقائي الآن.`;
-          }
-          if (isWaitReply) {
-            return `شكراً لتواصلك، نقوم بمراجعة طلبك الآن وسنرسل لك التأكيد خلال دقائق.`;
-          }
-          return detectedLanguage === 'ar'
-            ? input
-            : `رسالة من الإدارة إلى صالونك: ${input}`;
-        }
-
-        if (dialect.includes('Standard Urdu')) {
-          if (isApproval && lower.includes('58')) {
-            return 'آپ کی ویڈیو ڈیل کی توثیق مکمل ہو چکی ہے، 58 سیکنڈ دورانیہ درست ہے اور کل صبح کا براڈکاسٹ شیڈول منظور کر لیا گیا ہے۔';
-          }
-          if (isApproval) {
-            return `السلام علیکم، آپ کا پیغام اور ویڈیو ڈیل سسٹم میں منظور کر لی گئی ہے اور شیڈول کر دی گئی ہے: ${input}`;
-          }
-          if (isRateReply) {
-            return 'جی، آپ کے سیلون کی سروسز اور پیکیج ریٹس سسٹم میں کامیابی سے اپڈیٹ کر دیے گئے ہیں۔';
-          }
-          if (isWaitReply) {
-            return 'شکریہ، آپ کی درخواست چیک کی جا رہی ہے، جلد ہی آپ کو کنفرمیشن مل جائے گی۔';
-          }
-          return detectedLanguage === 'ur' ? input : `ورک کرافٹ ایڈمن پیغام: ${input}`;
-        }
-
-        if (dialect.includes('Lahori Punjabi')) {
-          if (isApproval && lower.includes('58')) {
-            return 'Tuhada video deal check ho gaya ae, 58 second da pura fit ae te approve ho gaya. Kal sawere broadcast chal pyega.';
-          }
-          if (isApproval) {
-            return `Assalamu Alaikum! Tuhada paigham mil gaya ae te system vich approve ho gaya: ${input}`;
-          }
-          if (isRateReply) {
-            return 'Ji haan, tuhade salon de naye package te rate list system vich update ho gaye ne.';
-          }
-          if (isWaitReply) {
-            return 'Bas thori der wait karo ji, asaan tuhada kam check kar rahe haan.';
-          }
-          return `WorkCraft Paigham: ${input}`;
-        }
-
-        if (dialect.includes('English')) {
-          return input;
-        }
-
-        // Roman Urdu (Lahori) default
-        if (isApproval && lower.includes('58')) {
-          return 'Aap ka video deal check ho gaya hai, bilkul 58 seconds ka hai aur approve kar diya hai. Kal subah broadcast schedule ho jayega.';
-        }
-        if (isApproval) {
-          return `Salam! Aap ka message aur request verify kar ke approve kar di gayi hai: ${input}`;
-        }
-        if (isRateReply) {
-          return 'Ji, aap ke salon ke updated package aur service rates system mein save ho gaye hain.';
-        }
-        if (isWaitReply) {
-          return 'Shukriya, hum aap ki request check kar rahe hain aur thori der mein confirm kar dein gay.';
-        }
-        return `Assalamu Alaikum! ${input}`;
-      };
-
-      const fallbackTranslated = buildVoiceFallback(rawText, targetDialect);
-      const apiKey = process.env.GEMINI_API_KEY;
-
-      if (apiKey && apiKey.trim().length > 0) {
-        try {
-          const ai = new GoogleGenAI({
-            apiKey: apiKey.trim(),
-            httpOptions: {
-              headers: {
-                'User-Agent': 'aistudio-build',
-              },
-            },
-          });
-
-          const dialectInstruction =
-            targetDialect.includes('Roman Urdu')
-              ? 'Natural conversational Pakistani Roman Urdu using Latin script (as spoken in Lahore/Karachi).'
-              : targetDialect.includes('Standard Urdu')
-              ? 'Natural polite Pakistani Urdu in Urdu script (اردو).'
-              : targetDialect.includes('Lahori Punjabi')
-              ? 'Friendly respectful Lahori Punjabi in Roman/Latin script.'
-              : targetDialect.includes('Gulf Arabic')
-              ? 'Natural polite Gulf Arabic in Arabic script (العربية).'
-              : 'Clear natural English.';
-
-          const response = await ai.models.generateContent({
-            model: 'gemini-4-hydrogen',
-            contents: `You are translating a short voice/text reply from a salon software Founder to a salon owner. Detect whatever language the input is written in (English, Urdu, Roman Urdu, Arabic, Punjabi, etc.) and translate its exact meaning faithfully into: ${dialectInstruction}\n\nKeep the tone warm, concise, and professional.\nInput message: "${rawText}"`,
-            config: {
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  translatedText: {
-                    type: Type.STRING,
-                    description: 'The faithful, natural translation in the requested target dialect.',
-                  },
-                  detectedSourceLanguage: {
-                    type: Type.STRING,
-                    description: 'Short label of the detected input language, e.g. English, Urdu, Arabic, Roman Urdu.',
-                  },
-                },
-                required: ['translatedText', 'detectedSourceLanguage'],
-              },
-            },
-          });
-
-          const parsed = JSON.parse((response.text ?? '{}').trim()) as {
-            translatedText?: string;
-            detectedSourceLanguage?: string;
-          };
-
-          if (parsed.translatedText && parsed.translatedText.trim()) {
-            return res.json({
-              detectedInputLanguage: parsed.detectedSourceLanguage?.trim() || detectedLanguage.toUpperCase(),
-              targetDialect,
-              translatedText: parsed.translatedText.trim(),
-              source: 'gemini',
-            });
-          }
-        } catch (aiErr) {
-          console.warn('Gemini voice translation fallback triggered:', aiErr);
-        }
-      }
+      const usage = recordAiVoiceApiUsage(
+        result.translationSource !== 'fallback',
+        result.ttsSource === 'msedge-tts'
+      );
 
       return res.json({
-        detectedInputLanguage:
-          detectedLanguage === 'ur' ? 'Urdu' : detectedLanguage === 'ar' ? 'Arabic' : 'English / Auto',
-        targetDialect,
-        translatedText: fallbackTranslated,
-        source: 'fallback',
+        ...result,
+        usage,
       });
     } catch (err) {
-      console.error('Voice translation route error:', err);
+      console.error('Voice translation & TTS route error:', err);
       return res.status(500).json({ error: 'Voice translation failed.' });
     }
+  });
+
+  // ===========================================================================
+  // UNIFIED VOICE INBOX, LIVE USAGE METER (7-DAY CLEANUP) & WHATSAPP HEARTBEAT
+  // ===========================================================================
+  app.get('/api/voice/usage', (_req, res) => {
+    sweepExpiredVoiceBlobs();
+    return res.json(getLiveUsageMeter());
+  });
+
+  app.get('/api/voice/threads', (req, res) => {
+    const authUser = extractAuthUserFromRequest(req);
+    const requestedSalonId =
+      typeof req.query.salonId === 'string' ? sanitizePlainText(req.query.salonId, 60) : undefined;
+    // Strict tenant isolation when logged in as SALON_OWNER
+    const salonFilter =
+      authUser?.userRole === 'SALON_OWNER' && authUser.salonId
+        ? authUser.salonId
+        : requestedSalonId;
+    return res.json(listVoiceThreads(salonFilter));
+  });
+
+  app.post('/api/voice/threads/message', (req, res) => {
+    try {
+      const authUser = extractAuthUserFromRequest(req);
+      const body = req.body || {};
+      const senderRole = body.senderRole === 'FOUNDER' ? 'FOUNDER' : 'SALON_OWNER';
+      if (senderRole === 'FOUNDER' && authUser && authUser.userRole !== 'FOUNDER') {
+        return res.status(403).json({ error: 'Only Founder can post Founder replies.' });
+      }
+
+      const threadId = typeof body.threadId === 'string' ? sanitizePlainText(body.threadId, 60) : undefined;
+      const salonId =
+        authUser?.userRole === 'SALON_OWNER' && authUser.salonId
+          ? authUser.salonId
+          : typeof body.salonId === 'string'
+          ? sanitizePlainText(body.salonId, 60)
+          : undefined;
+      const salonName = typeof body.salonName === 'string' ? sanitizePlainText(body.salonName, 100) : undefined;
+      const ownerName = typeof body.ownerName === 'string' ? sanitizePlainText(body.ownerName, 80) : undefined;
+      const city = typeof body.city === 'string' ? sanitizePlainText(body.city, 80) : undefined;
+      const targetLocale = resolveTargetLocale(
+        typeof body.targetLocale === 'string' ? body.targetLocale : undefined,
+        typeof body.targetDialect === 'string' ? body.targetDialect : undefined
+      );
+      const originalText = sanitizePlainText(body.originalText, 1000) || '(Compressed Opus Voice Note)';
+      const translatedText = sanitizePlainText(body.translatedText, 1200) || originalText;
+      const detectedInputLanguage = sanitizePlainText(body.detectedInputLanguage, 40) || 'Auto';
+      const voiceName = typeof body.voiceName === 'string' ? sanitizePlainText(body.voiceName, 60) : undefined;
+      const audioDataUrl =
+        typeof body.audioDataUrl === 'string' && body.audioDataUrl.startsWith('data:audio/')
+          ? body.audioDataUrl.slice(0, 2 * 1024 * 1024)
+          : undefined;
+      const sizeBytes = Number(body.sizeBytes || 0) || undefined;
+
+      const updated = appendVoiceMessage({
+        threadId,
+        salonId,
+        salonName,
+        ownerName,
+        city,
+        targetLocale,
+        senderRole,
+        originalText,
+        translatedText,
+        detectedInputLanguage,
+        voiceName,
+        audioDataUrl,
+        sizeBytes,
+      });
+
+      return res.status(201).json(updated);
+    } catch (err) {
+      console.error('Failed to append voice thread message:', err);
+      return res.status(500).json({ error: 'Could not save voice message.' });
+    }
+  });
+
+  app.patch('/api/voice/threads/:threadId/read', (req, res) => {
+    const threadId = sanitizePlainText(req.params.threadId, 60);
+    const unread = Boolean(req.body?.unread);
+    return res.json(markVoiceThreadRead(threadId, unread));
+  });
+
+  app.get('/api/health/whatsapp', (_req, res) => {
+    return res.json(getWhatsAppHeartbeatStatus());
+  });
+
+  app.post('/api/health/whatsapp/heartbeat', requireWebhookSecret, (req, res) => {
+    const ok = req.body?.ok !== false;
+    const reason = typeof req.body?.reason === 'string' ? sanitizePlainText(req.body.reason, 180) : undefined;
+    return res.json(recordWhatsAppGatewayHeartbeat(ok, reason));
   });
 
   // ===========================================================================
@@ -1097,6 +1057,7 @@ async function startServer() {
   );
 
   startConciergeSchedulers();
+  startVoiceStorageCleanupCron();
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

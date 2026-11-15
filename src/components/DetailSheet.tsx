@@ -1,26 +1,17 @@
 import React from 'react';
-import {
-  X,
-  Radio,
-  Clock,
-  AlertTriangle,
-  CheckCircle2,
-  UsersRound,
-  WalletCards,
-  Mic,
-  ArrowRight,
-  ShieldCheck,
-  CreditCard,
-  MapPin,
-  Smartphone,
-  Lock,
-} from 'lucide-react';
+import { X, ArrowRight } from 'lucide-react';
 import { TabName } from '../types/workcraft';
+import {
+  DEFAULT_USAGE_METER,
+  MONTHLY_REVENUE_SUMMARY,
+  type LiveUsageMeter,
+} from '../data/portalData';
 
 interface DetailSheetProps {
   detail: string | null;
   onClose: () => void;
   go: (tab: TabName) => void;
+  usageMeter?: LiveUsageMeter;
   onOpenVoiceTicker?: () => void;
   onOpenCashModal?: () => void;
   onOpenReportModal?: () => void;
@@ -30,11 +21,8 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
   detail,
   onClose,
   go,
-  onOpenVoiceTicker,
-  onOpenCashModal,
-  onOpenReportModal,
+  usageMeter = DEFAULT_USAGE_METER,
 }) => {
-  const [reminderDispatched, setReminderDispatched] = React.useState(false);
   if (!detail) return null;
 
   return (
@@ -85,7 +73,7 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
           </button>
         </div>
 
-        {/* 1. Salon Connections (24 online - LIVE) */}
+        {/* 1. Salon Connections */}
         {detail === 'Salon connections' && (
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-3 gap-2 font-mono">
@@ -106,7 +94,6 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
               </div>
             </div>
 
-            {/* City Distribution */}
             <div className="rounded-xl border border-[#30363D] bg-[#21262D] p-3.5 space-y-2 font-mono">
               <p className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider">
                 City Breakdown
@@ -127,7 +114,6 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
               </div>
             </div>
 
-            {/* Recent Activity */}
             <div className="space-y-2 font-mono">
               <p className="text-xs font-bold text-[#8B949E] uppercase tracking-wider">
                 Recent WhatsApp Checks
@@ -153,14 +139,16 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
           </div>
         )}
 
-        {/* 2. Maintenance Queue (3 due today - ACTION) */}
+        {/* 2. Maintenance Queue (Live Pending Salons Only — Zero Manual Dispatch Button) */}
         {detail === 'Maintenance queue' && (
           <div className="mt-4 space-y-4 font-mono">
             <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B] p-4 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-bold text-[#D29922] uppercase">3 Salons Due Today (5th of Month)</span>
+                <span className="text-xs font-bold text-[#D29922] uppercase">
+                  {MONTHLY_REVENUE_SUMMARY.pendingSalonsCount} Salons Due Today (5th of Month)
+                </span>
                 <span className="rounded bg-[#0D1117] px-2 py-0.5 text-[10px] font-bold text-[#D29922] border border-[#9E6A03]">
-                  PKR 6,000 (10% SLA)
+                  PKR {MONTHLY_REVENUE_SUMMARY.pendingDueAmount.toLocaleString()} (10% SLA)
                 </span>
               </div>
               <p className="text-xs text-[#F0F6FC]/90 font-sans leading-relaxed">
@@ -168,16 +156,16 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
               </p>
             </div>
 
-            {/* Autonomous Cron Engine Status */}
             <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-2">
                 <span className="size-2 rounded-full bg-[#3FB950] animate-pulse" />
-                <span className="text-[#3FB950] font-bold">Autonomous Cron Engine: ACTIVE</span>
+                <span className="text-[#3FB950] font-bold">Autonomous Cron Reminders: ACTIVE</span>
               </div>
-              <span className="text-[10px] text-[#8B949E]">Fires Daily @ 09:00 AM via Central SIM</span>
+              <span className="text-[10px] text-[#8B949E]">
+                Runs automatically 2 days before month-end, on the 3rd, and on the 5th
+              </span>
             </div>
 
-            {/* Salons with Pending Dues */}
             <div className="space-y-2">
               <p className="text-xs font-bold text-[#8B949E] uppercase tracking-wider">
                 Pending Salons in Maintenance Window
@@ -201,26 +189,6 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
                   </div>
                 </div>
               ))}
-            </div>
-
-            {/* Manual Test Override Button */}
-            <div className="pt-2 space-y-1.5">
-              <button
-                type="button"
-                onClick={() => setReminderDispatched(true)}
-                className={`w-full min-h-[48px] rounded-xl py-3 text-xs font-mono font-bold uppercase transition text-center ${
-                  reminderDispatched
-                    ? 'bg-[#3FB950] text-[#0D1117]'
-                    : 'bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117]'
-                }`}
-              >
-                {reminderDispatched
-                  ? '✓ Manual Test Reminders Dispatched via Central SIM!'
-                  : '🧪 Test Manual WhatsApp Payment Reminder Dispatch →'}
-              </button>
-              <p className="text-[10px] text-[#6E7681] text-center font-sans">
-                Automatic background cron runs daily at 09:00 AM; click above only to force an immediate test reminder.
-              </p>
             </div>
           </div>
         )}
@@ -255,14 +223,22 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
                 <span className="text-[9px] text-[#6E7681]">Ban-safe delivery</span>
               </div>
 
-              <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3">
-                <span className="text-[10px] text-[#6E7681] uppercase block">System Cost</span>
-                <span className="text-xs font-bold text-[#D29922] mt-1 block">$0.00 / mo</span>
-                <span className="text-[9px] text-[#6E7681]">Self-hosted line</span>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  go('Settings');
+                }}
+                className="rounded-xl border border-[#30363D] hover:border-[#06B6D4] bg-[#0D1117] p-3 text-left transition"
+              >
+                <span className="text-[10px] text-[#6E7681] uppercase block">Live AI &amp; Storage</span>
+                <span className="text-xs font-bold text-[#D29922] mt-1 block">
+                  {usageMeter.monthlyExpenseLabel} ({usageMeter.usagePercent}%)
+                </span>
+                <span className="text-[9px] text-[#06B6D4]">Open Settings Meter →</span>
+              </button>
             </div>
 
-            {/* Live Activity Feed */}
             <div className="space-y-2">
               <p className="text-xs font-bold text-[#8B949E] uppercase tracking-wider">
                 Recent Automatic Actions
@@ -285,44 +261,49 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
           </div>
         )}
 
-        {/* 4. Revenue Status */}
+        {/* 4. Revenue Status (Unified Single Source of Truth: PKR 108,000) */}
         {detail === 'Revenue status' && (
           <div className="mt-4 space-y-4 font-mono">
             <div className="rounded-xl border border-[#30363D] bg-[#21262D] p-4 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-bold text-[#D29922] uppercase">Current Month Collection Summary</span>
                 <span className="rounded bg-[#0D3822] px-2 py-0.5 text-[10px] font-bold text-[#3FB950] border border-[#116329]">
-                  PKR 156,000 VERIFIED
+                  PKR {MONTHLY_REVENUE_SUMMARY.totalCollected.toLocaleString()} VERIFIED
                 </span>
               </div>
               <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
-                Total inflows cleared via 100% automated direct digital payment rails. Zero cloud SaaS platform tolls or third-party telephony taxes incurred.
+                Total inflows cleared across {MONTHLY_REVENUE_SUMMARY.paidSalonsCount} of {MONTHLY_REVENUE_SUMMARY.totalSalonsCount} paid salons. Matches Revenue Ledger and Overview KPI 100%.
               </p>
             </div>
 
-            {/* Current Month Dual Breakup */}
             <div className="rounded-xl border border-[#30363D] bg-[#21262D] p-3.5 space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider">
                   Current Month Revenue Breakup
                 </p>
-                <span className="text-[10px] text-cyan-400 font-bold">26 Active Partners</span>
+                <span className="text-[10px] text-cyan-400 font-bold">
+                  {MONTHLY_REVENUE_SUMMARY.paidSalonsCount} Paid Partners
+                </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-1">
                   <span className="text-[10px] text-[#8B949E] uppercase block">New Salons Onboarded</span>
-                  <p className="text-lg font-bold text-cyan-400">PKR 120,000</p>
+                  <p className="text-lg font-bold text-cyan-400">
+                    PKR {MONTHLY_REVENUE_SUMMARY.setupCollected.toLocaleString()}
+                  </p>
                   <p className="text-[10px] text-[#8B949E] font-sans">
-                    8 Salons onboarded this month (@ PKR 15k–25k Setup fee)
+                    {MONTHLY_REVENUE_SUMMARY.setupSalonsCount} Salons onboarded this month
                   </p>
                 </div>
 
                 <div className="rounded-xl border border-[#116329] bg-[#0D3822]/60 p-3 space-y-1">
                   <span className="text-[10px] text-[#8B949E] uppercase block">Paid 10% Maintenance</span>
-                  <p className="text-lg font-bold text-[#3FB950]">PKR 36,000</p>
+                  <p className="text-lg font-bold text-[#3FB950]">
+                    PKR {MONTHLY_REVENUE_SUMMARY.maintenanceCollected.toLocaleString()}
+                  </p>
                   <p className="text-[10px] text-[#8B949E] font-sans">
-                    18 Salons settled current month 10% SLA fee
+                    {MONTHLY_REVENUE_SUMMARY.maintenanceSalonsCount} Salons settled current month 10% SLA fee
                   </p>
                 </div>
               </div>
@@ -330,45 +311,57 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
               <div className="space-y-1 pt-1">
                 <div className="flex items-center justify-between text-[10px] text-[#8B949E]">
                   <span>Revenue Composition:</span>
-                  <span>77% Setup · 23% Recurring</span>
+                  <span>
+                    {MONTHLY_REVENUE_SUMMARY.setupPct}% Setup · {MONTHLY_REVENUE_SUMMARY.maintenancePct}% Recurring
+                  </span>
                 </div>
                 <div className="h-2.5 w-full rounded-full bg-[#0D1117] overflow-hidden flex border border-[#30363D] p-0.5">
-                  <div className="h-full bg-[#06B6D4] rounded-l-full" style={{ width: '77%' }} title="New Setup Fee: 77%" />
-                  <div className="h-full bg-[#3FB950] rounded-r-full" style={{ width: '23%' }} title="Monthly 10% Maintenance: 23%" />
+                  <div
+                    className="h-full bg-[#06B6D4] rounded-l-full"
+                    style={{ width: `${MONTHLY_REVENUE_SUMMARY.setupPct}%` }}
+                  />
+                  <div
+                    className="h-full bg-[#3FB950] rounded-r-full"
+                    style={{ width: `${MONTHLY_REVENUE_SUMMARY.maintenancePct}%` }}
+                  />
                 </div>
               </div>
             </div>
 
-            {/* Channel Breakdown */}
             <div className="rounded-xl border border-[#30363D] bg-[#21262D] p-3.5 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider">
                   Settled Digital Channels
                 </p>
-                <span className="rounded-full bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[9px] font-bold text-[#3FB950]">
-                  100% ZERO AGENT CASH VERIFIED
-                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    go('Revenue');
+                  }}
+                  className="inline-flex items-center gap-1 text-[10px] font-bold text-[#06B6D4] hover:underline"
+                >
+                  <span>Open Full Ledger</span>
+                  <ArrowRight className="size-3" />
+                </button>
               </div>
               <div className="space-y-1.5 text-xs">
-                <div className="flex items-center justify-between gap-2 bg-[#0D1117] p-2.5 rounded-lg border border-[#06B6D4]/50">
-                  <div className="min-w-0">
-                    <span className="text-[#F0F6FC] font-bold block">Official Bank Account (IBFT / Raast / Overseas)</span>
-                    <span className="text-[10px] text-[#8B949E] font-sans block">12 salons · Local IBFT + Overseas setup &amp; 10% maint auto-deposits</span>
+                {MONTHLY_REVENUE_SUMMARY.channels.map((ch, idx) => (
+                  <div
+                    key={ch.id}
+                    className={`flex items-center justify-between gap-2 bg-[#0D1117] p-2.5 rounded-lg border ${
+                      idx === 0 ? 'border-[#06B6D4]/50' : 'border-[#30363D]'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <span className="text-[#F0F6FC] font-bold block">{ch.shortName}</span>
+                      <span className="text-[10px] text-[#8B949E] font-sans block">{ch.desc}</span>
+                    </div>
+                    <span className="text-[#D29922] font-bold shrink-0">
+                      PKR {ch.amount.toLocaleString()}
+                    </span>
                   </div>
-                  <span className="text-[#D29922] font-bold shrink-0">PKR 78,000</span>
-                </div>
-                <div className="flex items-center justify-between gap-2 bg-[#0D1117] p-2.5 rounded-lg border border-[#30363D]">
-                  <span className="text-[#F0F6FC]">EasyPaisa SMS Webhooks (7 Local Salons)</span>
-                  <span className="text-[#D29922] font-bold shrink-0">PKR 36,000</span>
-                </div>
-                <div className="flex items-center justify-between gap-2 bg-[#0D1117] p-2.5 rounded-lg border border-[#30363D]">
-                  <span className="text-[#F0F6FC]">JazzCash SMS Webhook (4 Local Salons)</span>
-                  <span className="text-[#D29922] font-bold shrink-0">PKR 22,000</span>
-                </div>
-                <div className="flex items-center justify-between gap-2 bg-[#0D1117] p-2.5 rounded-lg border border-[#30363D]">
-                  <span className="text-[#F0F6FC]">Stripe Connect Overseas Split (3 Salons → Bank)</span>
-                  <span className="text-[#D29922] font-bold shrink-0">PKR 20,000</span>
-                </div>
+                ))}
               </div>
             </div>
           </div>

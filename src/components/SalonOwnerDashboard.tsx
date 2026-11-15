@@ -50,11 +50,19 @@ import {
   Moon,
   Sun,
   Flag,
+  Play,
+  Pause,
 } from 'lucide-react';
 import { PortalCard } from './PortalCard';
 import { BroadcastTab } from './Tabs/BroadcastTab';
 import { SalonWindowPosterPdf } from './SalonWindowPosterPdf';
 import { SalonRetentionSettingsPanel } from './SalonRetentionSettingsPanel';
+import { VoiceRecorder, type RecordedOpusClip } from './VoiceRecorder';
+import {
+  INITIAL_VOICE_THREADS,
+  type SupportedVoiceLocale,
+  type VoiceThreadItem,
+} from '../data/portalData';
 import { Contact, SalonProfile } from '../types';
 import type { AuthUser } from '../types/auth';
 import type { SalonConciergeStateResponse, SalonPackageTier } from '../types/concierge';
@@ -962,6 +970,8 @@ interface SalonOwnerDashboardProps {
   onSectionModeChange?: (mode: 'LIVE' | 'MANAGE') => void;
   onOpenSimulator?: () => void;
   onClose?: () => void;
+  voiceThreads?: VoiceThreadItem[];
+  onVoiceThreadsUpdated?: (threads: VoiceThreadItem[]) => void;
 }
 
 export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
@@ -975,6 +985,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   sectionMode,
   onSectionModeChange,
   onClose,
+  voiceThreads,
+  onVoiceThreadsUpdated,
 }) => {
   const [salonsState, setSalonsState] = useState<ClientSalon[]>(() => {
     const dynamicId =
@@ -1222,6 +1234,256 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const recognitionRef = useRef<any>(null);
   const micTimerRef = useRef<number | null>(null);
   const latestTranscriptRef = useRef<string>('');
+
+  // Query 6: Voice Support with Founder (Compressed Opus -> /api/translate-voice -> Unified Voice Inbox)
+  const founderVoiceCardRef = useRef<HTMLDivElement | null>(null);
+  const founderVoiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [salonVoiceThreads, setSalonVoiceThreads] = useState<VoiceThreadItem[]>(
+    voiceThreads && voiceThreads.length > 0 ? voiceThreads : INITIAL_VOICE_THREADS
+  );
+  const [ownerVoiceDraft, setOwnerVoiceDraft] = useState('');
+  const [ownerRecordedClip, setOwnerRecordedClip] = useState<RecordedOpusClip | null>(null);
+  const [isSendingFounderVoice, setIsSendingFounderVoice] = useState(false);
+  const [founderVoiceError, setFounderVoiceError] = useState<string | null>(null);
+  const [playingFounderMsgId, setPlayingFounderMsgId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (voiceThreads && voiceThreads.length > 0) {
+      setSalonVoiceThreads(voiceThreads);
+    }
+  }, [voiceThreads]);
+
+  const activeVoiceSalonId = /^\d+$/.test(currentSalon.id)
+    ? `salon-${currentSalon.id}`
+    : currentSalon.id;
+  const activeOwnerVoiceLocale: SupportedVoiceLocale =
+    ownerLang === 'ur' ? 'ur-PK' : ownerLang === 'ar' ? 'ar-AE' : 'en-US';
+
+  useEffect(() => {
+    let cancelled = false;
+    const syncThread = async () => {
+      try {
+        const res = await fetch(
+          `/api/voice/threads?salonId=${encodeURIComponent(activeVoiceSalonId)}`
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { threads?: VoiceThreadItem[] };
+        if (!cancelled && Array.isArray(data.threads) && data.threads.length > 0) {
+          setSalonVoiceThreads((prev) => {
+            const byId = new Map(prev.map((t) => [t.id, t]));
+            data.threads!.forEach((t) => byId.set(t.id, t));
+            return Array.from(byId.values());
+          });
+        }
+      } catch {
+        // Fallback smoothly on static preview hosts
+      }
+    };
+    void syncThread();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeVoiceSalonId]);
+
+  const activeFounderVoiceThread: VoiceThreadItem =
+    salonVoiceThreads.find(
+      (t) =>
+        t.salonId === activeVoiceSalonId ||
+        t.salonName.trim().toLowerCase() === currentSalon.name.trim().toLowerCase()
+    ) || {
+      id: `wc-${activeVoiceSalonId}`,
+      serialNumber: String(100 + Math.max(0, salonsState.findIndex((s) => s.id === currentSalon.id)) + 1),
+      salonId: activeVoiceSalonId,
+      ownerName: currentSalon.owner,
+      salonName: currentSalon.name,
+      city: currentSalon.location || 'Local Salon Branch',
+      duration: '0:12',
+      receivedAgo: 'Just now',
+      dialect:
+        activeOwnerVoiceLocale === 'ar-AE'
+          ? 'Gulf Arabic'
+          : activeOwnerVoiceLocale === 'en-US'
+          ? 'English'
+          : 'Standard Urdu',
+      targetLocale: activeOwnerVoiceLocale,
+      unread: false,
+      transcript: '',
+      speechPlayText: '',
+      defaultReplySuggestion: '',
+      messages: [],
+    };
+
+  const hasFounderVoiceReply = activeFounderVoiceThread.messages.some(
+    (m) => m.senderRole === 'FOUNDER'
+  );
+
+  const scrollToFounderVoiceSupport = () => {
+    setSectionMode('MANAGE');
+    window.setTimeout(() => {
+      founderVoiceCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  };
+
+  const handlePlayFounderMessage = (msgId: string, audioDataUrl: string | null, fallbackText: string) => {
+    if (playingFounderMsgId === msgId) {
+      if (founderVoiceAudioRef.current) {
+        founderVoiceAudioRef.current.pause();
+        founderVoiceAudioRef.current = null;
+      }
+      setPlayingFounderMsgId(null);
+      return;
+    }
+    if (founderVoiceAudioRef.current) {
+      founderVoiceAudioRef.current.pause();
+      founderVoiceAudioRef.current = null;
+    }
+    if (audioDataUrl) {
+      try {
+        const audio = new Audio(audioDataUrl);
+        founderVoiceAudioRef.current = audio;
+        setPlayingFounderMsgId(msgId);
+        audio.onended = () => {
+          setPlayingFounderMsgId(null);
+          founderVoiceAudioRef.current = null;
+        };
+        audio.onerror = () => {
+          setPlayingFounderMsgId(null);
+          founderVoiceAudioRef.current = null;
+        };
+        void audio.play();
+        return;
+      } catch {
+        setPlayingFounderMsgId(null);
+      }
+    }
+    setFounderVoiceError(fallbackText ? `Text ready above: "${fallbackText}"` : 'Audio clip expired after 7-day retention.');
+  };
+
+  const handleSendOwnerVoiceToFounder = async () => {
+    if (isSendingFounderVoice) return;
+    if (!ownerVoiceDraft.trim() && !ownerRecordedClip) {
+      setFounderVoiceError('Record an Opus voice note or type a short question for Founder Support.');
+      return;
+    }
+    setFounderVoiceError(null);
+    setIsSendingFounderVoice(true);
+
+    try {
+      let resolvedTranscript = ownerVoiceDraft.trim();
+      let resolvedReplyText = ownerVoiceDraft.trim();
+      let resolvedAudioDataUrl: string | null = null;
+
+      let resolvedDetectedLang = ownerLang === 'ur' ? 'Urdu' : ownerLang === 'ar' ? 'Arabic' : 'English';
+      if (ownerRecordedClip?.base64) {
+        resolvedAudioDataUrl = `data:${ownerRecordedClip.mimeType};base64,${ownerRecordedClip.base64}`;
+      }
+
+      try {
+        const trRes = await fetch('/api/translate-voice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            audioBase64: ownerRecordedClip?.base64,
+            audioMimeType: ownerRecordedClip?.mimeType,
+            text: ownerVoiceDraft.trim() || undefined,
+            targetLocale: activeOwnerVoiceLocale,
+          }),
+        });
+        if (trRes.ok) {
+          const trData = (await trRes.json()) as {
+            transcript?: string;
+            translatedText?: string;
+            detectedLanguage?: string;
+          };
+          if (trData.transcript) resolvedTranscript = trData.transcript;
+          if (trData.translatedText) resolvedReplyText = trData.translatedText;
+          if (trData.detectedLanguage) resolvedDetectedLang = trData.detectedLanguage;
+        }
+      } catch {
+        // Proceed smoothly if offline
+      }
+
+      if (!resolvedTranscript) {
+        resolvedTranscript = `Voice note (${ownerRecordedClip?.sizeKb || 0} KB Opus) in ${ownerLang.toUpperCase()}`;
+      }
+      if (!resolvedReplyText) {
+        resolvedReplyText = resolvedTranscript;
+      }
+
+      const msgRes = await fetch('/api/voice/threads/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId: activeFounderVoiceThread.id,
+          salonId: activeVoiceSalonId,
+          salonName: currentSalon.name,
+          ownerName: currentSalon.owner,
+          city: currentSalon.location,
+          targetLocale: activeOwnerVoiceLocale,
+          senderRole: 'SALON_OWNER',
+          originalText: resolvedTranscript,
+          translatedText: resolvedReplyText,
+          detectedInputLanguage: resolvedDetectedLang,
+          audioDataUrl: resolvedAudioDataUrl || undefined,
+          sizeBytes: ownerRecordedClip?.sizeBytes || 0,
+        }),
+      });
+
+      if (msgRes.ok) {
+        const saved = (await msgRes.json()) as {
+          thread?: VoiceThreadItem;
+          threads?: VoiceThreadItem[];
+        };
+        if (Array.isArray(saved.threads) && saved.threads.length > 0) {
+          setSalonVoiceThreads(saved.threads);
+          onVoiceThreadsUpdated?.(saved.threads);
+        } else if (saved.thread) {
+          const nextThreads = salonVoiceThreads.some((t) => t.id === saved.thread!.id)
+            ? salonVoiceThreads.map((t) => (t.id === saved.thread!.id ? saved.thread! : t))
+            : [saved.thread!, ...salonVoiceThreads];
+          setSalonVoiceThreads(nextThreads);
+          onVoiceThreadsUpdated?.(nextThreads);
+        }
+      } else {
+        const nowMs = Date.now();
+        const localMessage = {
+          id: `msg-${nowMs}`,
+          senderRole: 'SALON_OWNER' as const,
+          senderLabel: `${currentSalon.owner} (${currentSalon.name})`,
+          originalText: resolvedTranscript,
+          translatedText: resolvedReplyText,
+          detectedInputLanguage: resolvedDetectedLang,
+          targetLocale: activeOwnerVoiceLocale,
+          audioDataUrl: resolvedAudioDataUrl || undefined,
+          sizeBytes: ownerRecordedClip?.sizeBytes || 0,
+          createdAtMs: nowMs,
+          expiresAtMs: nowMs + 7 * 24 * 60 * 60 * 1000,
+        };
+        const updatedThread: VoiceThreadItem = {
+          ...activeFounderVoiceThread,
+          unread: true,
+          receivedAgo: 'Just now',
+          transcript: resolvedTranscript,
+          speechPlayText: resolvedReplyText,
+          messages: [...activeFounderVoiceThread.messages, localMessage],
+        };
+        const nextThreads = salonVoiceThreads.some((t) => t.id === updatedThread.id)
+          ? salonVoiceThreads.map((t) => (t.id === updatedThread.id ? updatedThread : t))
+          : [updatedThread, ...salonVoiceThreads];
+        setSalonVoiceThreads(nextThreads);
+        onVoiceThreadsUpdated?.(nextThreads);
+      }
+
+      setOwnerRecordedClip(null);
+      setOwnerVoiceDraft('');
+      setMaintToast('🎙️ Voice note sent to Founder Voice Inbox.');
+      window.setTimeout(() => setMaintToast(null), 3500);
+    } catch {
+      setFounderVoiceError('Unable to send voice note right now. Please try again.');
+    } finally {
+      setIsSendingFounderVoice(false);
+    }
+  };
 
   const [voiceLogs, setVoiceLogs] = useState<VoiceEventLog[]>([
     {
@@ -3128,6 +3390,20 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               {isVoiceEnabled ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
             </button>
 
+            <button
+              type="button"
+              onClick={scrollToFounderVoiceSupport}
+              className="relative min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-2.5 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5"
+              title="Voice Support with Founder"
+              aria-label="Voice Support with Founder"
+            >
+              <Mic className="size-4 shrink-0" />
+              <span className="hidden sm:inline">Founder</span>
+              {hasFounderVoiceReply && (
+                <span className="size-2 rounded-full bg-[#06B6D4]" aria-hidden="true" />
+              )}
+            </button>
+
             {onLogout && (
               <button
                 type="button"
@@ -3940,6 +4216,130 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       {/* ========================================================================= */}
       {currentSectionMode === 'MANAGE' && (
         <div className="space-y-4">
+          {/* Query 6: Compact Matte Obsidian "Voice Support with Founder" Card */}
+          <div ref={founderVoiceCardRef}>
+            <PortalCard
+              title="Voice Support with Founder"
+              kicker={`DIRECT FOUNDER VOICE DESK · #${activeFounderVoiceThread.serialNumber} · ${activeOwnerVoiceLocale}`}
+            >
+              <div className="space-y-3">
+                <p className="text-xs text-[#8B949E] font-sans">
+                  Speak in your preferred language ({ownerLang === 'ur' ? 'Urdu' : ownerLang === 'ar' ? 'Arabic' : 'English'}). Compressed Opus voice notes route to the Founder Voice Inbox, and Founder replies play back aloud in your language.
+                </p>
+
+                <VoiceRecorder
+                  compact
+                  title="Hold or Tap to Record Voice Support Note"
+                  subtitle="Light Opus clip (~150 KB, auto-purged after 7 days)"
+                  onRecorded={(clip) => {
+                    setOwnerRecordedClip(clip);
+                    setFounderVoiceError(null);
+                  }}
+                />
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={ownerVoiceDraft}
+                    onChange={(e) => setOwnerVoiceDraft(e.target.value)}
+                    placeholder="Optional note or quick question (or just send recorded voice)..."
+                    className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-sm text-[#F0F6FC] placeholder-[#6E7681] focus:border-[#06B6D4] focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSendOwnerVoiceToFounder}
+                    disabled={isSendingFounderVoice || (!ownerVoiceDraft.trim() && !ownerRecordedClip)}
+                    className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 px-4 py-2 text-xs font-mono font-bold uppercase text-[#0D1117] transition flex items-center justify-center gap-2 shrink-0"
+                  >
+                    <Send className="size-4" />
+                    <span>{isSendingFounderVoice ? 'Sending...' : 'Send to Founder'}</span>
+                  </button>
+                </div>
+
+                {founderVoiceError && (
+                  <p className="text-xs font-mono text-[#F85149]">{founderVoiceError}</p>
+                )}
+
+                {activeFounderVoiceThread.messages.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-[#21262D]">
+                    <p className="text-[10px] font-mono uppercase text-[#8B949E]">
+                      Recent Support Messages ({activeFounderVoiceThread.messages.length})
+                    </p>
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                      {activeFounderVoiceThread.messages.slice(-4).map((msg) => {
+                        const isFounderMsg = msg.senderRole === 'FOUNDER';
+                        const isPlaying = playingFounderMsgId === msg.id;
+                        const displayBody = isFounderMsg
+                          ? msg.translatedText || msg.originalText
+                          : msg.originalText;
+                        const rtl =
+                          (isFounderMsg ? msg.targetLocale : activeOwnerVoiceLocale) !== 'en-US';
+                        return (
+                          <div
+                            key={msg.id}
+                            className={`rounded-xl border p-3 space-y-2 ${
+                              isFounderMsg
+                                ? 'border-[#06B6D4]/40 bg-[#0D1117]'
+                                : 'border-[#30363D] bg-[#0D1117]'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span
+                                className={`text-[10px] font-mono font-bold uppercase ${
+                                  isFounderMsg ? 'text-[#06B6D4]' : 'text-[#D29922]'
+                                }`}
+                              >
+                                {isFounderMsg ? 'Founder Reply (Translated Voice)' : `${currentSalon.owner} (You)`}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-mono text-[#6E7681]">
+                                  {new Date(msg.createdAtMs).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                                {msg.audioDataUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handlePlayFounderMessage(
+                                        msg.id,
+                                        msg.audioDataUrl ?? null,
+                                        displayBody
+                                      )
+                                    }
+                                    className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 text-[11px] font-mono font-bold text-[#F0F6FC] hover:border-[#06B6D4] flex items-center gap-1"
+                                  >
+                                    {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+                                    <span>{isPlaying ? 'Stop' : 'Play Voice'}</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <p
+                              dir={rtl ? 'rtl' : 'ltr'}
+                              className="text-sm text-[#F0F6FC] leading-relaxed font-sans"
+                            >
+                              {displayBody}
+                            </p>
+                            {msg.audioDataUrl && (
+                              <audio
+                                controls
+                                preload="none"
+                                src={msg.audioDataUrl}
+                                className="w-full h-9"
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </PortalCard>
+          </div>
+
           {/* Sub-Section Switcher Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1.5 rounded-2xl border border-[#30363D] bg-[#161B22]">
             {[

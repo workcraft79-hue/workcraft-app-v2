@@ -25,11 +25,16 @@ import {
 import type { AuthUser } from './types/auth';
 
 import { TabName } from './types/workcraft';
-import { WATERMARK_URL } from './data/portalData';
+import {
+  WATERMARK_URL,
+  DEFAULT_USAGE_METER,
+  INITIAL_VOICE_THREADS,
+  type LiveUsageMeter,
+  type VoiceThreadItem,
+} from './data/portalData';
 import { BrandMark } from './components/BrandMark';
 import { OverviewSection } from './components/OverviewSection';
 import { VoiceSection } from './components/VoiceSection';
-import { VoiceSupportDrawer } from './components/VoiceSupportDrawer';
 import { TabsSection } from './components/TabsSection';
 import { DetailSheet } from './components/DetailSheet';
 import { FieldAgentHub, OnboardedSalonPayload } from './components/FieldAgentHub';
@@ -449,7 +454,9 @@ export default function App() {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [isVoiceDrawerOpen, setIsVoiceDrawerOpen] = useState(false);
+  const [voiceThreads, setVoiceThreads] = useState<VoiceThreadItem[]>(INITIAL_VOICE_THREADS);
+  const [usageMeter, setUsageMeter] = useState<LiveUsageMeter>(DEFAULT_USAGE_METER);
+  const unreadVoiceCount = voiceThreads.filter((t) => t.unread).length;
   const [paymentRoutingMethod, setPaymentRoutingMethod] = useState<string | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isGlobalPaused, setIsGlobalPaused] = useState(false);
@@ -469,6 +476,59 @@ export default function App() {
   const [detailSheet, setDetailSheet] = useState<string | null>(null);
 
   const [founderPreviewMode, setFounderPreviewMode] = useState<'NONE' | 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE'>('NONE');
+
+  const refreshVoiceAndUsage = React.useCallback(async () => {
+    try {
+      const [healthRes, threadsRes, usageRes] = await Promise.allSettled([
+        fetch('/api/health/whatsapp'),
+        fetch('/api/voice/threads'),
+        fetch('/api/voice/usage'),
+      ]);
+
+      if (healthRes.status === 'fulfilled' && healthRes.value.ok) {
+        const healthData = (await healthRes.value.json()) as {
+          status?: 'HEALTHY' | 'ISSUE';
+        };
+        if (healthData?.status === 'ISSUE' || healthData?.status === 'HEALTHY') {
+          setWhatsAppHealth(healthData.status);
+        }
+      }
+
+      if (threadsRes.status === 'fulfilled' && threadsRes.value.ok) {
+        const threadsData = (await threadsRes.value.json()) as {
+          threads?: VoiceThreadItem[];
+        };
+        if (Array.isArray(threadsData?.threads) && threadsData.threads.length > 0) {
+          setVoiceThreads(threadsData.threads);
+        }
+      }
+
+      if (usageRes.status === 'fulfilled' && usageRes.value.ok) {
+        const usageData = (await usageRes.value.json()) as
+          | ({ usage?: LiveUsageMeter } & Partial<LiveUsageMeter>);
+        const parsedUsage = usageData?.usage
+          ? usageData.usage
+          : typeof usageData?.usagePercent === 'number'
+          ? (usageData as LiveUsageMeter)
+          : null;
+        if (parsedUsage) {
+          setUsageMeter(parsedUsage);
+        }
+      }
+    } catch {
+      // Non-blocking fallback for static/offline hosts
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isCheckingSession) return;
+    void refreshVoiceAndUsage();
+    if (activeRole !== 'FOUNDER') return;
+    const interval = window.setInterval(() => {
+      void refreshVoiceAndUsage();
+    }, 30000);
+    return () => window.clearInterval(interval);
+  }, [isCheckingSession, activeRole, refreshVoiceAndUsage]);
 
   const handleLaunchFounderPreview = (mode: 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE') => {
     if (authUser?.userRole !== 'FOUNDER') return;
@@ -912,7 +972,7 @@ export default function App() {
                     <span>{name}</span>
                     {name === 'Voice' && (
                       <span className="ml-auto rounded-full bg-[#06B6D4]/15 border border-[#06B6D4]/40 px-2 py-0.5 text-[9px] font-bold text-cyan-400">
-                        2 unread
+                        {unreadVoiceCount} unread
                       </span>
                     )}
                     {name === 'Revenue' && (
@@ -1228,19 +1288,6 @@ export default function App() {
                       </span>
                     </div>
 
-                    {activeRole === 'FOUNDER' && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setWhatsAppHealth((prev) => (prev === 'HEALTHY' ? 'ISSUE' : 'HEALTHY'))
-                        }
-                        className="min-h-[40px] rounded-xl border border-[#30363D] bg-[#161B22] hover:bg-[#21262D] px-3 py-1.5 text-[10px] text-[#8B949E] hover:text-[#F0F6FC] transition"
-                        title="Preview Green Healthy vs Red Issue alert state"
-                      >
-                        {whatsAppHealth === 'HEALTHY' ? 'Test Red Issue' : 'Restore Green Healthy'}
-                      </button>
-                    )}
-
                     {isGlobalPaused && (
                       <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3 py-1.5 text-[11px] font-bold text-[#D29922]">
                         <Pause className="size-3" />
@@ -1350,6 +1397,8 @@ export default function App() {
                     isFounderInspector={activeRole === 'FOUNDER'}
                     sectionMode={salonOwnerSection}
                     onSectionModeChange={setSalonOwnerSection}
+                    voiceThreads={voiceThreads}
+                    onVoiceThreadsUpdated={setVoiceThreads}
                     onClose={activeRole === 'FOUNDER' ? () => handleTabChange('Overview') : undefined}
                   />
                 )}
@@ -1360,14 +1409,20 @@ export default function App() {
                 onSilentRecovered={(d) => showToast(`🛡️ Auto-recovered ${d.areaName} cleanly`)}
               >
                 {activeTab === 'Voice' ? (
-                  <VoiceSection onClose={() => handleTabChange('Overview')} />
+                  <VoiceSection
+                    threads={voiceThreads}
+                    onThreadsUpdated={setVoiceThreads}
+                    onUsageUpdated={setUsageMeter}
+                    onClose={() => handleTabChange('Overview')}
+                  />
                 ) : activeTab === 'Overview' ? (
                   <OverviewSection
                     payment={isPaymentPaid}
                     setPayment={setIsPaymentPaid}
                     go={handleTabChange}
                     setDetailSheet={setDetailSheet}
-                    onOpenVoiceTicker={() => setIsVoiceDrawerOpen(true)}
+                    onOpenVoiceTicker={() => handleTabChange('Voice')}
+                    voiceThreads={voiceThreads}
                     onInspectSalon={handleInspectSalon}
                     activeSalonCount={activeSalonCount}
                     kamranCashHeld={kamranCashHeld}
@@ -1380,6 +1435,8 @@ export default function App() {
                     active={activeTab}
                     go={handleTabChange}
                     setPaymentRouting={setPaymentRoutingMethod}
+                    usageMeter={usageMeter}
+                    onRefreshUsage={refreshVoiceAndUsage}
                     onInspectSalon={handleInspectSalon}
                     onLaunchFounderPreview={handleLaunchFounderPreview}
                     onTestSocialLaunch={handleTestSocialLaunch}
@@ -1459,18 +1516,13 @@ export default function App() {
         </div>
       )}
 
-      {/* Dedicated Voice Ticker Support Drawer */}
-      <VoiceSupportDrawer
-        isOpen={isVoiceDrawerOpen}
-        onClose={() => setIsVoiceDrawerOpen(false)}
-      />
-
       {/* Detail Bottom Sheet */}
       <DetailSheet
         detail={detailSheet}
         onClose={() => setDetailSheet(null)}
         go={handleTabChange}
-        onOpenVoiceTicker={() => setIsVoiceDrawerOpen(true)}
+        usageMeter={usageMeter}
+        onOpenVoiceTicker={() => handleTabChange('Voice')}
         onOpenReportModal={() => setIsReportModalOpen(true)}
       />
 
@@ -1478,6 +1530,8 @@ export default function App() {
       <FinancialReportModal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
+        usageMeter={usageMeter}
+        unreadVoiceCount={unreadVoiceCount}
       />
 
       <PaymentRoutingModal
@@ -1489,7 +1543,7 @@ export default function App() {
       <NotificationsDrawer
         isOpen={isNotificationsOpen}
         onClose={() => setIsNotificationsOpen(false)}
-        onOpenVoiceTicker={() => setIsVoiceDrawerOpen(true)}
+        onOpenVoiceTicker={() => handleTabChange('Voice')}
       />
 
       {/* Unified 4-Step Salon Onboarding Modal */}

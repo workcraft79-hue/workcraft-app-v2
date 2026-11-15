@@ -14,7 +14,11 @@ import {
   Sparkles,
   Zap,
 } from 'lucide-react';
-import { NOTIFICATIONS } from '../data/portalData';
+import {
+  NOTIFICATIONS,
+  DEFAULT_USAGE_METER,
+  type LiveUsageMeter,
+} from '../data/portalData';
 
 // Monthly Historical Data Models
 interface MonthData {
@@ -135,9 +139,16 @@ const MONTHLY_REPORTS: Record<string, MonthData> = {
 interface FinancialReportModalProps {
   isOpen: boolean;
   onClose: () => void;
+  usageMeter?: LiveUsageMeter;
+  unreadVoiceCount?: number;
 }
 
-export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({ isOpen, onClose }) => {
+export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
+  isOpen,
+  onClose,
+  usageMeter = DEFAULT_USAGE_METER,
+  unreadVoiceCount = 2,
+}) => {
   const [selectedMonth, setSelectedMonth] = useState<string>('October 2026');
   const [activeTab, setActiveTab] = useState<'revenue' | 'health'>('revenue');
 
@@ -423,16 +434,18 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({ isOp
               </div>
               <div className="grid grid-cols-3 gap-2 text-xs pt-1">
                 <div className="bg-[#161B22] p-2.5 rounded-lg border border-[#30363D]">
-                  <span className="text-[10px] text-[#8B949E] block">Active Voice Notes</span>
-                  <span className="text-[#F0F6FC] font-bold text-sm">2 In Queue</span>
+                  <span className="text-[10px] text-[#8B949E] block">Unread Voice Notes</span>
+                  <span className="text-[#F0F6FC] font-bold text-sm">{unreadVoiceCount} Unread</span>
                 </div>
                 <div className="bg-[#161B22] p-2.5 rounded-lg border border-[#30363D]">
-                  <span className="text-[10px] text-[#8B949E] block">Avg Response Time</span>
-                  <span className="text-[#3FB950] font-bold text-sm">14m 15s</span>
+                  <span className="text-[10px] text-[#8B949E] block">Retention Policy</span>
+                  <span className="text-[#3FB950] font-bold text-sm">{usageMeter.retentionDays}-Day Purge</span>
                 </div>
                 <div className="bg-[#161B22] p-2.5 rounded-lg border border-[#30363D]">
-                  <span className="text-[10px] text-[#8B949E] block">Cloud Media Rent</span>
-                  <span className="text-[#3FB950] font-bold text-sm">$0.00 / mo</span>
+                  <span className="text-[10px] text-[#8B949E] block">Opus Storage Meter</span>
+                  <span className="text-[#3FB950] font-bold text-sm">
+                    {usageMeter.storageUsedKb} KB ({usageMeter.monthlyExpenseLabel})
+                  </span>
                 </div>
               </div>
             </div>
