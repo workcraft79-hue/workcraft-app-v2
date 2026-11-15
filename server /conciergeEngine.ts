@@ -8,6 +8,7 @@ import type {
   LanguageMenuOption,
   OwnerInterventionAlert,
   RetentionSettings,
+  SalonBillingStatus,
   SalonConciergeStateResponse,
   SalonPackageTier,
   SalonRegionCode,
@@ -171,7 +172,8 @@ function defaultSettingsForSalon(
   salonName: string,
   ownerName: string,
   phone: string,
-  packageTier: SalonPackageTier = 'PRO++'
+  packageTier: SalonPackageTier = 'PRO++',
+  billingStatus: SalonBillingStatus = 'ACTIVE'
 ): RetentionSettings {
   const regionMeta = detectRegionFromPhone(phone);
   const isPk = regionMeta.region === 'PK';
@@ -185,6 +187,7 @@ function defaultSettingsForSalon(
     currency: regionMeta.currency,
     currencySymbol: regionMeta.currencySymbol,
     packageTier,
+    billingStatus,
     counterSleptAt: null,
     birthdayEnabled: true,
     birthdayDiscountPct: 20,
@@ -407,7 +410,13 @@ function persistStore() {
 
 function ensureSalonExists(
   salonId: string,
-  meta?: { salonName?: string; ownerName?: string; whatsappPhone?: string }
+  meta?: {
+    salonName?: string;
+    ownerName?: string;
+    whatsappPhone?: string;
+    billingStatus?: SalonBillingStatus;
+    packageTier?: SalonPackageTier;
+  }
 ): RetentionSettings {
   const store = ensureStoreLoaded();
   if (!store.settingsBySalon[salonId]) {
@@ -415,7 +424,9 @@ function ensureSalonExists(
       salonId,
       meta?.salonName || 'WorkCraft Salon',
       meta?.ownerName || 'Salon Owner',
-      meta?.whatsappPhone || '+92 300 0000000'
+      meta?.whatsappPhone || '+92 300 0000000',
+      meta?.packageTier || 'PRO++',
+      meta?.billingStatus || 'ACTIVE'
     );
     persistStore();
   } else if (meta) {
@@ -758,10 +769,19 @@ export function runAutoCompleteAppointmentsCron(salonId?: string): { completedCo
 
 export function getSalonConciergeState(
   salonId: string,
-  meta?: { salonName?: string; ownerName?: string; whatsappPhone?: string }
+  meta?: {
+    salonName?: string;
+    ownerName?: string;
+    whatsappPhone?: string;
+    billingStatus?: SalonBillingStatus;
+    packageTier?: SalonPackageTier;
+  }
 ): SalonConciergeStateResponse {
   const store = ensureStoreLoaded();
   const settings = ensureSalonExists(salonId, meta);
+  if (!settings.billingStatus) {
+    settings.billingStatus = 'ACTIVE';
+  }
   runAutoCompleteAppointmentsCron(salonId);
   const regionMeta = detectRegionFromPhone(settings.whatsappPhone);
   const languageOptions = getLanguageMenuForRegion(regionMeta.region);
@@ -850,6 +870,19 @@ export function updateRetentionSettings(
     updated.currencySymbol = meta.currencySymbol;
   }
   store.settingsBySalon[salonId] = updated;
+  persistStore();
+  return getSalonConciergeState(salonId);
+}
+
+export function setSalonBillingStatus(
+  salonId: string,
+  billingStatus: SalonBillingStatus
+): SalonConciergeStateResponse {
+  const store = ensureStoreLoaded();
+  const current = ensureSalonExists(salonId);
+  current.billingStatus = billingStatus;
+  current.updatedAt = new Date().toISOString();
+  store.settingsBySalon[salonId] = current;
   persistStore();
   return getSalonConciergeState(salonId);
 }
@@ -1748,6 +1781,7 @@ export function processWhatsAppWebhook(payload: {
 export function runBirthdayCron(salonId?: string, forceRun = false): {
   dispatchedCount: number;
   salonIdsChecked: number;
+  quarantinedCount: number;
 } {
   const store = ensureStoreLoaded();
   const targetSalons = salonId
@@ -1755,9 +1789,14 @@ export function runBirthdayCron(salonId?: string, forceRun = false): {
     : Object.values(store.settingsBySalon);
 
   let dispatchedCount = 0;
+  let quarantinedCount = 0;
 
   for (const settings of targetSalons) {
     if (!settings.birthdayEnabled) continue;
+    if (settings.billingStatus === 'PENDING_ACTIVATION' || settings.billingStatus === 'SUSPENDED') {
+      quarantinedCount++;
+      continue;
+    }
     const local = getLocalClockForOffset(settings.timezoneOffsetHours);
     if (!forceRun && local.hour !== 9) continue;
 
@@ -1786,11 +1825,12 @@ export function runBirthdayCron(salonId?: string, forceRun = false): {
   }
 
   if (dispatchedCount > 0) persistStore();
-  return { dispatchedCount, salonIdsChecked: targetSalons.length };
+  return { dispatchedCount, salonIdsChecked: targetSalons.length, quarantinedCount };
 }
 
 export function runWinBackCron(salonId?: string, forceRun = false): {
   dispatchedCount: number;
+  quarantinedCount: number;
 } {
   const store = ensureStoreLoaded();
   const targetSalons = salonId
@@ -1799,9 +1839,14 @@ export function runWinBackCron(salonId?: string, forceRun = false): {
 
   const nowMs = Date.now();
   let dispatchedCount = 0;
+  let quarantinedCount = 0;
 
   for (const settings of targetSalons) {
     if (!settings.winbackEnabled) continue;
+    if (settings.billingStatus === 'PENDING_ACTIVATION' || settings.billingStatus === 'SUSPENDED') {
+      quarantinedCount++;
+      continue;
+    }
     const thresholdMs = Math.max(1, settings.winbackDays) * 86400000;
 
     const salonClients = store.clients.filter((c) => c.salonId === settings.salonId);
@@ -1842,7 +1887,7 @@ export function runWinBackCron(salonId?: string, forceRun = false): {
   }
 
   if (dispatchedCount > 0) persistStore();
-  return { dispatchedCount };
+  return { dispatchedCount, quarantinedCount };
 }
 
 export function runPostServiceReviewCron(

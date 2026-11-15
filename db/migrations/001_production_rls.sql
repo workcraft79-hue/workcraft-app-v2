@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS salons (
   currency TEXT NOT NULL DEFAULT 'PKR',
   currency_symbol TEXT NOT NULL DEFAULT 'PKR ',
   package_tier TEXT NOT NULL DEFAULT 'PRO++' CHECK (package_tier IN ('STARTER', 'PRO', 'PRO++')),
+  billing_status TEXT NOT NULL DEFAULT 'PENDING_ACTIVATION'
+    CHECK (billing_status IN ('PENDING_ACTIVATION', 'ACTIVE', 'PAST_DUE', 'SUSPENDED')),
   assigned_agent_id TEXT,
   counter_slept_at TIMESTAMPTZ,
   birthday_enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -168,13 +170,28 @@ CREATE TABLE IF NOT EXISTS alerts (
   resolved_at TIMESTAMPTZ
 );
 
+CREATE TABLE IF NOT EXISTS agent_invite_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  token_hash TEXT NOT NULL UNIQUE,
+  agent_id TEXT NOT NULL,
+  agent_name TEXT NOT NULL,
+  agent_phone TEXT NOT NULL,
+  territory TEXT NOT NULL DEFAULT '',
+  country_name TEXT NOT NULL DEFAULT 'Pakistan',
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_salons_agent ON salons (assigned_agent_id);
+CREATE INDEX IF NOT EXISTS idx_salons_billing_status ON salons (billing_status);
 CREATE INDEX IF NOT EXISTS idx_barbers_salon ON barbers (salon_id);
 CREATE INDEX IF NOT EXISTS idx_services_salon ON services (salon_id);
 CREATE INDEX IF NOT EXISTS idx_clients_salon ON clients (salon_id);
 CREATE INDEX IF NOT EXISTS idx_appointments_salon ON appointments (salon_id, status);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_salon ON whatsapp_messages (salon_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_salon_status ON alerts (salon_id, status);
+CREATE INDEX IF NOT EXISTS idx_agent_invite_tokens_hash ON agent_invite_tokens (token_hash);
 
 -- -----------------------------------------------------------------------------
 -- 2. Verified Session / JWT Claim Helpers
@@ -234,23 +251,25 @@ $$;
 -- 3. Enable & Force Row-Level Security (RLS) on All Tables
 -- -----------------------------------------------------------------------------
 
-ALTER TABLE app_users         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE salons            ENABLE ROW LEVEL SECURITY;
-ALTER TABLE barbers           ENABLE ROW LEVEL SECURITY;
-ALTER TABLE services          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE appointments      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE clients           ENABLE ROW LEVEL SECURITY;
-ALTER TABLE whatsapp_messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alerts            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_users           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE salons              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE barbers             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE services            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE appointments        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE clients             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE whatsapp_messages   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alerts              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_invite_tokens ENABLE ROW LEVEL SECURITY;
 
-ALTER TABLE app_users         FORCE ROW LEVEL SECURITY;
-ALTER TABLE salons            FORCE ROW LEVEL SECURITY;
-ALTER TABLE barbers           FORCE ROW LEVEL SECURITY;
-ALTER TABLE services          FORCE ROW LEVEL SECURITY;
-ALTER TABLE appointments      FORCE ROW LEVEL SECURITY;
-ALTER TABLE clients           FORCE ROW LEVEL SECURITY;
-ALTER TABLE whatsapp_messages FORCE ROW LEVEL SECURITY;
-ALTER TABLE alerts            FORCE ROW LEVEL SECURITY;
+ALTER TABLE app_users           FORCE ROW LEVEL SECURITY;
+ALTER TABLE salons              FORCE ROW LEVEL SECURITY;
+ALTER TABLE barbers             FORCE ROW LEVEL SECURITY;
+ALTER TABLE services            FORCE ROW LEVEL SECURITY;
+ALTER TABLE appointments        FORCE ROW LEVEL SECURITY;
+ALTER TABLE clients             FORCE ROW LEVEL SECURITY;
+ALTER TABLE whatsapp_messages   FORCE ROW LEVEL SECURITY;
+ALTER TABLE alerts              FORCE ROW LEVEL SECURITY;
+ALTER TABLE agent_invite_tokens FORCE ROW LEVEL SECURITY;
 
 -- -----------------------------------------------------------------------------
 -- 4. Tenant Isolation Policies
@@ -464,5 +483,32 @@ CREATE POLICY alerts_owner_isolated ON alerts
     current_workcraft_role() = 'SALON_OWNER'
     AND salon_id = current_workcraft_salon_id()
   );
+
+-- === AGENT_INVITE_TOKENS (Strictly Founder managed) ===
+DROP POLICY IF EXISTS agent_invite_tokens_founder_all ON agent_invite_tokens;
+CREATE POLICY agent_invite_tokens_founder_all ON agent_invite_tokens
+  FOR ALL
+  USING (current_workcraft_role() = 'FOUNDER')
+  WITH CHECK (current_workcraft_role() = 'FOUNDER');
+
+-- Prevent non-FOUNDER users from self-promoting billing_status out of PENDING_ACTIVATION
+CREATE OR REPLACE FUNCTION guard_salon_billing_status_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.billing_status IS DISTINCT FROM OLD.billing_status
+     AND current_workcraft_role() <> 'FOUNDER' THEN
+    RAISE EXCEPTION 'Only FOUNDER or billing webhook may change billing_status';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_guard_salon_billing_status ON salons;
+CREATE TRIGGER trg_guard_salon_billing_status
+  BEFORE UPDATE ON salons
+  FOR EACH ROW
+  EXECUTE FUNCTION guard_salon_billing_status_update();
 
 COMMIT;

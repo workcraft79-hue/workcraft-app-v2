@@ -2,12 +2,11 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import type { NextFunction, Request, Response } from 'express';
-import type { AuthRole, AuthUser, DevTestAccount } from '../src/types/auth';
+import type { AuthRole, AuthUser } from '../src/types/auth';
 
 export const SESSION_COOKIE_NAME = 'wc_session';
-const SESSION_TTL_SECONDS = 60 * 60 * 12; // 12 hours
-const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const OTP_MAX_ATTEMPTS = 5;
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days persistent session
+const AGENT_INVITE_TTL_MS = 1000 * 60 * 60 * 72; // 72 hours single-use invite expiry
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
@@ -473,23 +472,22 @@ export function clearSessionCookie(res: Response) {
 }
 
 // -----------------------------------------------------------------------------
-// Email / Phone Lookup & 6-Digit OTP Verification Store
+// Direct Persistent Founder Session + Single-Use Agent Invite Token Store
+// (Zero 6-digit PIN walls & zero IP rate limits)
 // -----------------------------------------------------------------------------
 
-interface OtpChallenge {
-  userId: string;
-  otpHash: string;
-  expiresAtMs: number;
-  attempts: number;
-}
-
-const otpChallenges = new Map<string, OtpChallenge>();
-
-function hashOtp(identifierKey: string, otp: string): string {
-  return crypto
-    .createHmac('sha256', RUNTIME_JWT_SECRET)
-    .update(`${identifierKey}:${otp}`)
-    .digest('hex');
+export function getFounderSessionUser(): AuthUser {
+  const f = USER_DIRECTORY[0];
+  return {
+    userId: f.userId,
+    userRole: f.userRole,
+    displayName: f.displayName,
+    email: f.email,
+    phone: f.phone,
+    salonId: f.salonId,
+    agentId: f.agentId,
+    salonName: f.salonName,
+  };
 }
 
 export function findUserByIdentifier(rawIdentifier: string): StoredUserRecord | null {
@@ -519,116 +517,202 @@ export function findUserById(userId: string): StoredUserRecord | null {
   return USER_DIRECTORY.find((u) => u.userId === userId) || null;
 }
 
-export function getDevTestAccounts(): DevTestAccount[] {
-  if (process.env.NODE_ENV !== 'development') return [];
-  return USER_DIRECTORY.map((u) => ({
-    userId: u.userId,
-    userRole: u.userRole,
-    displayName: u.displayName,
-    email: u.email,
-    phone: u.phone,
-    salonId: u.salonId,
-    agentId: u.agentId,
-    salonName: u.salonName,
-    badge: u.badge,
-  }));
+export interface AgentInviteRecord {
+  tokenHash: string;
+  agentId: string;
+  name: string;
+  phone: string;
+  city: string;
+  countryName: string;
+  createdAt: string;
+  expiresAt: string;
+  usedAt: string | null;
 }
 
-export function createOtpChallenge(rawIdentifier: string): {
-  ok: true;
-  user: AuthUser;
-  maskedTarget: string;
-  devOtpPreview?: string;
-} | {
-  ok: false;
-  error: string;
+const AGENT_INVITES_FILE = path.join(AUTH_DATA_DIR, 'agent-invites.json');
+const agentInvites = new Map<string, AgentInviteRecord>();
+
+function hashInviteToken(rawToken: string): string {
+  return crypto.createHash('sha256').update(rawToken.trim()).digest('hex');
+}
+
+function loadPersistedAgentInvites() {
+  try {
+    if (!fs.existsSync(AGENT_INVITES_FILE)) return;
+    const raw = fs.readFileSync(AGENT_INVITES_FILE, 'utf8');
+    const list = JSON.parse(raw) as AgentInviteRecord[];
+    if (Array.isArray(list)) {
+      for (const rec of list) {
+        if (rec?.tokenHash) {
+          agentInvites.set(rec.tokenHash, rec);
+        }
+      }
+    }
+  } catch {
+    // Ignore corrupt cache cleanly
+  }
+}
+
+function persistAgentInvites() {
+  try {
+    if (!fs.existsSync(AUTH_DATA_DIR)) {
+      fs.mkdirSync(AUTH_DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(
+      AGENT_INVITES_FILE,
+      JSON.stringify(Array.from(agentInvites.values()), null, 2),
+      'utf8'
+    );
+  } catch (err) {
+    console.warn('Could not persist agent invites:', err);
+  }
+}
+
+loadPersistedAgentInvites();
+
+export function createAgentInviteToken(params: {
+  agentId?: string;
+  name: string;
+  phone: string;
+  city: string;
+  countryName?: string;
+}): {
+  token: string;
+  agentId: string;
+  name: string;
+  phone: string;
+  city: string;
+  countryName: string;
+  expiresAt: string;
 } {
-  const user = findUserByIdentifier(rawIdentifier);
-  if (!user) {
+  const cleanName = sanitizePlainText(params.name, 80) || 'Field Agent';
+  const cleanPhone = sanitizePhone(params.phone);
+  const cleanCity = sanitizePlainText(params.city, 120) || 'Assigned Territory';
+  const cleanCountry = sanitizePlainText(params.countryName, 60) || 'Pakistan';
+  const agentId =
+    sanitizePlainText(params.agentId, 40) ||
+    `agent-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`;
+
+  const rawToken = crypto.randomBytes(24).toString('hex');
+  const tokenHash = hashInviteToken(rawToken);
+  const now = Date.now();
+  const expiresAt = new Date(now + AGENT_INVITE_TTL_MS).toISOString();
+
+  agentInvites.set(tokenHash, {
+    tokenHash,
+    agentId,
+    name: cleanName,
+    phone: cleanPhone,
+    city: cleanCity,
+    countryName: cleanCountry,
+    createdAt: new Date(now).toISOString(),
+    expiresAt,
+    usedAt: null,
+  });
+  persistAgentInvites();
+
+  return {
+    token: rawToken,
+    agentId,
+    name: cleanName,
+    phone: cleanPhone,
+    city: cleanCity,
+    countryName: cleanCountry,
+    expiresAt,
+  };
+}
+
+export function inspectAgentInviteToken(rawToken: string):
+  | { valid: true; invite: Omit<AgentInviteRecord, 'tokenHash'> }
+  | { valid: false; status: 400 | 404 | 410; error: string } {
+  const cleaned = sanitizePlainText(rawToken, 128);
+  if (!cleaned || cleaned.length < 16) {
+    return { valid: false, status: 400, error: 'Missing or invalid agent invite token.' };
+  }
+  const tokenHash = hashInviteToken(cleaned);
+  const rec = agentInvites.get(tokenHash);
+  if (!rec) {
+    return { valid: false, status: 404, error: 'Agent invite link not found.' };
+  }
+  if (rec.usedAt) {
     return {
-      ok: false,
-      error: 'No registered WORKCRAFT account found for that email or WhatsApp phone.',
+      valid: false,
+      status: 410,
+      error: 'This single-use agent invite link has already been used and is permanently locked.',
     };
   }
-
-  const code = String(crypto.randomInt(100000, 1000000));
-  const key = user.userId;
-  otpChallenges.set(key, {
-    userId: user.userId,
-    otpHash: hashOtp(key, code),
-    expiresAtMs: Date.now() + OTP_TTL_MS,
-    attempts: 0,
-  });
-
-  const maskedTarget = rawIdentifier.includes('@')
-    ? user.email.replace(/(^.{2})[^@]*(@.*$)/, '$1***$2')
-    : `${user.phone.slice(0, 6)}••••${user.phone.slice(-3)}`;
-
-  const publicUser: AuthUser = {
-    userId: user.userId,
-    userRole: user.userRole,
-    displayName: user.displayName,
-    email: user.email,
-    phone: user.phone,
-    salonId: user.salonId,
-    agentId: user.agentId,
-    salonName: user.salonName,
-  };
-
-  // Never expose OTP codes in production HTTP responses
-  if (process.env.NODE_ENV === 'development') {
-    return { ok: true, user: publicUser, maskedTarget, devOtpPreview: code };
+  if (new Date(rec.expiresAt).getTime() < Date.now()) {
+    return { valid: false, status: 410, error: 'This agent invite link has expired.' };
   }
-  return { ok: true, user: publicUser, maskedTarget };
+  return {
+    valid: true,
+    invite: {
+      agentId: rec.agentId,
+      name: rec.name,
+      phone: rec.phone,
+      city: rec.city,
+      countryName: rec.countryName,
+      createdAt: rec.createdAt,
+      expiresAt: rec.expiresAt,
+      usedAt: rec.usedAt,
+    },
+  };
 }
 
-export function verifyOtpChallenge(
-  rawIdentifier: string,
-  rawOtp: string
-): { ok: true; user: AuthUser } | { ok: false; error: string } {
-  const user = findUserByIdentifier(rawIdentifier);
-  if (!user) {
-    return { ok: false, error: 'Invalid credentials or expired verification code.' };
+export function consumeAgentInviteTokenAndRegisterAgent(params: {
+  rawToken: string;
+  name?: string;
+  phone?: string;
+  city?: string;
+}):
+  | { ok: true; user: AuthUser }
+  | { ok: false; status: 400 | 404 | 410; error: string } {
+  const check = inspectAgentInviteToken(params.rawToken);
+  if (!check.valid) {
+    return { ok: false, status: check.status, error: check.error };
   }
-  const challenge = otpChallenges.get(user.userId);
-  if (!challenge) {
-    return { ok: false, error: 'No active OTP challenge. Please request a new code.' };
-  }
-  if (Date.now() > challenge.expiresAtMs) {
-    otpChallenges.delete(user.userId);
-    return { ok: false, error: 'Verification code expired. Please request a new code.' };
-  }
-  if (challenge.attempts >= OTP_MAX_ATTEMPTS) {
-    otpChallenges.delete(user.userId);
-    return { ok: false, error: 'Too many invalid attempts. Please request a new code.' };
-  }
+  const tokenHash = hashInviteToken(params.rawToken);
+  const rec = agentInvites.get(tokenHash)!;
+  rec.usedAt = new Date().toISOString();
+  persistAgentInvites();
 
-  const cleanOtp = String(rawOtp || '').replace(/\D/g, '').slice(0, 6);
-  if (cleanOtp.length !== 6) {
-    challenge.attempts += 1;
-    return { ok: false, error: 'Please enter the 6-digit verification code.' };
-  }
+  const finalName = sanitizePlainText(params.name, 80) || rec.name;
+  const finalPhone = sanitizePhone(params.phone) || rec.phone;
+  const finalCity = sanitizePlainText(params.city, 120) || rec.city;
 
-  const candidateHash = hashOtp(user.userId, cleanOtp);
-  const a = Buffer.from(candidateHash, 'hex');
-  const b = Buffer.from(challenge.otpHash, 'hex');
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    challenge.attempts += 1;
-    return { ok: false, error: 'Incorrect verification code. Please check and try again.' };
-  }
+  const userId = `usr-onboard-${rec.agentId}`;
+  const existingIdx = USER_DIRECTORY.findIndex(
+    (u) => u.userId === userId || (u.userRole === 'AGENT' && u.agentId === rec.agentId)
+  );
 
-  otpChallenges.delete(user.userId);
+  const agentRecord: StoredUserRecord = {
+    userId,
+    userRole: 'AGENT',
+    displayName: finalName,
+    email: `${rec.agentId}@agent.workcraft.local`,
+    phone: finalPhone,
+    salonId: null,
+    agentId: rec.agentId,
+    badge: `Field Agent · ${finalCity}`,
+  };
+
+  if (existingIdx >= 0) {
+    USER_DIRECTORY[existingIdx] = agentRecord;
+  } else {
+    USER_DIRECTORY.push(agentRecord);
+  }
+  persistDynamicUsers();
+
   return {
     ok: true,
     user: {
-      userId: user.userId,
-      userRole: user.userRole,
-      displayName: user.displayName,
-      email: user.email,
-      phone: user.phone,
-      salonId: user.salonId,
-      agentId: user.agentId,
-      salonName: user.salonName,
+      userId: agentRecord.userId,
+      userRole: 'AGENT',
+      displayName: agentRecord.displayName,
+      email: agentRecord.email,
+      phone: agentRecord.phone,
+      salonId: null,
+      agentId: rec.agentId,
     },
   };
 }
@@ -656,7 +740,7 @@ export function extractAuthUserFromRequest(req: Request): AuthUser | null {
 export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const user = extractAuthUserFromRequest(req);
   if (!user) {
-    return res.status(401).json({ error: 'Authentication required. Please sign in.' });
+    return res.status(401).json({ error: 'Authentication required. Please open your portal link.' });
   }
   req.authUser = user;
   return next();
@@ -719,7 +803,7 @@ export function requireSalonTenantAccess(allowAgentReadOnly = false) {
 }
 
 // -----------------------------------------------------------------------------
-// Webhook Header Secret Check & Per-Number Rate Limiter
+// Webhook Header Secret Check (Zero IP Rate Limits)
 // -----------------------------------------------------------------------------
 
 export function requireWebhookSecret(req: Request, res: Response, next: NextFunction) {
@@ -745,62 +829,4 @@ export function requireWebhookSecret(req: Request, res: Response, next: NextFunc
   }
 
   return next();
-}
-
-interface RateBucket {
-  timestamps: number[];
-}
-
-export function createWebhookRateLimiter(options?: {
-  windowMs?: number;
-  maxPerPhone?: number;
-  maxPerIp?: number;
-}) {
-  const windowMs = options?.windowMs ?? 60_000;
-  const maxPerPhone = options?.maxPerPhone ?? 15;
-  const maxPerIp = options?.maxPerIp ?? 60;
-  const buckets = new Map<string, RateBucket>();
-
-  const checkBucket = (key: string, limit: number, now: number): { allowed: boolean; retryAfterSec: number } => {
-    const existing = buckets.get(key) || { timestamps: [] };
-    existing.timestamps = existing.timestamps.filter((t) => now - t < windowMs);
-    if (existing.timestamps.length >= limit) {
-      const oldest = existing.timestamps[0] || now;
-      const retryAfterSec = Math.max(1, Math.ceil((windowMs - (now - oldest)) / 1000));
-      buckets.set(key, existing);
-      return { allowed: false, retryAfterSec };
-    }
-    existing.timestamps.push(now);
-    buckets.set(key, existing);
-    return { allowed: true, retryAfterSec: 0 };
-  };
-
-  return (req: Request, res: Response, next: NextFunction) => {
-    const now = Date.now();
-    const rawPhone = typeof req.body?.fromPhone === 'string' ? req.body.fromPhone : '';
-    const normPhone = normalizePhoneDigits(rawPhone);
-    const clientIp = String(req.ip || req.socket.remoteAddress || 'unknown');
-
-    if (normPhone) {
-      const phoneCheck = checkBucket(`phone:${normPhone}`, maxPerPhone, now);
-      if (!phoneCheck.allowed) {
-        res.setHeader('Retry-After', String(phoneCheck.retryAfterSec));
-        return res.status(429).json({
-          error: 'Rate limit exceeded for this WhatsApp phone number. Please retry shortly.',
-          retryAfterSec: phoneCheck.retryAfterSec,
-        });
-      }
-    }
-
-    const ipCheck = checkBucket(`ip:${clientIp}`, maxPerIp, now);
-    if (!ipCheck.allowed) {
-      res.setHeader('Retry-After', String(ipCheck.retryAfterSec));
-      return res.status(429).json({
-        error: 'Rate limit exceeded from this source IP. Please retry shortly.',
-        retryAfterSec: ipCheck.retryAfterSec,
-      });
-    }
-
-    return next();
-  };
 }

@@ -5,15 +5,16 @@ import {
   Send,
   Sparkles,
   CheckCircle2,
-  Lock,
+  Link2,
   Globe,
   Smartphone,
   MapPin,
   ShieldCheck,
-  Check,
   Radio,
   AlertTriangle,
   AlertOctagon,
+  Copy,
+  Check,
 } from 'lucide-react';
 import {
   detectCountryFromPhone,
@@ -28,11 +29,11 @@ interface AddNewAgentModalProps {
   onClose: () => void;
   onAgentAdded?: (agent: {
     id: string;
-    pin: string;
     name: string;
     phone: string;
     city: string;
     category: string;
+    enrollUrl?: string;
     countryCode?: string;
     countryName?: string;
     countryFlag?: string;
@@ -41,11 +42,11 @@ interface AddNewAgentModalProps {
   }) => void;
   onOpenRemoteEnrollment?: (agent: {
     id: string;
-    pin: string;
     name: string;
     phone: string;
     city: string;
     category: string;
+    enrollUrl?: string;
     countryCode?: string;
     countryName?: string;
     countryFlag?: string;
@@ -66,10 +67,12 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
   const [agentCity, setAgentCity] = useState('Karachi South');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dispatchedSuccess, setDispatchedSuccess] = useState(false);
+  const [mintedEnrollUrl, setMintedEnrollUrl] = useState<string | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Auto-generate unique sequential Agent ID & 4-digit security PIN
+  // Auto-generate unique sequential Agent ID (Zero PINs — Single-Use Token Invite only)
   const [generatedId, setGeneratedId] = useState(() => 'AGT-' + Math.floor(410 + Math.random() * 500));
-  const [generatedPin, setGeneratedPin] = useState(() => Math.floor(1000 + Math.random() * 9000).toString());
 
   const detectedCountry = detectCountryFromPhone(agentPhone, `${agentCity} ${agentCountry}`);
 
@@ -101,7 +104,9 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
   if (!isOpen) return null;
 
   const resolvedCountryName = agentCountry.trim() || detectedCountry.name;
-  const enrollUrl = `https://portal.workcraft.local/enroll?id=${generatedId}&pin=${generatedPin}&phone=${encodeURIComponent(agentPhone)}&name=${encodeURIComponent(agentName || 'Agent')}`;
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://portal.workcraft.local';
+  const previewEnrollUrl =
+    mintedEnrollUrl || `${origin}/enroll/agent?token=single-use-${generatedId.toLowerCase()}`;
 
   const isWesternGreeting =
     detectedCountry.region === 'EUROPE' ||
@@ -113,34 +118,77 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
     ? `Mr. ${agentName || '[Agent Name]'}`
     : `Assalamu Alaikum ${agentName || '[Agent Name]'}`;
 
-  const whatsappMessage = `${greetingHeader}! Welcome to WORKCRAFT Local Field Force. You have been appointed for ${agentCity || '[City]'}, ${resolvedCountryName}. Your Agent ID is ${generatedId} and 4-digit Security PIN is ${generatedPin}. Open your secure link to complete enrollment: ${enrollUrl}`;
+  const whatsappMessage = `${greetingHeader}! Welcome to WORKCRAFT Local Field Force. You have been appointed for ${agentCity || '[City]'}, ${resolvedCountryName}. Your Agent ID is ${generatedId}. Open your single-use enrollment link (locks permanently once completed): ${previewEnrollUrl}`;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleCopyInviteUrl = () => {
+    try {
+      navigator.clipboard?.writeText(previewEnrollUrl);
+    } catch {
+      // ignore
+    }
+    setCopiedInvite(true);
+    setTimeout(() => setCopiedInvite(false), 2500);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agentName.trim() || !agentPhone.trim()) return;
-    if (cityConflict) return; // Block dispatch on geographic mismatch
+    if (cityConflict) return;
 
+    setSubmitError(null);
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setDispatchedSuccess(true);
 
-      if (onAgentAdded) {
-        onAgentAdded({
-          id: generatedId,
-          pin: generatedPin,
+    let resolvedId = generatedId;
+    let resolvedEnrollUrl = `${origin}/enroll/agent?token=single-use-${generatedId.toLowerCase()}`;
+
+    try {
+      const res = await fetch('/api/founder/agent-invites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          agentId: generatedId,
           name: agentName.trim(),
           phone: agentPhone.trim(),
           city: `${agentCity.trim()}, ${resolvedCountryName}`,
-          category: 'Universal (All Salons, Barbershops & Parlors)',
-          countryCode: detectedCountry.code,
           countryName: resolvedCountryName,
-          countryFlag: detectedCountry.flag,
-          currency: detectedCountry.localCurrency,
-          dialCode: detectedCountry.dialCode,
-        });
+        }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          agentId?: string;
+          enrollPath?: string;
+          token?: string;
+        };
+        if (data.agentId) resolvedId = data.agentId;
+        if (data.enrollPath) {
+          resolvedEnrollUrl = `${origin}${data.enrollPath}`;
+        }
       }
-    }, 800);
+    } catch {
+      // Fallback preview link if offline
+    }
+
+    setGeneratedId(resolvedId);
+    setMintedEnrollUrl(resolvedEnrollUrl);
+    setIsSubmitting(false);
+    setDispatchedSuccess(true);
+
+    if (onAgentAdded) {
+      onAgentAdded({
+        id: resolvedId,
+        name: agentName.trim(),
+        phone: agentPhone.trim(),
+        city: `${agentCity.trim()}, ${resolvedCountryName}`,
+        category: 'Universal (All Salons, Barbershops & Parlors)',
+        enrollUrl: resolvedEnrollUrl,
+        countryCode: detectedCountry.code,
+        countryName: resolvedCountryName,
+        countryFlag: detectedCountry.flag,
+        currency: detectedCountry.localCurrency,
+        dialCode: detectedCountry.dialCode,
+      });
+    }
   };
 
   return (
@@ -160,7 +208,7 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
             </div>
             <div>
               <span className="text-[10px] font-mono font-bold uppercase tracking-[.2em] text-[#D29922]">
-                FOUNDER FIELD FORCE ENGINE (QUERY 3)
+                FOUNDER FIELD FORCE ENGINE
               </span>
               <h3 className="text-xl font-black text-[#F0F6FC] tracking-tight flex items-center gap-2">
                 <span>Add New Field Agent</span>
@@ -189,29 +237,49 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
               </div>
               <div className="space-y-1">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-[#3FB950] font-bold">
-                  SIM GATEWAY WHATSAPP DISPATCH CONFIRMED
+                  SINGLE-USE INVITE LINK DISPATCHED
                 </span>
                 <h4 className="text-lg font-bold text-[#F0F6FC]">
-                  Field Agent Invitation Dispatched!
+                  Field Agent Invitation Ready!
                 </h4>
                 <p className="text-xs text-[#8B949E] font-sans max-w-md mx-auto break-words [overflow-wrap:break-word]">
-                  Credentials and onboarding terminal link have been sent directly to <strong className="text-[#F0F6FC]">{agentName}</strong> (<span dir="ltr" className="text-[#F0F6FC]">{agentPhone}</span>) via Central SIM Gateway (+92-300-WORKCRAFT-LOCAL).
+                  A single-use enrollment link has been prepared for <strong className="text-[#F0F6FC]">{agentName}</strong> (<span dir="ltr" className="text-[#F0F6FC]">{agentPhone}</span>). Once completed, the invite link locks permanently.
                 </p>
               </div>
 
-              {/* Generated Credential Summary Card */}
-              <div className="grid grid-cols-2 gap-2 text-left font-mono text-xs bg-[#0D1117] rounded-xl p-3 border border-[#30363D]">
-                <div>
-                  <span className="text-[10px] text-[#8B949E] block">AGENT TERMINAL ID</span>
-                  <span className="text-sm font-bold text-[#06B6D4]">{generatedId}</span>
+              {/* Generated Single-Use Invite Summary Card (Zero PINs) */}
+              <div className="space-y-2 text-left font-mono text-xs bg-[#0D1117] rounded-xl p-3 border border-[#30363D]">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] text-[#8B949E] block">AGENT TERMINAL ID</span>
+                    <span className="text-sm font-bold text-[#06B6D4]">{generatedId}</span>
+                  </div>
+                  <span className="rounded bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[10px] font-bold text-[#3FB950]">
+                    1-TIME TOKEN
+                  </span>
                 </div>
-                <div>
-                  <span className="text-[10px] text-[#8B949E] block">4-DIGIT SECURITY PIN</span>
-                  <span className="text-sm font-bold text-[#D29922]">{generatedPin}</span>
+                <div className="pt-2 border-t border-[#21262D] space-y-1.5">
+                  <span className="text-[10px] text-[#8B949E] block">SINGLE-USE ENROLLMENT LINK</span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      dir="ltr"
+                      className="flex-1 truncate rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-2 text-[11px] text-[#06B6D4]"
+                    >
+                      {previewEnrollUrl}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyInviteUrl}
+                      className="min-h-[40px] rounded-lg border border-[#30363D] bg-[#21262D] hover:border-[#06B6D4] px-3 text-[11px] font-bold text-[#F0F6FC] flex items-center gap-1 shrink-0"
+                    >
+                      {copiedInvite ? <Check className="size-3.5 text-[#3FB950]" /> : <Copy className="size-3.5 text-[#06B6D4]" />}
+                      <span>{copiedInvite ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="col-span-2 pt-2 border-t border-[#21262D] flex items-center justify-between text-[11px] gap-2">
+                <div className="pt-2 border-t border-[#21262D] flex items-center justify-between text-[11px] gap-2">
                   <span className="text-[#8B949E] truncate">Territory: {agentCity}</span>
-                  <span className="text-[#3FB950] font-bold shrink-0">✓ Non-Restricted Category</span>
+                  <span className="text-[#3FB950] font-bold shrink-0">✓ Locks After Enrollment</span>
                 </div>
               </div>
             </div>
@@ -223,11 +291,11 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
                   onClick={() => {
                     onOpenRemoteEnrollment({
                       id: generatedId,
-                      pin: generatedPin,
                       name: agentName.trim(),
                       phone: agentPhone.trim(),
                       city: `${agentCity.trim()}, ${resolvedCountryName}`,
                       category: 'Universal (All Salons, Barbershops & Parlors)',
+                      enrollUrl: previewEnrollUrl,
                       countryCode: detectedCountry.code,
                       countryName: resolvedCountryName,
                       countryFlag: detectedCountry.flag,
@@ -246,9 +314,9 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
                 type="button"
                 onClick={() => {
                   setDispatchedSuccess(false);
+                  setMintedEnrollUrl(null);
                   setAgentName('');
                   setGeneratedId('AGT-' + Math.floor(410 + Math.random() * 500));
-                  setGeneratedPin(Math.floor(1000 + Math.random() * 9000).toString());
                 }}
                 className="min-h-[48px] rounded-xl bg-[#0D3822] border border-[#116329] hover:border-[#3FB950] text-[#3FB950] px-4 py-3 text-xs font-mono font-bold uppercase transition active:scale-95"
               >
@@ -258,9 +326,9 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
                 type="button"
                 onClick={() => {
                   setDispatchedSuccess(false);
+                  setMintedEnrollUrl(null);
                   setAgentName('');
                   setGeneratedId('AGT-' + Math.floor(410 + Math.random() * 500));
-                  setGeneratedPin(Math.floor(1000 + Math.random() * 9000).toString());
                   onClose();
                 }}
                 className="min-h-[48px] rounded-xl bg-[#21262D] border border-[#30363D] hover:border-[#484F58] text-[#F0F6FC] px-4 py-3 text-xs font-mono font-bold uppercase transition active:scale-95"
@@ -272,10 +340,16 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
         ) : (
           <form onSubmit={handleSubmit} className="mt-4 space-y-4">
             <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
-              Register a new field agent. The system automatically provisions a unique ID, generates a 4-digit PIN, and dispatches the terminal link to the agent&apos;s WhatsApp via the Central SIM Gateway.
+              Register a new field agent. The system mints a unique Agent ID and a single-use <code className="text-[#06B6D4]">/enroll/agent?token=...</code> invite link (no PINs needed) that locks permanently once the agent completes enrollment.
             </p>
 
-            {/* Field 1: Agent Name (Always English format & left-aligned) */}
+            {submitError && (
+              <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] p-3 text-xs font-mono text-[#F85149]">
+                {submitError}
+              </div>
+            )}
+
+            {/* Field 1: Agent Name */}
             <div>
               <label className="text-[11px] font-mono font-bold uppercase text-[#8B949E] block mb-1.5">
                 1. Field Agent Full Name (English Format) *
@@ -357,7 +431,7 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
               />
             </div>
 
-            {/* Field 3: Territory / City with Real-Time City vs Country Integrity Checking (Query 1) */}
+            {/* Field 3: Territory / City */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-[11px] font-mono font-bold uppercase text-[#8B949E]">
@@ -386,7 +460,6 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
                 />
               </div>
 
-              {/* Red Warning Banner if City doesn't match WhatsApp Country */}
               {cityConflict && (
                 <div className="mt-2 rounded-xl border border-[#da3633] bg-[#4C1C1D] p-3 space-y-1 animate-in fade-in">
                   <div className="flex items-center gap-1.5 text-[#F85149] font-mono text-xs font-bold">
@@ -399,7 +472,6 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
                 </div>
               )}
 
-              {/* Quick Select Valid Territory Chips for Auto-Detected Country */}
               {validTerritories.length > 0 && (
                 <div className="mt-2 space-y-1.5">
                   <span className="text-[10px] font-mono text-[#6E7681] block">
@@ -425,7 +497,7 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
               )}
             </div>
 
-            {/* Field 4: WhatsApp Number with Real-Time Country Detection & Regional Language Preview */}
+            {/* Field 4: WhatsApp Number */}
             <div>
               <div className="flex items-center justify-between mb-1.5 gap-2">
                 <label className="text-[11px] font-mono font-bold uppercase text-[#8B949E]">
@@ -459,30 +531,30 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
               </div>
             </div>
 
-            {/* Query 4 Compliance: Non-restricted Category Authorization Note */}
+            {/* Category Authorization */}
             <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-3 space-y-1">
               <div className="flex items-center justify-between text-xs font-mono">
                 <span className="text-[#3FB950] font-bold flex items-center gap-1.5">
                   <ShieldCheck className="size-4" />
-                  <span>Query 4: Category Authorization</span>
+                  <span>Universal Category Authorization</span>
                 </span>
                 <span className="text-[10px] font-bold text-[#3FB950] bg-[#161B22] border border-[#116329] px-2 py-0.5 rounded">
                   NON-RESTRICTED
                 </span>
               </div>
               <p className="text-[11px] text-[#F0F6FC] font-sans leading-relaxed">
-                Agent is authorized city-wide for <strong>ALL salon categories</strong> (men&apos;s barbershops, ladies&apos; beauty parlors, and unisex studios). No gender or parlor category restrictions applied.
+                Agent is authorized city-wide for <strong>ALL salon categories</strong> (men&apos;s barbershops, ladies&apos; beauty parlors, and unisex studios).
               </p>
             </div>
 
-            {/* Auto-Generated Credentials Preview */}
+            {/* Auto-Generated Single-Use Invite Preview */}
             <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2">
               <div className="flex items-center justify-between text-xs font-mono">
                 <span className="text-[#D29922] font-bold uppercase flex items-center gap-1.5">
-                  <Lock className="size-3.5" />
-                  <span>Auto-Generated System Credentials</span>
+                  <Link2 className="size-3.5" />
+                  <span>Single-Use Invite Configuration</span>
                 </span>
-                <span className="text-[10px] text-[#6E7681]">Simulated Sequence</span>
+                <span className="text-[10px] text-[#3FB950] font-bold">ZERO PIN ACCESS</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                 <div className="rounded-lg bg-[#161B22] p-2.5 border border-[#30363D]">
@@ -490,8 +562,8 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
                   <span className="text-sm font-bold text-[#06B6D4]">{generatedId}</span>
                 </div>
                 <div className="rounded-lg bg-[#161B22] p-2.5 border border-[#30363D]">
-                  <span className="text-[#8B949E] block text-[10px]">SECURITY PIN</span>
-                  <span className="text-sm font-bold text-[#D29922]">{generatedPin}</span>
+                  <span className="text-[#8B949E] block text-[10px]">INVITE LINK POLICY</span>
+                  <span className="text-xs font-bold text-[#3FB950]">Locks Permanently</span>
                 </div>
               </div>
             </div>
@@ -531,12 +603,12 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
                 {isSubmitting ? (
                   <>
                     <Radio className="size-4 animate-spin text-[#0D1117]" />
-                    <span>Dispatching via SIM Gateway...</span>
+                    <span>Minting Single-Use Invite...</span>
                   </>
                 ) : (
                   <>
                     <Send className="size-4 text-[#0D1117]" />
-                    <span>Create Agent &amp; Dispatch WhatsApp Link →</span>
+                    <span>Create Agent &amp; Mint Invite Link →</span>
                   </>
                 )}
               </button>

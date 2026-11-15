@@ -80,6 +80,7 @@ export interface OnboardedSalonPayload {
   monthlyMaint: number;
   services: ServiceItem[];
   barbers: string[];
+  websiteUrl?: string;
 }
 
 interface FieldAgentHubProps {
@@ -92,7 +93,6 @@ interface FieldAgentHubProps {
   initialAutoOpenEnrollment?: boolean;
   initialEnrollAgentData?: {
     id?: string;
-    pin?: string;
     name?: string;
     phone?: string;
     city?: string;
@@ -103,6 +103,12 @@ interface FieldAgentHubProps {
   initialSalonName?: string;
   onReturnToFounder?: () => void;
   onSalonOnboardingComplete?: (data: OnboardedSalonPayload) => void;
+  onAgentEnrollmentComplete?: (data: {
+    name: string;
+    phone: string;
+    city: string;
+    websiteUrl?: string;
+  }) => Promise<void> | void;
 }
 
 const DEFAULT_MENS_SERVICES: ServiceItem[] = [
@@ -1858,14 +1864,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   initialSalonName,
   onReturnToFounder,
   onSalonOnboardingComplete,
+  onAgentEnrollmentComplete,
 }) => {
   const isSelfServeOwner = userRole === 'SALON_OWNER';
 
-  // Agent Terminal Authentication State (always unlocked for self-onboarding Salon Owners)
-  const [isAgentAuthenticated, setIsAgentAuthenticated] = useState(true);
-  const [agentIdInput, setAgentIdInput] = useState('AGT-409');
-  const [agentPinInput, setAgentPinInput] = useState('7892');
-  const [loginError, setLoginError] = useState<string | null>(null);
+  // Agent Terminal Identity & Invisible CSS Honeypot State (Zero PIN gates, zero IP limits)
+  const [agentIdInput] = useState(initialEnrollAgentData?.id || 'AGT-409');
+  const [honeypotWebsiteUrl, setHoneypotWebsiteUrl] = useState('');
+  const [isCompletingAgentEnroll, setIsCompletingAgentEnroll] = useState(false);
 
   // 4-Step Sequential In-Hub Onboarding State
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
@@ -2251,7 +2257,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const [selectedDossierAgent, setSelectedDossierAgent] = useState<any | null>(null);
   const [enrolledAgentsList, setEnrolledAgentsList] = useState<Array<{
     id: string;
-    pin: string;
     name: string;
     phone: string;
     city: string;
@@ -2279,7 +2284,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   }>>([
     {
       id: 'AGT-409',
-      pin: '7892',
       name: 'Kamran Tariq',
       phone: '+92 301 4567891',
       city: 'Lahore West (Gulberg · DHA · Model Town)',
@@ -2301,7 +2305,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     },
     {
       id: 'AGT-415',
-      pin: '5219',
       name: 'Bilal Sheikh',
       phone: '+92 300 4819204',
       city: 'Karachi South (Clifton · DHA Phase 6)',
@@ -2323,7 +2326,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     },
     {
       id: 'AGT-502',
-      pin: '6640',
       name: 'Tariq Al-Mansoor',
       phone: '+971 50 8491022',
       city: 'Dubai (Deira · Marina · Jumeirah)',
@@ -2346,7 +2348,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     },
     {
       id: 'AGT-608',
-      pin: '3904',
       name: 'Oliver Bennett',
       phone: '+44 7712 894012',
       city: 'London (Soho · Canary Wharf)',
@@ -2506,16 +2507,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
 
 
 
-  // Query 1: Auto-open enrollment once for new agents, never for already enrolled agents
+  // Single-use invite enrollment opener (always opens when launched from /enroll/agent?token=...)
   React.useEffect(() => {
     if (initialAutoOpenEnrollment || initialEnrollAgentData) {
-      // Check if this agent terminal has already completed Day-1 enrollment
       const isAlreadyEnrolled =
         typeof window !== 'undefined' &&
         localStorage.getItem('wcl_agent_enrolled_v1') === 'true';
 
-      // If already enrolled and running in agent mode without new URL query parameters, keep wizard closed
-      if (isAlreadyEnrolled && userRole === 'FIELD_AGENT' && !initialEnrollAgentData?.id) {
+      if (isAlreadyEnrolled && userRole === 'FIELD_AGENT' && !onAgentEnrollmentComplete) {
         return;
       }
 
@@ -2539,7 +2538,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       setIsRemoteEnrollmentWizardOpen(true);
       setEnrollmentStep(1);
     }
-  }, [initialAutoOpenEnrollment, initialEnrollAgentData, userRole]);
+  }, [initialAutoOpenEnrollment, initialEnrollAgentData, userRole, onAgentEnrollmentComplete]);
 
   // PWA Home Screen Installation Prompt + Auto-Detect Android vs iPhone (Query 2)
   const [showPwaInstallModal, setShowPwaInstallModal] = useState(false);
@@ -3018,91 +3017,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const totalSalonsOnboarded = 19;
   const isHubRtl = agentLanguage === 'ur' || agentLanguage === 'ur_roman' || agentLanguage === 'ar';
 
-  if (!isAgentAuthenticated && !isSelfServeOwner) {
-    return (
-      <div className="max-w-md mx-auto my-8 mb-28 lg:mb-10 p-6 sm:p-7 rounded-3xl border border-[#30363D] bg-[#161B22] space-y-6 animate-in zoom-in-95">
-        <div className="text-center space-y-2">
-          <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-[#3B2E0B] border border-[#9E6A03]">
-            <Lock className="size-8 text-[#D29922]" />
-          </div>
-          <span className="text-[10px] font-mono font-bold uppercase tracking-[.22em] text-[#06B6D4] block">
-            WORKCRAFT FIELD FORCE · AGENT TERMINAL
-          </span>
-          <h2 className="text-2xl font-black text-[#F0F6FC]">Agent Portal Login</h2>
-          <p className="text-xs text-[#8B949E] font-sans">
-            Enter your assigned Agent ID & Security PIN to access field onboarding and commission adjustments.
-          </p>
-        </div>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (agentIdInput.trim() && agentPinInput.trim()) {
-              setIsAgentAuthenticated(true);
-              setLoginError(null);
-            } else {
-              setLoginError('Please enter valid Agent ID and 4-digit PIN');
-            }
-          }}
-          className="space-y-4"
-        >
-          <div>
-            <label className="text-xs font-mono font-bold text-[#8B949E] block mb-1">
-              Field Agent ID
-            </label>
-            <input
-              type="text"
-              required
-              value={agentIdInput}
-              onChange={(e) => setAgentIdInput(e.target.value)}
-              placeholder="e.g. AGT-409"
-              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-xs font-mono font-bold text-[#06B6D4] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-mono font-bold text-[#8B949E] block mb-1">
-              4-Digit Security PIN
-            </label>
-            <input
-              type="password"
-              required
-              maxLength={4}
-              value={agentPinInput}
-              onChange={(e) => setAgentPinInput(e.target.value)}
-              placeholder="••••"
-              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-xs font-mono font-bold text-[#D29922] placeholder:text-[#484F58] tracking-widest focus:outline-none focus:border-[#D29922]"
-            />
-          </div>
-
-          {loginError && (
-            <p className="text-xs font-mono text-[#F85149] text-center">{loginError}</p>
-          )}
-
-          <button
-            type="submit"
-            className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] py-3 text-xs font-mono font-bold uppercase transition active:scale-95"
-          >
-            <Lock className="size-4" />
-            <span>Unlock Agent Terminal & Pipeline →</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setAgentIdInput('AGT-409');
-              setAgentPinInput('7892');
-              setIsAgentAuthenticated(true);
-            }}
-            className="w-full min-h-[40px] text-center text-[11px] font-mono text-[#06B6D4] hover:underline pt-1 block"
-          >
-            ⚡ Quick Login as Kamran Tariq (Verified Agent)
-          </button>
-        </form>
-      </div>
-    );
-  }
-
   const effectiveHubView = isSelfServeOwner
     ? 'ONBOARDING'
     : userRole === 'FOUNDER' && activeHubView === 'PROFILE'
@@ -3243,18 +3157,9 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 </button>
               </div>
 
-              {/* Query 5: Lock & Save App buttons shown strictly for Field Agent mobile terminals */}
+              {/* Save App button shown strictly for Field Agent mobile terminals */}
               {userRole === 'FIELD_AGENT' && (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => setIsAgentAuthenticated(false)}
-                    className="min-h-[40px] rounded-lg px-2.5 py-1.5 text-xs font-mono text-[#8B949E] hover:text-[#D29922] transition flex items-center gap-1 border border-[#30363D] bg-[#21262D] hover:border-[#D29922]"
-                    title="Lock App & Logout"
-                  >
-                    <Lock className="size-3.5" />
-                    <span>{agentLanguage === 'ur' ? 'لاک' : agentLanguage === 'ar' ? 'قفل' : 'Lock'}</span>
-                  </button>
 
                   <button
                     type="button"
@@ -3681,7 +3586,18 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
           {/* STEP 1: LEAD INFO & HARDWARE GPS PINNING (FULLY LOCALIZED) */}
           {currentStep === 1 && (
             <PortalCard title={t.step1Title} kicker={t.step1Kicker}>
-              <form onSubmit={handleDispatchStep1} className="space-y-4">
+              <form onSubmit={handleDispatchStep1} className="relative space-y-4">
+                {/* Invisible CSS Honeypot (Backend bot-spam filter with zero friction to human multi-branch owners) */}
+                <input
+                  type="text"
+                  name="websiteUrl"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  aria-hidden="true"
+                  value={honeypotWebsiteUrl}
+                  onChange={(e) => setHoneypotWebsiteUrl(e.target.value)}
+                  className="absolute -left-[9999px] top-0 h-0 w-0 overflow-hidden opacity-0 pointer-events-none"
+                />
                 {/* Query 1: Smart Recipient Routing & Auto Detection Display */}
                 <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-3">
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -5220,14 +5136,27 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => setIsHomeShortcutInstalled(true)}
+                        onClick={async () => {
+                          if (deferredInstallPromptRef.current) {
+                            try {
+                              await deferredInstallPromptRef.current.prompt();
+                              deferredInstallPromptRef.current = null;
+                              setIsHomeShortcutInstalled(true);
+                              return;
+                            } catch {
+                              // fallback to manual OS guide modal
+                            }
+                          }
+                          setShowPwaInstallModal(true);
+                          setIsHomeShortcutInstalled(true);
+                        }}
                         className={`min-h-[44px] px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition shrink-0 border ${
                           isHomeShortcutInstalled
                             ? 'bg-[#0D3822] text-[#3FB950] border-[#116329]'
                             : 'bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] border-[#06B6D4]'
                         }`}
                       >
-                        {isHomeShortcutInstalled ? 'Saved ✓' : 'Install Shortcut'}
+                        {isHomeShortcutInstalled ? 'Saved ✓' : 'Add to Home Screen'}
                       </button>
                     </div>
 
@@ -5251,6 +5180,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                               monthlyMaint: activePackage.monthlyMaint,
                               services: activeServices,
                               barbers: barbersRoster,
+                              websiteUrl: honeypotWebsiteUrl,
                             });
                           }}
                           className="w-full sm:w-auto min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-5 py-3 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center justify-center gap-2"
@@ -7435,7 +7365,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
             ...prev,
             {
               id: newAgent.id,
-              pin: newAgent.pin,
               name: newAgent.name,
               phone: newAgent.phone,
               city: newAgent.city,
@@ -7546,8 +7475,8 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <span className="font-bold text-[#F0F6FC] text-sm">{selectedDossierAgent.cnicOrId}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-[#8B949E] block uppercase">SECURITY PIN</span>
-                  <span className="font-bold text-[#D29922] text-sm">{selectedDossierAgent.pin}</span>
+                  <span className="text-[10px] text-[#8B949E] block uppercase">INVITE STATUS</span>
+                  <span className="font-bold text-[#3FB950] text-sm">TOKEN CONSUMED</span>
                 </div>
                 <div className="col-span-2 pt-2 border-t border-[#21262D] min-w-0 overflow-hidden">
                   <span className="text-[10px] text-[#8B949E] block uppercase">OPTICAL THUMBPRINT HARDWARE ENCRYPTION</span>
@@ -8010,10 +7939,21 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               return (
                 <div
                   dir={enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'rtl' : 'ltr'}
-                  className={`space-y-3.5 animate-in fade-in min-w-0 ${
+                  className={`relative space-y-3.5 animate-in fade-in min-w-0 ${
                     enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'text-right' : 'text-left'
                   }`}
                 >
+                  {/* Invisible CSS Honeypot for Agent Invite Completion */}
+                  <input
+                    type="text"
+                    name="websiteUrl"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    aria-hidden="true"
+                    value={honeypotWebsiteUrl}
+                    onChange={(e) => setHoneypotWebsiteUrl(e.target.value)}
+                    className="absolute -left-[9999px] top-0 h-0 w-0 overflow-hidden opacity-0 pointer-events-none"
+                  />
                   <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-1">
                     <span className="text-[10px] font-mono text-[#06B6D4] font-bold uppercase">
                       {enrollmentLang === 'ur_roman'
@@ -9104,12 +9044,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       const resolvedMethod = payoutCfgStep4.methods.some((m) => m.value === enrollPayoutMethod)
                         ? enrollPayoutMethod
                         : payoutCfgStep4.defaultMethod;
-                      // Add to enrolledAgentsList
                       setEnrolledAgentsList((prev) => [
                         ...prev.filter(a => a.name !== enrollAgentName),
                         {
-                          id: 'AGT-' + Math.floor(410 + Math.random() * 50),
-                          pin: Math.floor(1000 + Math.random() * 9000).toString(),
+                          id: initialEnrollAgentData?.id || ('AGT-' + Math.floor(410 + Math.random() * 50)),
                           name: enrollAgentName,
                           phone: enrollAgentPhone,
                           city: enrollAgentCity,
@@ -9148,7 +9086,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               </div>
             )}
 
-            {/* STEP 5: ENROLLMENT CONFIRMED & HOME SCREEN PWA INSTALL (QUERIES 11 & 12) */}
+            {/* STEP 5: ENROLLMENT CONFIRMED & HOME SCREEN PWA INSTALL */}
             {enrollmentStep === 5 && (
               <div className="space-y-4 text-center animate-in zoom-in-95">
                 <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-[#0D3822] border border-[#116329] text-[#3FB950]">
@@ -9210,7 +9148,17 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <div className="flex items-center gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
+                        if (deferredInstallPromptRef.current) {
+                          try {
+                            await deferredInstallPromptRef.current.prompt();
+                            deferredInstallPromptRef.current = null;
+                            setIsPwaInstalledConfirmed(true);
+                            return;
+                          } catch {
+                            // fallback
+                          }
+                        }
                         setIsPwaInstalledConfirmed(true);
                         setShowPwaInstallModal(true);
                       }}
@@ -9226,34 +9174,70 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   </div>
                 </div>
 
-                {/* Auto-Launch Button into Agent Hub Step 1 Onboarding */}
+                {/* Lock Single-Use Invite & Transition Straight Into Editable Agent Hub */}
                 <div className="pt-2 flex flex-col sm:flex-row gap-2.5 justify-center">
                   <button
                     type="button"
-                    onClick={() => {
+                    disabled={isCompletingAgentEnroll}
+                    onClick={async () => {
                       if (typeof window !== 'undefined') {
                         localStorage.setItem('wcl_agent_enrolled_v1', 'true');
+                      }
+                      if (onAgentEnrollmentComplete) {
+                        setIsCompletingAgentEnroll(true);
+                        try {
+                          await onAgentEnrollmentComplete({
+                            name: enrollAgentName,
+                            phone: enrollAgentPhone,
+                            city: enrollAgentCity,
+                            websiteUrl: honeypotWebsiteUrl,
+                          });
+                        } finally {
+                          setIsCompletingAgentEnroll(false);
+                        }
                       }
                       setIsRemoteEnrollmentWizardOpen(false);
                       setActiveHubView('ONBOARDING');
                       setCurrentStep(1);
                     }}
-                    className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-6 py-3 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center justify-center gap-2"
+                    className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-6 py-3 text-xs font-mono font-black uppercase transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60"
                   >
                     <Scissors className="size-4" />
-                    <span>{enrollmentLang === 'ur_roman' ? 'پورٹل کھولیں (پہلا سیلون شامل کریں) ←' : enrollmentLang === 'ar' ? 'فتح البوابة وبدء تسجيل الصالونات ←' : 'Open Hub & Add First Salon →'}</span>
+                    <span>
+                      {isCompletingAgentEnroll
+                        ? 'Locking Invite & Opening Hub...'
+                        : enrollmentLang === 'ur_roman'
+                        ? 'پورٹل کھولیں (پہلا سیلون شامل کریں) ←'
+                        : enrollmentLang === 'ar'
+                        ? 'فتح البوابة وبدء تسجيل الصالونات ←'
+                        : 'Open Hub & Add First Salon →'}
+                    </span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
+                    disabled={isCompletingAgentEnroll}
+                    onClick={async () => {
                       if (typeof window !== 'undefined') {
                         localStorage.setItem('wcl_agent_enrolled_v1', 'true');
                       }
+                      if (onAgentEnrollmentComplete) {
+                        setIsCompletingAgentEnroll(true);
+                        try {
+                          await onAgentEnrollmentComplete({
+                            name: enrollAgentName,
+                            phone: enrollAgentPhone,
+                            city: enrollAgentCity,
+                            websiteUrl: honeypotWebsiteUrl,
+                          });
+                        } finally {
+                          setIsCompletingAgentEnroll(false);
+                        }
+                      }
                       setIsRemoteEnrollmentWizardOpen(false);
                     }}
-                    className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 py-3 text-xs font-mono text-[#8B949E] hover:text-[#F0F6FC] hover:border-[#484F58]"
+                    className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 py-3 text-xs font-mono text-[#8B949E] hover:text-[#F0F6FC] hover:border-[#484F58] disabled:opacity-60"
                   >
-                    {enrollmentLang === 'ur_roman' ? 'بند کریں اور واپس جائیں' : enrollmentLang === 'ar' ? 'إغلاق والعودة' : 'Close & Return'}
+                    {enrollmentLang === 'ur_roman' ? 'بند کریں اور واپس جائیں' : enrollmentLang === 'ar' ? 'إغلاق والعودة' : 'Close & Open Editable Hub'}
                   </button>
                 </div>
               </div>

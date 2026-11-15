@@ -15,6 +15,7 @@ import {
   runPostServiceReviewCron,
   runWinBackCron,
   setCounterSleepState,
+  setSalonBillingStatus,
   startConciergeSchedulers,
   syncSalonBarbers,
   updateRetentionSettings,
@@ -23,11 +24,11 @@ import {
 import {
   AuthenticatedRequest,
   clearSessionCookie,
-  createOtpChallenge,
-  createWebhookRateLimiter,
+  consumeAgentInviteTokenAndRegisterAgent,
+  createAgentInviteToken,
   extractAuthUserFromRequest,
-  findUserById,
-  getDevTestAccounts,
+  getFounderSessionUser,
+  inspectAgentInviteToken,
   registerSalonAssignment,
   registerSalonOwnerAccount,
   requireAuth,
@@ -38,10 +39,30 @@ import {
   sanitizePlainText,
   setSessionCookie,
   signSessionToken,
-  verifyOtpChallenge,
 } from './server/security';
 
-const PORT = Number(process.env.PORT || 3000);
+function resolveServerPort(): number {
+  const portFlagIdx = process.argv.indexOf('--port');
+  if (portFlagIdx !== -1 && process.argv[portFlagIdx + 1]) {
+    const parsed = Number(process.argv[portFlagIdx + 1]);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  if (process.env.DEFAULT_APP_PORT) {
+    const parsed = Number(process.env.DEFAULT_APP_PORT);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  if (
+    process.env.PORT &&
+    process.env.PORT !== process.env.NGINX_PORT &&
+    process.env.NODE_ENV === 'production'
+  ) {
+    const parsed = Number(process.env.PORT);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 3000;
+}
+
+const PORT = resolveServerPort();
 
 const SALON_GLOSSARY: Array<[RegExp, string, string]> = [
   [/\bbeard oil treatment\b/i, 'داڑھی آئل ٹریٹمنٹ', 'علاج اللحية بالزيت'],
@@ -229,20 +250,14 @@ function detectInputLanguage(text: string): 'en' | 'ur' | 'ar' {
   }
   return 'en';
 }
-const app = express();
 
 async function startServer() {
+  const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
 
-  const webhookRateLimiter = createWebhookRateLimiter({
-    windowMs: 60_000,
-    maxPerPhone: 15,
-    maxPerIp: 60,
-  });
-
   // ===========================================================================
-  // AUTHENTICATION & SESSION MANAGEMENT (JWT HttpOnly Cookie + OTP Flow)
+  // DIRECT 4-ROLE SESSION & INVITE MANAGEMENT (ZERO PIN WALLS · ZERO IP LIMITS)
   // ===========================================================================
   app.get('/api/auth/session', (req, res) => {
     const user = extractAuthUserFromRequest(req);
@@ -252,37 +267,12 @@ async function startServer() {
     return res.json({ authenticated: true, user });
   });
 
-  app.post('/api/auth/request-otp', (req, res) => {
-    const identifier = sanitizePlainText(req.body?.identifier, 120);
-    if (!identifier) {
-      return res.status(400).json({ error: 'Email or WhatsApp phone number is required.' });
-    }
-    const result = createOtpChallenge(identifier);
-    if (!result.ok) {
-      return res.status(404).json({ error: result.error });
-    }
-    return res.json({
-      ok: true,
-      maskedTarget: result.maskedTarget,
-      displayName: result.user.displayName,
-      userRole: result.user.userRole,
-      ...(result.devOtpPreview ? { devOtpPreview: result.devOtpPreview } : {}),
-    });
-  });
-
-  app.post('/api/auth/verify-otp', (req, res) => {
-    const identifier = sanitizePlainText(req.body?.identifier, 120);
-    const otp = sanitizePlainText(req.body?.otp, 12);
-    if (!identifier || !otp) {
-      return res.status(400).json({ error: 'Identifier and 6-digit OTP code are required.' });
-    }
-    const verified = verifyOtpChallenge(identifier, otp);
-    if (!verified.ok) {
-      return res.status(401).json({ error: verified.error });
-    }
-    const token = signSessionToken(verified.user);
+  // Direct persistent Founder session for Founder Command Center (root entry)
+  app.post('/api/auth/founder-session', (req, res) => {
+    const founder = getFounderSessionUser();
+    const token = signSessionToken(founder);
     setSessionCookie(res, token, req);
-    return res.json({ authenticated: true, user: verified.user });
+    return res.json({ authenticated: true, user: founder });
   });
 
   app.post('/api/auth/logout', (_req, res) => {
@@ -290,36 +280,57 @@ async function startServer() {
     return res.json({ ok: true });
   });
 
-  // Strict Development-Only Quick Switch Test Account Endpoints
-  app.get('/api/auth/dev-accounts', (_req, res) => {
-    if (process.env.NODE_ENV !== 'development') {
-      return res.status(404).json({ error: 'Not found.' });
+  // Founder mints a single-use /enroll/agent?token=... invite link (ZERO PIN)
+  app.post('/api/founder/agent-invites', requireAuth, requireRole('FOUNDER'), (req, res) => {
+    const agentId = sanitizePlainText(req.body?.agentId, 40) || undefined;
+    const name = sanitizePlainText(req.body?.name, 80) || 'Field Agent';
+    const phone = sanitizePhone(req.body?.phone);
+    const city = sanitizePlainText(req.body?.city, 120) || 'Assigned Territory';
+    const countryName = sanitizePlainText(req.body?.countryName, 60) || 'Pakistan';
+    if (!phone) {
+      return res.status(400).json({ error: 'Agent WhatsApp phone is required.' });
     }
-    return res.json({ accounts: getDevTestAccounts() });
+    const created = createAgentInviteToken({ agentId, name, phone, city, countryName });
+    return res.status(201).json({
+      ...created,
+      enrollPath: `/enroll/agent?token=${encodeURIComponent(created.token)}`,
+    });
   });
 
-  app.post('/api/auth/dev-login', (req, res) => {
-    if (process.env.NODE_ENV !== 'development') {
-      return res.status(403).json({ error: 'Dev account switching is disabled in production.' });
+  // Single-use Field Agent Invite Verification (/enroll/agent?token=...)
+  app.get('/api/agent/enroll', (req, res) => {
+    const token = typeof req.query.token === 'string' ? req.query.token : '';
+    const check = inspectAgentInviteToken(token);
+    if (!check.valid) {
+      return res.status(check.status).json({ valid: false, error: check.error });
     }
-    const userId = sanitizePlainText(req.body?.userId, 60);
-    const found = findUserById(userId);
-    if (!found) {
-      return res.status(404).json({ error: 'Test account not found.' });
+    return res.json({ valid: true, invite: check.invite });
+  });
+
+  // Complete Agent Enrollment -> Locks invite token permanently & issues AGENT session
+  app.post('/api/agent/enroll/complete', (req, res) => {
+    // Invisible CSS Honeypot check
+    const honeypot =
+      (typeof req.body?.websiteUrl === 'string' && req.body.websiteUrl.trim()) ||
+      (typeof req.body?.companyFax === 'string' && req.body.companyFax.trim());
+    if (honeypot) {
+      return res.status(200).json({ ok: true, ignored: true });
     }
-    const user = {
-      userId: found.userId,
-      userRole: found.userRole,
-      displayName: found.displayName,
-      email: found.email,
-      phone: found.phone,
-      salonId: found.salonId,
-      agentId: found.agentId,
-      salonName: found.salonName,
-    };
-    const token = signSessionToken(user);
-    setSessionCookie(res, token, req);
-    return res.json({ authenticated: true, user });
+
+    const rawToken = sanitizePlainText(req.body?.token, 128);
+    const result = consumeAgentInviteTokenAndRegisterAgent({
+      rawToken,
+      name: req.body?.name,
+      phone: req.body?.phone,
+      city: req.body?.city,
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    const jwt = signSessionToken(result.user);
+    setSessionCookie(res, jwt, req);
+    return res.json({ authenticated: true, user: result.user });
   });
 
   // Agent & Founder Scoped Salon Directory
@@ -337,7 +348,7 @@ async function startServer() {
     if (!salonName || !whatsappPhone) {
       return res.status(400).json({ error: 'salonName and whatsappPhone are required.' });
     }
-    const newId = `salon-${Date.now().toString(36)}`;
+    const newId = `salon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
     const assignedAgentId = user.agentId || 'agent-pk-1';
     registerSalonAssignment(newId, assignedAgentId);
     const ownerReg = registerSalonOwnerAccount({
@@ -350,19 +361,27 @@ async function startServer() {
     if (!ownerReg.ok) {
       return res.status(409).json({ error: ownerReg.error });
     }
-    const state = getSalonConciergeState(newId, { salonName, ownerName, whatsappPhone });
+    const state = getSalonConciergeState(newId, {
+      salonName,
+      ownerName,
+      whatsappPhone,
+      billingStatus: 'ACTIVE',
+    });
     return res.status(201).json({ salonId: newId, state });
   });
 
-  // Zero-Privilege Public Self-Onboarding Completion -> Triggers Mandatory Post-Install OTP Check
-  const onboardingRateLimiter = createWebhookRateLimiter({
-    windowMs: 60_000,
-    maxPerPhone: 5,
-    maxPerIp: 20,
-  });
-
-  app.post('/api/onboarding/complete', onboardingRateLimiter, (req, res) => {
+  // Unlimited Multi-Branch Public Salon Self-Onboarding (Zero IP Limits · Honeypot Protected)
+  // Assigns billing_status = 'PENDING_ACTIVATION' & immediately opens Live Salon Dashboard
+  app.post('/api/onboarding/complete', (req, res) => {
     try {
+      // Invisible CSS Honeypot: silently drop automated bot spam with zero friction to real users
+      const honeypot =
+        (typeof req.body?.websiteUrl === 'string' && req.body.websiteUrl.trim()) ||
+        (typeof req.body?.companyFax === 'string' && req.body.companyFax.trim());
+      if (honeypot) {
+        return res.status(200).json({ ok: true, ignored: true });
+      }
+
       const salonName = sanitizePlainText(req.body?.salonName, 100);
       const ownerName = sanitizePlainText(req.body?.ownerName, 80) || 'Salon Owner';
       const whatsappPhone = sanitizePhone(req.body?.phone);
@@ -377,7 +396,8 @@ async function startServer() {
         return res.status(400).json({ error: 'Salon name and WhatsApp phone number are required.' });
       }
 
-      const newSalonId = `salon-${Date.now().toString(36)}`;
+      const newSalonId = `salon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+      // Enforce strictly ONE unique WhatsApp number per salon branch
       const reg = registerSalonOwnerAccount({
         salonId: newSalonId,
         salonName,
@@ -387,10 +407,19 @@ async function startServer() {
       });
 
       if (!reg.ok) {
-        return res.status(409).json({ error: reg.error });
+        return res.status(409).json({
+          error:
+            'Each salon branch requires its own unique WhatsApp number. That WhatsApp number is already bound to an active branch.',
+        });
       }
 
-      getSalonConciergeState(newSalonId, { salonName, ownerName, whatsappPhone });
+      getSalonConciergeState(newSalonId, {
+        salonName,
+        ownerName,
+        whatsappPhone,
+        billingStatus: 'PENDING_ACTIVATION',
+        packageTier,
+      });
       updateRetentionSettings(newSalonId, {
         salonName,
         ownerName,
@@ -401,26 +430,45 @@ async function startServer() {
         syncSalonBarbers(newSalonId, barbers);
       }
 
-      // Immediately issue a 6-digit OTP challenge for Post-Installation Security Verification
-      // (Never sets wc_session cookie until OTP is explicitly verified)
-      const challenge = createOtpChallenge(whatsappPhone);
-      if (!challenge.ok) {
-        return res.status(500).json({ error: 'Could not issue post-install verification OTP.' });
-      }
+      const finalState = getSalonConciergeState(newSalonId);
+      // Directly issue verified, tenant-locked SALON_OWNER session cookie (Zero PIN walls)
+      const token = signSessionToken(reg.user);
+      setSessionCookie(res, token, req);
 
       return res.status(201).json({
+        authenticated: true,
+        user: reg.user,
         salonId: newSalonId,
         salonName,
         ownerName,
         phone: whatsappPhone,
-        maskedTarget: challenge.maskedTarget,
-        ...(challenge.devOtpPreview ? { devOtpPreview: challenge.devOtpPreview } : {}),
+        billingStatus: 'PENDING_ACTIVATION',
+        state: finalState,
       });
     } catch (err) {
       console.error('Public onboarding completion error:', err);
       return res.status(500).json({ error: 'Could not complete salon setup.' });
     }
   });
+
+  // Founder-Only Billing Activation (Unlocks Automated Mass WhatsApp Blasts)
+  app.post(
+    '/api/salons/:salonId/activate-billing',
+    requireAuth,
+    requireRole('FOUNDER'),
+    (req, res) => {
+      const { salonId } = req.params;
+      const statusRaw = sanitizePlainText(req.body?.billingStatus, 30).toUpperCase();
+      const billingStatus =
+        statusRaw === 'PENDING_ACTIVATION' ||
+        statusRaw === 'PAST_DUE' ||
+        statusRaw === 'SUSPENDED'
+          ? statusRaw
+          : 'ACTIVE';
+      const state = setSalonBillingStatus(salonId, billingStatus);
+      return res.json({ billingStatus, state });
+    }
+  );
 
   app.post('/api/translate-service', requireAuth, async (req, res) => {
     try {
@@ -801,8 +849,8 @@ async function startServer() {
     }
   );
 
-  // External WhatsApp Gateway Webhook: Protected by x-workcraft-webhook-secret + Per-Number Rate Limiter
-  app.post('/api/whatsapp/webhook', requireWebhookSecret, webhookRateLimiter, (req, res) => {
+  // External WhatsApp Gateway Webhook: Protected by x-workcraft-webhook-secret (Zero IP rate limits)
+  app.post('/api/whatsapp/webhook', requireWebhookSecret, (req, res) => {
     try {
       const { salonId, fromPhone, messageText, clientName, appointmentIdForReview, forceLanguagePrompt } =
         req.body || {};
@@ -837,12 +885,17 @@ async function startServer() {
       let birthdayDispatched = 0;
       let winbackDispatched = 0;
       let reviewDispatched = 0;
+      let quarantinedCount = 0;
 
       if (job === 'birthday_9am' || job === 'all' || !job) {
-        birthdayDispatched = runBirthdayCron(salonId, shouldForce).dispatchedCount;
+        const b = runBirthdayCron(salonId, shouldForce);
+        birthdayDispatched = b.dispatchedCount;
+        quarantinedCount += b.quarantinedCount;
       }
       if (job === 'winback_30d' || job === 'all' || !job) {
-        winbackDispatched = runWinBackCron(salonId, shouldForce).dispatchedCount;
+        const w = runWinBackCron(salonId, shouldForce);
+        winbackDispatched = w.dispatchedCount;
+        quarantinedCount += w.quarantinedCount;
       }
       if (job === 'review_t2h' || job === 'all' || !job) {
         reviewDispatched = runPostServiceReviewCron(
@@ -856,6 +909,7 @@ async function startServer() {
         birthdayDispatched,
         winbackDispatched,
         reviewDispatched,
+        quarantinedCount,
         state: getSalonConciergeState(salonId),
       });
     } catch (err) {
@@ -869,7 +923,6 @@ async function startServer() {
     '/api/salons/:salonId/concierge/simulate',
     requireAuth,
     requireSalonTenantAccess(false),
-    webhookRateLimiter,
     (req, res) => {
       try {
         const { salonId } = req.params;
@@ -910,12 +963,17 @@ async function startServer() {
         let birthdayDispatched = 0;
         let winbackDispatched = 0;
         let reviewDispatched = 0;
+        let quarantinedCount = 0;
 
         if (job === 'birthday_9am' || job === 'all' || !job) {
-          birthdayDispatched = runBirthdayCron(salonId, shouldForce).dispatchedCount;
+          const b = runBirthdayCron(salonId, shouldForce);
+          birthdayDispatched = b.dispatchedCount;
+          quarantinedCount += b.quarantinedCount;
         }
         if (job === 'winback_30d' || job === 'all' || !job) {
-          winbackDispatched = runWinBackCron(salonId, shouldForce).dispatchedCount;
+          const w = runWinBackCron(salonId, shouldForce);
+          winbackDispatched = w.dispatchedCount;
+          quarantinedCount += w.quarantinedCount;
         }
         if (job === 'review_t2h' || job === 'all' || !job) {
           reviewDispatched = runPostServiceReviewCron(
@@ -929,6 +987,7 @@ async function startServer() {
           birthdayDispatched,
           winbackDispatched,
           reviewDispatched,
+          quarantinedCount,
           state: getSalonConciergeState(salonId),
         });
       } catch (err) {
@@ -1053,10 +1112,9 @@ async function startServer() {
     });
   }
 
-  if (!process.env.VERCEL) {
-   app.Listen(PORT,'0.0.0.0', () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`WORKCRAFT Local server listening on http://0.0.0.0:${PORT}`);
-   });
-  }
-  startServer();
-  export default app;
+  });
+}
+
+startServer();

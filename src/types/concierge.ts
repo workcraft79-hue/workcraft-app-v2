@@ -11,6 +11,8 @@ export interface LanguageMenuOption {
 
 export type SalonPackageTier = 'STARTER' | 'PRO' | 'PRO++';
 
+export type SalonBillingStatus = 'PENDING_ACTIVATION' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED';
+
 export interface RetentionSettings {
   salonId: string;
   salonName: string;
@@ -21,6 +23,7 @@ export interface RetentionSettings {
   currency: string;
   currencySymbol: string;
   packageTier?: SalonPackageTier;
+  billingStatus?: SalonBillingStatus;
   counterSleptAt?: string | null;
 
   // Module 2: Automated 9:00 AM Birthday & Special Event Offers

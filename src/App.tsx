@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   House,
-  QrCode,
   UsersRound,
-  GitFork,
   WalletCards,
   Settings2,
   Mic,
@@ -22,11 +20,9 @@ import {
   Megaphone,
   SlidersHorizontal,
   LogOut,
-  ArrowLeft,
 } from 'lucide-react';
 
 import type { AuthUser } from './types/auth';
-import { AuthLoginScreen, type PostInstallChallenge } from './components/AuthLoginScreen';
 
 import { TabName } from './types/workcraft';
 import { WATERMARK_URL } from './data/portalData';
@@ -63,55 +59,31 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabName>('Overview');
   const [salonOwnerSection, setSalonOwnerSection] = useState<'LIVE' | 'MANAGE'>('LIVE');
 
-  // Verified Server-Side JWT Session State (Zero URL role switchers / zero open bypasses)
+  // Verified Server-Side JWT Session State (Zero PIN gates, zero IP limits, zero ?role= overrides)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [initialEnrollAgentData, setInitialEnrollAgentData] = useState<{
     id?: string;
-    pin?: string;
     name?: string;
     phone?: string;
     city?: string;
   } | null>(null);
+  const [agentInviteToken, setAgentInviteToken] = useState<string | null>(null);
+  const [agentInviteError, setAgentInviteError] = useState<string | null>(null);
 
-  // Pure 3-Role Isolation Architecture driven strictly by verified session `user_role`
-  const [activeRole, setActiveRole] = useState<'FOUNDER' | 'FIELD_AGENT' | 'SALON_OWNER'>('SALON_OWNER');
+  // Pure Role Isolation Architecture driven strictly by verified session `userRole`
+  const [activeRole, setActiveRole] = useState<'FOUNDER' | 'FIELD_AGENT' | 'SALON_OWNER'>('FOUNDER');
   const [socialCampaignSource, setSocialCampaignSource] = useState<string | null>(null);
   const [isPublicOnboardingOpen, setIsPublicOnboardingOpen] = useState(false);
   const [isSubmittingPublicOnboarding, setIsSubmittingPublicOnboarding] = useState(false);
   const [publicOnboardingError, setPublicOnboardingError] = useState<string | null>(null);
-  const [postInstallChallenge, setPostInstallChallenge] = useState<PostInstallChallenge | null>(null);
-  const [authExternalNotice, setAuthExternalNotice] = useState<string | null>(null);
-
-  // Benign social campaign UTM arrival opens ONLY the zero-privilege 4-step self-onboarding & install flow (never sets any role/session)
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const refParam = (params.get('ref') || '').trim().toLowerCase();
-    const utmSource = (params.get('utm_source') || '').trim().toLowerCase();
-    const sourceKey = refParam || utmSource;
-    if (!sourceKey) return;
-
-    const sourceMap: Record<string, string> = {
-      fb: 'Facebook Ads Campaign',
-      facebook: 'Facebook Ads Campaign',
-      ig: 'Instagram Ads Campaign',
-      instagram: 'Instagram Ads Campaign',
-      tiktok: 'TikTok Ads Campaign',
-      tt: 'TikTok Ads Campaign',
-      social: 'Social Media Campaign',
-    };
-    if (sourceMap[sourceKey]) {
-      setSocialCampaignSource(sourceMap[sourceKey]);
-      setIsPublicOnboardingOpen(true);
-    }
-  }, []);
 
   const applyVerifiedSession = (user: AuthUser) => {
     setAuthUser(user);
     setFounderPreviewMode('NONE');
     setIsPublicOnboardingOpen(false);
-    setPostInstallChallenge(null);
-    setAuthExternalNotice(null);
+    setAgentInviteToken(null);
+    setAgentInviteError(null);
     if (user.userRole === 'FOUNDER') {
       setActiveRole('FOUNDER');
       setActiveTab('Overview');
@@ -138,26 +110,172 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/auth/session')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { authenticated?: boolean; user?: AuthUser | null } | null) => {
-        if (cancelled) return;
-        if (data?.authenticated && data.user) {
-          applyVerifiedSession(data.user);
-        } else {
-          setAuthUser(null);
+    const boot = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+      const inviteTokenParam = (params.get('token') || '').trim();
+
+      // Workflow 3: Single-Use Field Agent Invite Link (/enroll/agent?token=...)
+      if (pathname === '/enroll/agent') {
+        if (!inviteTokenParam) {
+          if (!cancelled) {
+            setAgentInviteError('Invalid or missing single-use agent invite token.');
+            setIsCheckingSession(false);
+          }
+          return;
         }
-      })
-      .catch(() => {
-        if (!cancelled) setAuthUser(null);
-      })
-      .finally(() => {
-        if (!cancelled) setIsCheckingSession(false);
-      });
+        try {
+          const res = await fetch(`/api/agent/enroll?token=${encodeURIComponent(inviteTokenParam)}`);
+          const data = (await res.json()) as {
+            valid?: boolean;
+            error?: string;
+            invite?: { agentId?: string; name?: string; phone?: string; city?: string };
+          };
+          if (cancelled) return;
+          if (!res.ok || !data?.valid || !data.invite) {
+            setAgentInviteError(
+              data?.error || 'This single-use agent invite link has already been completed and permanently locked.'
+            );
+            setIsCheckingSession(false);
+            return;
+          }
+          setAgentInviteToken(inviteTokenParam);
+          setInitialEnrollAgentData({
+            id: data.invite.agentId,
+            name: data.invite.name,
+            phone: data.invite.phone,
+            city: data.invite.city,
+          });
+          setActiveRole('FIELD_AGENT');
+          setActiveTab('Agent Hub / Onboarding');
+          setIsCheckingSession(false);
+          return;
+        } catch {
+          if (!cancelled) {
+            setAgentInviteError('Unable to verify agent invite link right now.');
+            setIsCheckingSession(false);
+          }
+          return;
+        }
+      }
+
+      // Check existing server HttpOnly session cookie
+      let existingUser: AuthUser | null = null;
+      try {
+        const sessionRes = await fetch('/api/auth/session');
+        if (sessionRes.ok) {
+          const sessionData = (await sessionRes.json()) as {
+            authenticated?: boolean;
+            user?: AuthUser | null;
+          };
+          if (sessionData?.authenticated && sessionData.user) {
+            existingUser = sessionData.user;
+          }
+        }
+      } catch {
+        // ignore network hiccup
+      }
+      if (cancelled) return;
+
+      // Workflow 4: Public Social Media Link Salon Self-Onboarding
+      const refParam = (params.get('ref') || '').trim().toLowerCase();
+      const utmSource = (params.get('utm_source') || '').trim().toLowerCase();
+      const onboardParam = (params.get('onboard') || '').trim().toLowerCase();
+      const sourceKey = refParam || utmSource || (onboardParam === 'true' ? 'social' : '');
+      const sourceMap: Record<string, string> = {
+        fb: 'Facebook Ads Campaign',
+        facebook: 'Facebook Ads Campaign',
+        ig: 'Instagram Ads Campaign',
+        instagram: 'Instagram Ads Campaign',
+        tiktok: 'TikTok Ads Campaign',
+        tt: 'TikTok Ads Campaign',
+        social: 'Social Media Campaign',
+      };
+      const sessionOnboardingLocked =
+        typeof window !== 'undefined' &&
+        Boolean(sessionStorage.getItem('wcl_salon_onboarding_locked_v1'));
+
+      if (sourceKey && sourceMap[sourceKey]) {
+        if (existingUser?.userRole === 'SALON_OWNER' && sessionOnboardingLocked) {
+          applyVerifiedSession(existingUser);
+          setIsCheckingSession(false);
+          return;
+        }
+        setSocialCampaignSource(sourceMap[sourceKey]);
+        setIsPublicOnboardingOpen(true);
+        setHasCompletedSalonOnboarding(false);
+        setActiveRole('SALON_OWNER');
+        setIsCheckingSession(false);
+        return;
+      }
+
+      if (existingUser) {
+        applyVerifiedSession(existingUser);
+        setIsCheckingSession(false);
+        return;
+      }
+
+      // Workflow 2: Direct Persistent Founder Session into Founder Command Center
+      try {
+        const founderRes = await fetch('/api/auth/founder-session', { method: 'POST' });
+        if (founderRes.ok) {
+          const founderData = (await founderRes.json()) as {
+            authenticated?: boolean;
+            user?: AuthUser | null;
+          };
+          if (!cancelled && founderData?.authenticated && founderData.user) {
+            applyVerifiedSession(founderData.user);
+            setIsCheckingSession(false);
+            return;
+          }
+        }
+      } catch {
+        // fallback below
+      }
+      if (!cancelled) {
+        setIsCheckingSession(false);
+      }
+    };
+
+    void boot();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const handleAgentEnrollmentComplete = async (agentPayload: {
+    name: string;
+    phone: string;
+    city: string;
+    websiteUrl?: string;
+  }) => {
+    if (!agentInviteToken) return;
+    const res = await fetch('/api/agent/enroll/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: agentInviteToken,
+        name: agentPayload.name,
+        phone: agentPayload.phone,
+        city: agentPayload.city,
+        websiteUrl: agentPayload.websiteUrl || '',
+      }),
+    });
+    const data = (await res.json()) as {
+      authenticated?: boolean;
+      user?: AuthUser;
+      error?: string;
+    };
+    if (!res.ok || !data?.authenticated || !data.user) {
+      setAgentInviteError(data?.error || 'Could not complete agent enrollment.');
+      return;
+    }
+    if (typeof window !== 'undefined' && window.location.pathname === '/enroll/agent') {
+      window.history.replaceState({}, '', '/');
+    }
+    applyVerifiedSession(data.user);
+    showToast('Invite locked permanently — welcome to your editable Field Agent Hub.');
+  };
 
   const handleCompletePublicOnboarding = async (payload: OnboardedSalonPayload) => {
     if (isSubmittingPublicOnboarding) return;
@@ -175,35 +293,38 @@ export default function App() {
           planId: payload.planId,
           language: payload.language,
           barbers: payload.barbers,
+          websiteUrl: payload.websiteUrl || '',
         }),
       });
       const data = await res.json();
       if (res.status === 409) {
-        setIsPublicOnboardingOpen(false);
-        setPostInstallChallenge(null);
-        setAuthExternalNotice(
+        setPublicOnboardingError(
           data?.error ||
-            'This WhatsApp number is already registered. Sign in below using your 6-digit OTP.'
+            'Each salon branch requires its own unique WhatsApp number. Please enter a different WhatsApp number for this branch.'
         );
         return;
       }
-      if (!res.ok) {
+      if (!res.ok || !data?.authenticated || !data?.user) {
         setPublicOnboardingError(
           data?.error || 'Could not finalize salon installation. Please check your details.'
         );
         return;
       }
+
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('wcl_salon_onboarding_locked_v1', String(data.salonId));
+        if (window.location.search) {
+          window.history.replaceState({}, '', '/');
+        }
+      }
       setCompletedOnboardingData(payload);
       setOnboardedSalonName(data.salonName || payload.salonName);
+      applyVerifiedSession(data.user as AuthUser);
+      setHasCompletedSalonOnboarding(true);
       setIsPublicOnboardingOpen(false);
-      setAuthExternalNotice(null);
-      setPostInstallChallenge({
-        identifier: data.phone || payload.phone,
-        maskedTarget: data.maskedTarget || payload.phone,
-        targetName: data.ownerName || payload.ownerName,
-        salonName: data.salonName || payload.salonName,
-        devOtpPreview: typeof data.devOtpPreview === 'string' ? data.devOtpPreview : null,
-      });
+      showToast(
+        `${data.salonName || payload.salonName} Live Floor Dashboard is active! Automated mass blasts activate once billing is confirmed.`
+      );
     } catch {
       setPublicOnboardingError('Network error while saving installation details. Try again.');
     } finally {
@@ -212,6 +333,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    const previousRole = authUser?.userRole;
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch {}
@@ -221,8 +343,28 @@ export default function App() {
     setInspectSalonName(undefined);
     setOnboardedSalonName(undefined);
     setCompletedOnboardingData(null);
-    setPostInstallChallenge(null);
-    setAuthExternalNotice(null);
+
+    if (previousRole === 'SALON_OWNER') {
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('wcl_salon_onboarding_locked_v1');
+      }
+      setHasCompletedSalonOnboarding(false);
+      setIsPublicOnboardingOpen(true);
+      return;
+    }
+
+    try {
+      const founderRes = await fetch('/api/auth/founder-session', { method: 'POST' });
+      if (founderRes.ok) {
+        const founderData = (await founderRes.json()) as {
+          authenticated?: boolean;
+          user?: AuthUser;
+        };
+        if (founderData?.authenticated && founderData.user) {
+          applyVerifiedSession(founderData.user);
+        }
+      }
+    } catch {}
   };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -447,28 +589,97 @@ export default function App() {
     return (
       <main className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex items-center justify-center p-6">
         <div className="rounded-2xl border border-[#30363D] bg-[#161B22] px-6 py-5 text-xs font-mono text-[#8B949E]">
-          Verifying secure session...
+          Opening WorkCraft Portal...
         </div>
       </main>
     );
   }
 
   if (!authUser) {
+    if (agentInviteToken && initialEnrollAgentData) {
+      return (
+        <main className="min-h-screen overflow-x-hidden bg-[#0D1117] text-[#F0F6FC] font-sans pb-28">
+          <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-[#30363D] bg-[#0D1117]/95 backdrop-blur-md px-4 sm:px-7 gap-3">
+            <div className="inline-flex items-center gap-1.5 rounded-lg border border-[#9E6A03] bg-[#3B2E0B] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#D29922]">
+              <Lock className="size-3 shrink-0" />
+              <span>SINGLE-USE INVITE</span>
+            </div>
+            <div className="flex flex-col items-center justify-center leading-none">
+              <img
+                src={WATERMARK_URL}
+                alt="WORKCRAFT"
+                className="h-auto w-[132px] object-contain opacity-95"
+              />
+              <span className="mt-1 text-[9px] font-mono font-black tracking-[0.25em] text-[#06B6D4] uppercase">
+                FIELD AGENT ENROLLMENT
+              </span>
+            </div>
+            <div className="inline-flex items-center gap-1 rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950]">
+              <ShieldCheck className="size-3 shrink-0" />
+              <span className="hidden sm:inline">Locks After Setup</span>
+            </div>
+          </header>
+
+          <div className="mx-auto max-w-4xl w-full p-4 sm:p-6 space-y-4">
+            {agentInviteError && (
+              <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] px-4 py-3 text-xs font-mono font-bold text-[#F85149] break-words [overflow-wrap:break-word]">
+                {agentInviteError}
+              </div>
+            )}
+            <SilentSelfHealingBoundary areaName="Agent Invite Enrollment">
+              <FieldAgentHub
+                userRole="FIELD_AGENT"
+                initialAutoOpenEnrollment={true}
+                initialEnrollAgentData={initialEnrollAgentData}
+                onAgentEnrollmentComplete={handleAgentEnrollmentComplete}
+                onSalonCreated={() => {}}
+              />
+            </SilentSelfHealingBoundary>
+          </div>
+        </main>
+      );
+    }
+
+    if (agentInviteError) {
+      return (
+        <main className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex items-center justify-center p-5">
+          <div className="w-full max-w-md rounded-3xl border border-[#da3633] bg-[#161B22] p-6 space-y-4 text-center">
+            <div className="mx-auto grid size-14 place-items-center rounded-2xl border border-[#da3633] bg-[#4C1C1D] text-[#F85149]">
+              <Lock className="size-7" />
+            </div>
+            <span className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-[#F85149] block">
+              INVITE PERMANENTLY LOCKED
+            </span>
+            <h1 className="text-xl font-black text-[#F0F6FC]">
+              Single-Use Enrollment Link Unavailable
+            </h1>
+            <p className="text-xs font-sans text-[#8B949E] leading-relaxed">
+              {agentInviteError}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  window.location.href = '/';
+                }
+              }}
+              className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-bold uppercase transition"
+            >
+              Return to WorkCraft Home
+            </button>
+          </div>
+        </main>
+      );
+    }
+
     if (isPublicOnboardingOpen) {
       return (
         <main className="min-h-screen overflow-x-hidden bg-[#0D1117] text-[#F0F6FC] font-sans pb-28">
           <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-[#30363D] bg-[#0D1117]/95 backdrop-blur-md px-4 sm:px-7 gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setIsPublicOnboardingOpen(false);
-                setPublicOnboardingError(null);
-              }}
-              className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:bg-[#21262D] px-3.5 py-2 text-xs font-mono font-bold text-[#F0F6FC] flex items-center gap-2 transition"
-            >
-              <ArrowLeft className="size-4 text-[#06B6D4]" />
-              <span>Sign In</span>
-            </button>
+            <div className="inline-flex items-center gap-1.5 rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#06B6D4]">
+              <Scissors className="size-3 shrink-0" />
+              <span>1 WHATSAPP / BRANCH</span>
+            </div>
 
             <div className="flex flex-col items-center justify-center leading-none">
               <img
@@ -482,8 +693,8 @@ export default function App() {
             </div>
 
             <div className="inline-flex items-center gap-1 rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950]">
-              <Lock className="size-3 shrink-0" />
-              <span className="hidden sm:inline">OTP After Install</span>
+              <ShieldCheck className="size-3 shrink-0" />
+              <span className="hidden sm:inline">Live Floor Ready</span>
             </div>
           </header>
 
@@ -499,10 +710,6 @@ export default function App() {
                 socialCampaignSource={socialCampaignSource}
                 onSalonCreated={() => {}}
                 onSalonOnboardingComplete={handleCompletePublicOnboarding}
-                onClose={() => {
-                  setIsPublicOnboardingOpen(false);
-                  setPublicOnboardingError(null);
-                }}
               />
             </SilentSelfHealingBoundary>
           </div>
@@ -511,17 +718,26 @@ export default function App() {
     }
 
     return (
-      <AuthLoginScreen
-        onAuthenticated={applyVerifiedSession}
-        onStartSelfOnboarding={() => {
-          setAuthExternalNotice(null);
-          setPublicOnboardingError(null);
-          setIsPublicOnboardingOpen(true);
-        }}
-        postInstallChallenge={postInstallChallenge}
-        onClearPostInstallChallenge={() => setPostInstallChallenge(null)}
-        externalNotice={authExternalNotice}
-      />
+      <main className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-2xl border border-[#30363D] bg-[#161B22] p-6 text-center space-y-4">
+          <p className="text-xs font-mono text-[#8B949E]">
+            Establishing direct Founder session...
+          </p>
+          <button
+            type="button"
+            onClick={async () => {
+              const res = await fetch('/api/auth/founder-session', { method: 'POST' });
+              if (res.ok) {
+                const d = await res.json();
+                if (d?.user) applyVerifiedSession(d.user);
+              }
+            }}
+            className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-bold uppercase transition"
+          >
+            Open Founder Command Center
+          </button>
+        </div>
+      </main>
     );
   }
 
