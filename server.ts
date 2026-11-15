@@ -20,7 +20,7 @@ import {
   syncSalonBarbers,
   updateRetentionSettings,
   upsertClientProfile,
-} from './server/conciergeEngine';
+} from './server/conciergeEngine.js';
 import {
   AuthenticatedRequest,
   clearSessionCookie,
