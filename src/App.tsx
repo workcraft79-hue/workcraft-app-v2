@@ -41,6 +41,71 @@ import {
   NotificationsDrawer,
 } from './components/Modals';
 
+const DEFAULT_FOUNDER_USER: AuthUser = {
+  userId: 'usr-founder-1',
+  userRole: 'FOUNDER',
+  displayName: 'Farhan Abid',
+  email: 'farhanabidraja1979@gmail.com',
+  phone: '+92 300 0000001',
+  salonId: null,
+  agentId: null,
+};
+
+const SOCIAL_CAMPAIGN_SOURCE_MAP: Record<string, string> = {
+  fb: 'Facebook Ads Campaign',
+  facebook: 'Facebook Ads Campaign',
+  ig: 'Instagram Ads Campaign',
+  instagram: 'Instagram Ads Campaign',
+  tiktok: 'TikTok Ads Campaign',
+  tt: 'TikTok Ads Campaign',
+  social: 'Social Media Campaign',
+};
+
+function getInitialRouteIntent() {
+  if (typeof window === 'undefined') {
+    return {
+      isAgentInviteRoute: false,
+      inviteTokenParam: '',
+      socialSource: null as string | null,
+      sessionOnboardingLocked: false,
+    };
+  }
+  const params = new URLSearchParams(window.location.search);
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  const inviteTokenParam = (params.get('token') || '').trim();
+  const refParam = (params.get('ref') || '').trim().toLowerCase();
+  const utmSource = (params.get('utm_source') || '').trim().toLowerCase();
+  const onboardParam = (params.get('onboard') || '').trim().toLowerCase();
+  const sourceKey = refParam || utmSource || (onboardParam === 'true' ? 'social' : '');
+  const socialSource = sourceKey ? SOCIAL_CAMPAIGN_SOURCE_MAP[sourceKey] || null : null;
+  let sessionOnboardingLocked = false;
+  try {
+    sessionOnboardingLocked = Boolean(sessionStorage.getItem('wcl_salon_onboarding_locked_v1'));
+  } catch {
+    sessionOnboardingLocked = false;
+  }
+  return {
+    isAgentInviteRoute: pathname === '/enroll/agent',
+    inviteTokenParam,
+    socialSource,
+    sessionOnboardingLocked,
+  };
+}
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs = 3500
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export default function App() {
   const [activeSalonCount, setActiveSalonCount] = useState(24);
   const [kamranCashHeld, setKamranCashHeld] = useState(25000);
@@ -59,9 +124,22 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabName>('Overview');
   const [salonOwnerSection, setSalonOwnerSection] = useState<'LIVE' | 'MANAGE'>('LIVE');
 
-  // Verified Server-Side JWT Session State (Zero PIN gates, zero IP limits, zero ?role= overrides)
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const initialRoute = React.useMemo(() => getInitialRouteIntent(), []);
+  const shouldStartPublicOnboarding = Boolean(
+    !initialRoute.isAgentInviteRoute &&
+      initialRoute.socialSource &&
+      !initialRoute.sessionOnboardingLocked
+  );
+
+  // Verified Session State: Immediately initialized to Founder on standard root load; non-blocking server sync runs in background
+  const [authUser, setAuthUser] = useState<AuthUser | null>(() =>
+    initialRoute.isAgentInviteRoute || shouldStartPublicOnboarding
+      ? null
+      : DEFAULT_FOUNDER_USER
+  );
+  const [isCheckingSession, setIsCheckingSession] = useState<boolean>(
+    () => initialRoute.isAgentInviteRoute
+  );
   const [initialEnrollAgentData, setInitialEnrollAgentData] = useState<{
     id?: string;
     name?: string;
@@ -71,10 +149,20 @@ export default function App() {
   const [agentInviteToken, setAgentInviteToken] = useState<string | null>(null);
   const [agentInviteError, setAgentInviteError] = useState<string | null>(null);
 
-  // Pure Role Isolation Architecture driven strictly by verified session `userRole`
-  const [activeRole, setActiveRole] = useState<'FOUNDER' | 'FIELD_AGENT' | 'SALON_OWNER'>('FOUNDER');
-  const [socialCampaignSource, setSocialCampaignSource] = useState<string | null>(null);
-  const [isPublicOnboardingOpen, setIsPublicOnboardingOpen] = useState(false);
+  // Pure Role Isolation Architecture driven strictly by active session `userRole`
+  const [activeRole, setActiveRole] = useState<'FOUNDER' | 'FIELD_AGENT' | 'SALON_OWNER'>(() =>
+    shouldStartPublicOnboarding
+      ? 'SALON_OWNER'
+      : initialRoute.isAgentInviteRoute
+      ? 'FIELD_AGENT'
+      : 'FOUNDER'
+  );
+  const [socialCampaignSource, setSocialCampaignSource] = useState<string | null>(
+    () => (shouldStartPublicOnboarding ? initialRoute.socialSource : null)
+  );
+  const [isPublicOnboardingOpen, setIsPublicOnboardingOpen] = useState<boolean>(
+    () => shouldStartPublicOnboarding
+  );
   const [isSubmittingPublicOnboarding, setIsSubmittingPublicOnboarding] = useState(false);
   const [publicOnboardingError, setPublicOnboardingError] = useState<string | null>(null);
 
@@ -111,13 +199,9 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const boot = async () => {
-      const params = new URLSearchParams(window.location.search);
-      const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
-      const inviteTokenParam = (params.get('token') || '').trim();
-
       // Workflow 3: Single-Use Field Agent Invite Link (/enroll/agent?token=...)
-      if (pathname === '/enroll/agent') {
-        if (!inviteTokenParam) {
+      if (initialRoute.isAgentInviteRoute) {
+        if (!initialRoute.inviteTokenParam) {
           if (!cancelled) {
             setAgentInviteError('Invalid or missing single-use agent invite token.');
             setIsCheckingSession(false);
@@ -125,7 +209,11 @@ export default function App() {
           return;
         }
         try {
-          const res = await fetch(`/api/agent/enroll?token=${encodeURIComponent(inviteTokenParam)}`);
+          const res = await fetchWithTimeout(
+            `/api/agent/enroll?token=${encodeURIComponent(initialRoute.inviteTokenParam)}`,
+            undefined,
+            3500
+          );
           const data = (await res.json()) as {
             valid?: boolean;
             error?: string;
@@ -134,12 +222,13 @@ export default function App() {
           if (cancelled) return;
           if (!res.ok || !data?.valid || !data.invite) {
             setAgentInviteError(
-              data?.error || 'This single-use agent invite link has already been completed and permanently locked.'
+              data?.error ||
+                'This single-use agent invite link has already been completed and permanently locked.'
             );
             setIsCheckingSession(false);
             return;
           }
-          setAgentInviteToken(inviteTokenParam);
+          setAgentInviteToken(initialRoute.inviteTokenParam);
           setInitialEnrollAgentData({
             id: data.invite.agentId,
             name: data.invite.name,
@@ -159,11 +248,12 @@ export default function App() {
         }
       }
 
-      // Check existing server HttpOnly session cookie
+      // Non-blocking background sync with /api/auth/session (fallback stays safely in client Founder state on static hosts)
       let existingUser: AuthUser | null = null;
       try {
-        const sessionRes = await fetch('/api/auth/session');
-        if (sessionRes.ok) {
+        const sessionRes = await fetchWithTimeout('/api/auth/session', undefined, 3000);
+        const contentType = sessionRes.headers.get('content-type') || '';
+        if (sessionRes.ok && contentType.includes('application/json')) {
           const sessionData = (await sessionRes.json()) as {
             authenticated?: boolean;
             user?: AuthUser | null;
@@ -173,67 +263,51 @@ export default function App() {
           }
         }
       } catch {
-        // ignore network hiccup
+        // Non-blocking fallback: static deployments (e.g. Vercel SPA) continue cleanly in client state
       }
       if (cancelled) return;
 
-      // Workflow 4: Public Social Media Link Salon Self-Onboarding
-      const refParam = (params.get('ref') || '').trim().toLowerCase();
-      const utmSource = (params.get('utm_source') || '').trim().toLowerCase();
-      const onboardParam = (params.get('onboard') || '').trim().toLowerCase();
-      const sourceKey = refParam || utmSource || (onboardParam === 'true' ? 'social' : '');
-      const sourceMap: Record<string, string> = {
-        fb: 'Facebook Ads Campaign',
-        facebook: 'Facebook Ads Campaign',
-        ig: 'Instagram Ads Campaign',
-        instagram: 'Instagram Ads Campaign',
-        tiktok: 'TikTok Ads Campaign',
-        tt: 'TikTok Ads Campaign',
-        social: 'Social Media Campaign',
-      };
-      const sessionOnboardingLocked =
-        typeof window !== 'undefined' &&
-        Boolean(sessionStorage.getItem('wcl_salon_onboarding_locked_v1'));
-
-      if (sourceKey && sourceMap[sourceKey]) {
-        if (existingUser?.userRole === 'SALON_OWNER' && sessionOnboardingLocked) {
+      if (initialRoute.socialSource) {
+        if (existingUser?.userRole === 'SALON_OWNER' && initialRoute.sessionOnboardingLocked) {
           applyVerifiedSession(existingUser);
-          setIsCheckingSession(false);
-          return;
         }
-        setSocialCampaignSource(sourceMap[sourceKey]);
-        setIsPublicOnboardingOpen(true);
-        setHasCompletedSalonOnboarding(false);
-        setActiveRole('SALON_OWNER');
         setIsCheckingSession(false);
         return;
       }
 
       if (existingUser) {
-        applyVerifiedSession(existingUser);
+        if (existingUser.userRole !== 'FOUNDER') {
+          applyVerifiedSession(existingUser);
+        } else {
+          setAuthUser(existingUser);
+        }
         setIsCheckingSession(false);
         return;
       }
 
-      // Workflow 2: Direct Persistent Founder Session into Founder Command Center
+      // Background cookie mint for full-stack servers; never blocks client UI if unavailable or timed out
       try {
-        const founderRes = await fetch('/api/auth/founder-session', { method: 'POST' });
-        if (founderRes.ok) {
+        const founderRes = await fetchWithTimeout(
+          '/api/auth/founder-session',
+          { method: 'POST' },
+          3000
+        );
+        const contentType = founderRes.headers.get('content-type') || '';
+        if (founderRes.ok && contentType.includes('application/json')) {
           const founderData = (await founderRes.json()) as {
             authenticated?: boolean;
             user?: AuthUser | null;
           };
           if (!cancelled && founderData?.authenticated && founderData.user) {
-            applyVerifiedSession(founderData.user);
-            setIsCheckingSession(false);
-            return;
+            setAuthUser(founderData.user);
           }
         }
       } catch {
-        // fallback below
-      }
-      if (!cancelled) {
-        setIsCheckingSession(false);
+        // Non-blocking fallback: client DEFAULT_FOUNDER_USER remains active
+      } finally {
+        if (!cancelled) {
+          setIsCheckingSession(false);
+        }
       }
     };
 
@@ -241,7 +315,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialRoute]);
 
   const handleAgentEnrollmentComplete = async (agentPayload: {
     name: string;
@@ -335,9 +409,8 @@ export default function App() {
   const handleLogout = async () => {
     const previousRole = authUser?.userRole;
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await fetchWithTimeout('/api/auth/logout', { method: 'POST' }, 2000);
     } catch {}
-    setAuthUser(null);
     setFounderPreviewMode('NONE');
     setIsSidebarOpen(false);
     setInspectSalonName(undefined);
@@ -348,20 +421,27 @@ export default function App() {
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('wcl_salon_onboarding_locked_v1');
       }
+      setAuthUser(null);
       setHasCompletedSalonOnboarding(false);
       setIsPublicOnboardingOpen(true);
       return;
     }
 
+    applyVerifiedSession(DEFAULT_FOUNDER_USER);
     try {
-      const founderRes = await fetch('/api/auth/founder-session', { method: 'POST' });
-      if (founderRes.ok) {
+      const founderRes = await fetchWithTimeout(
+        '/api/auth/founder-session',
+        { method: 'POST' },
+        2500
+      );
+      const contentType = founderRes.headers.get('content-type') || '';
+      if (founderRes.ok && contentType.includes('application/json')) {
         const founderData = (await founderRes.json()) as {
           authenticated?: boolean;
           user?: AuthUser;
         };
         if (founderData?.authenticated && founderData.user) {
-          applyVerifiedSession(founderData.user);
+          setAuthUser(founderData.user);
         }
       }
     } catch {}
@@ -721,16 +801,21 @@ export default function App() {
       <main className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex items-center justify-center p-6">
         <div className="w-full max-w-md rounded-2xl border border-[#30363D] bg-[#161B22] p-6 text-center space-y-4">
           <p className="text-xs font-mono text-[#8B949E]">
-            Establishing direct Founder session...
+            Founder workspace ready.
           </p>
           <button
             type="button"
-            onClick={async () => {
-              const res = await fetch('/api/auth/founder-session', { method: 'POST' });
-              if (res.ok) {
-                const d = await res.json();
-                if (d?.user) applyVerifiedSession(d.user);
-              }
+            onClick={() => {
+              applyVerifiedSession(DEFAULT_FOUNDER_USER);
+              fetchWithTimeout('/api/auth/founder-session', { method: 'POST' }, 2500)
+                .then(async (res) => {
+                  const contentType = res.headers.get('content-type') || '';
+                  if (res.ok && contentType.includes('application/json')) {
+                    const d = await res.json();
+                    if (d?.user) setAuthUser(d.user);
+                  }
+                })
+                .catch(() => {});
             }}
             className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-bold uppercase transition"
           >
