@@ -229,9 +229,9 @@ function detectInputLanguage(text: string): 'en' | 'ur' | 'ar' {
   }
   return 'en';
 }
+const app = express();
 
 async function startServer() {
-  const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
 
@@ -1053,9 +1053,10 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  if (!process.env.VERCEL) {
+   app.Listen(PORT,'0.0.0.0', () => {
     console.log(`WORKCRAFT Local server listening on http://0.0.0.0:${PORT}`);
-  });
-}
-
-startServer();
+   });
+  }
+  startServer();
+  export default app;
