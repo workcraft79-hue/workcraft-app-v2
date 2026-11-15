@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { translateAndSynthesizeVoice } from '../server/voiceTranslator';
+import { translateAndSynthesizeVoice } from '../server/voiceTranslator.js';
 
 export const config = {
   runtime: 'nodejs',
