@@ -1,5 +1,6 @@
 import express from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
+import QRCode from 'qrcode';
 import {
   addChairLock,
   completeAppointmentAndRecordVisit,
@@ -19,12 +20,15 @@ import {
 } from './conciergeEngine.js';
 import {
   AuthenticatedRequest,
+  checkFounderPinAttemptAllowed,
+  clearFounderPinFailures,
   clearSessionCookie,
   consumeAgentInviteTokenAndRegisterAgent,
   createAgentInviteToken,
   extractAuthUserFromRequest,
   getFounderSessionUser,
   inspectAgentInviteToken,
+  recordFounderPinFailure,
   registerSalonAssignment,
   registerSalonOwnerAccount,
   requireAuth,
@@ -35,6 +39,7 @@ import {
   sanitizePlainText,
   setSessionCookie,
   signSessionToken,
+  verifyFounderPin,
 } from './security.js';
 import { resolveTargetLocale, translateAndSynthesizeVoice } from './voiceTranslator.js';
 import {
@@ -47,6 +52,22 @@ import {
   recordWhatsAppGatewayHeartbeat,
   sweepExpiredVoiceBlobs,
 } from './voiceInboxStore.js';
+import {
+  createCoAgentRecord,
+  getFinanceAndAgentSummary,
+  getFounderSettings,
+  issueFounderWebAuthnChallenge,
+  recordAgentCashCollection,
+  recordAgentCashRemittance,
+  recordCoAgentCashHandoff,
+  recordFounderBroadcastDispatch,
+  recordSalonFinancialPayment,
+  registerFounderBiometricCredential,
+  revokeAllFounderBiometrics,
+  rotateFounderPairingKey,
+  updateFounderReportPhone,
+  verifyFounderBiometricAssertion,
+} from './opsStore.js';
 
 const SALON_GLOSSARY: Array<[RegExp, string, string]> = [
   [/\bbeard oil treatment\b/i, 'داڑھی آئل ٹریٹمنٹ', 'علاج اللحية بالزيت'],
@@ -245,7 +266,8 @@ export function createApiApp(port = 3000): express.Express {
   });
 
   // ===========================================================================
-  // DIRECT 4-ROLE SESSION & INVITE MANAGEMENT (ZERO PIN WALLS · ZERO IP LIMITS)
+  // DIRECT 4-ROLE SESSION, FOUNDER PIN + MOBILE BIOMETRIC (WEBAUTHN)
+  // Zero PIN walls & zero IP rate limits for Salons, Agents, or End-Users
   // ===========================================================================
   app.get('/api/auth/session', (req, res) => {
     const user = extractAuthUserFromRequest(req);
@@ -255,13 +277,117 @@ export function createApiApp(port = 3000): express.Express {
     return res.json({ authenticated: true, user });
   });
 
-  // Direct persistent Founder session for Founder Command Center (root entry)
+  // Founder PIN Gate (WC3118) — isolated strictly to Founder Command Center access
   app.post('/api/auth/founder-session', (req, res) => {
+    const existing = extractAuthUserFromRequest(req);
+    if (existing?.userRole === 'FOUNDER') {
+      const token = signSessionToken(existing);
+      setSessionCookie(res, token, req);
+      return res.json({ authenticated: true, user: existing });
+    }
+
+    const clientKey = sanitizePlainText(
+      String(req.header('x-forwarded-for') || req.ip || 'founder-client').split(',')[0],
+      64
+    );
+    const attemptGate = checkFounderPinAttemptAllowed(clientKey);
+    if (!attemptGate.allowed) {
+      return res.status(429).json({
+        error: `Too many incorrect Founder PIN attempts. Wait ${attemptGate.retryAfterSec}s before trying again.`,
+      });
+    }
+
+    const pin = typeof req.body?.pin === 'string' ? req.body.pin : '';
+    if (!verifyFounderPin(pin)) {
+      recordFounderPinFailure(clientKey);
+      return res.status(401).json({
+        error: 'Invalid Founder PIN. Enter your 6-character Founder PIN (e.g., WC3118).',
+      });
+    }
+
+    clearFounderPinFailures(clientKey);
     const founder = getFounderSessionUser();
     const token = signSessionToken(founder);
     setSessionCookie(res, token, req);
     return res.json({ authenticated: true, user: founder });
   });
+
+  // WebAuthn Mobile Biometric Challenge (Thumb / Face ID)
+  app.post('/api/auth/founder-webauthn/challenge', (req: AuthenticatedRequest, res) => {
+    const purpose = req.body?.purpose === 'register' ? 'register' : 'login';
+    if (purpose === 'register') {
+      const user = extractAuthUserFromRequest(req);
+      if (!user || user.userRole !== 'FOUNDER') {
+        return res.status(401).json({ error: 'Sign in with Founder PIN first to register mobile biometrics.' });
+      }
+    }
+    const hostHeader = String(req.header('host') || 'localhost').split(':')[0].toLowerCase();
+    const { challenge, challengeToken } = issueFounderWebAuthnChallenge(purpose);
+    return res.json({
+      challenge,
+      challengeToken,
+      rpId: hostHeader,
+      rpName: 'WORKCRAFT Local',
+    });
+  });
+
+  // Register Mobile Biometric Credential (Requires active Founder PIN session)
+  app.post(
+    '/api/auth/founder-webauthn/register',
+    requireAuth,
+    requireRole('FOUNDER'),
+    (req, res) => {
+      const body = req.body || {};
+      const result = registerFounderBiometricCredential({
+        challengeToken: String(body.challengeToken || ''),
+        credentialId: String(body.credentialId || ''),
+        clientDataJSON: String(body.clientDataJSON || ''),
+        publicKeySpkiBase64:
+          typeof body.publicKeySpkiBase64 === 'string' ? body.publicKeySpkiBase64 : undefined,
+        authenticatorDataBase64:
+          typeof body.authenticatorDataBase64 === 'string' ? body.authenticatorDataBase64 : undefined,
+        deviceLabel: typeof body.deviceLabel === 'string' ? body.deviceLabel : undefined,
+      });
+      if (!result.ok) {
+        return res.status(400).json({ error: result.error });
+      }
+      return res.status(201).json(result);
+    }
+  );
+
+  // Login via Hardware Biometric Assertion (Thumb / Face ID)
+  app.post('/api/auth/founder-webauthn/verify', (req, res) => {
+    const body = req.body || {};
+    const verification = verifyFounderBiometricAssertion({
+      challengeToken: String(body.challengeToken || ''),
+      biometricBlob: String(body.biometricBlob || ''),
+      credentialId: String(body.credentialId || ''),
+      authenticatorData: String(body.authenticatorData || ''),
+      clientDataJSON: String(body.clientDataJSON || ''),
+      signature: String(body.signature || ''),
+    });
+    if (!verification.ok) {
+      return res.status(401).json({ error: verification.error });
+    }
+    const founder = getFounderSessionUser();
+    const token = signSessionToken(founder);
+    setSessionCookie(res, token, req);
+    return res.json({
+      authenticated: true,
+      user: founder,
+      deviceLabel: verification.deviceLabel,
+    });
+  });
+
+  // Revoke all previously registered Founder biometric credentials
+  app.post(
+    '/api/auth/founder-webauthn/revoke',
+    requireAuth,
+    requireRole('FOUNDER'),
+    (_req, res) => {
+      return res.json({ ok: true, ...revokeAllFounderBiometrics() });
+    }
+  );
 
   app.post('/api/auth/logout', (_req, res) => {
     clearSessionCookie(res);
@@ -543,7 +669,7 @@ export function createApiApp(port = 3000): express.Express {
     }
   });
 
-  app.post('/api/translate-voice', async (req, res) => {
+  app.post('/api/translate-voice', requireAuth, async (req, res) => {
     try {
       const rawText = sanitizePlainText(req.body?.text, 1000);
       const audioBase64 = typeof req.body?.audioBase64 === 'string' ? req.body.audioBase64.trim() : '';
@@ -587,86 +713,118 @@ export function createApiApp(port = 3000): express.Express {
   // ===========================================================================
   // UNIFIED VOICE INBOX, LIVE USAGE METER (7-DAY CLEANUP) & WHATSAPP HEARTBEAT
   // ===========================================================================
-  app.get('/api/voice/usage', (_req, res) => {
+  app.get('/api/voice/usage', requireAuth, (_req, res) => {
     sweepExpiredVoiceBlobs();
     return res.json(getLiveUsageMeter());
   });
 
-  app.get('/api/voice/threads', (req, res) => {
-    const authUser = extractAuthUserFromRequest(req);
-    const requestedSalonId =
-      typeof req.query.salonId === 'string' ? sanitizePlainText(req.query.salonId, 60) : undefined;
-    // Strict tenant isolation when logged in as SALON_OWNER
-    const salonFilter =
-      authUser?.userRole === 'SALON_OWNER' && authUser.salonId
-        ? authUser.salonId
-        : requestedSalonId;
-    return res.json(listVoiceThreads(salonFilter));
-  });
-
-  app.post('/api/voice/threads/message', (req, res) => {
-    try {
-      const authUser = extractAuthUserFromRequest(req);
-      const body = req.body || {};
-      const senderRole = body.senderRole === 'FOUNDER' ? 'FOUNDER' : 'SALON_OWNER';
-      if (senderRole === 'FOUNDER' && authUser && authUser.userRole !== 'FOUNDER') {
-        return res.status(403).json({ error: 'Only Founder can post Founder replies.' });
-      }
-
-      const threadId = typeof body.threadId === 'string' ? sanitizePlainText(body.threadId, 60) : undefined;
-      const salonId =
-        authUser?.userRole === 'SALON_OWNER' && authUser.salonId
-          ? authUser.salonId
-          : typeof body.salonId === 'string'
-          ? sanitizePlainText(body.salonId, 60)
-          : undefined;
-      const salonName = typeof body.salonName === 'string' ? sanitizePlainText(body.salonName, 100) : undefined;
-      const ownerName = typeof body.ownerName === 'string' ? sanitizePlainText(body.ownerName, 80) : undefined;
-      const city = typeof body.city === 'string' ? sanitizePlainText(body.city, 80) : undefined;
-      const targetLocale = resolveTargetLocale(
-        typeof body.targetLocale === 'string' ? body.targetLocale : undefined,
-        typeof body.targetDialect === 'string' ? body.targetDialect : undefined
-      );
-      const originalText = sanitizePlainText(body.originalText, 1000) || '(Compressed Opus Voice Note)';
-      const translatedText = sanitizePlainText(body.translatedText, 1200) || originalText;
-      const detectedInputLanguage = sanitizePlainText(body.detectedInputLanguage, 40) || 'Auto';
-      const voiceName = typeof body.voiceName === 'string' ? sanitizePlainText(body.voiceName, 60) : undefined;
-      const audioDataUrl =
-        typeof body.audioDataUrl === 'string' && body.audioDataUrl.startsWith('data:audio/')
-          ? body.audioDataUrl.slice(0, 2 * 1024 * 1024)
-          : undefined;
-      const sizeBytes = Number(body.sizeBytes || 0) || undefined;
-
-      const updated = appendVoiceMessage({
-        threadId,
-        salonId,
-        salonName,
-        ownerName,
-        city,
-        targetLocale,
-        senderRole,
-        originalText,
-        translatedText,
-        detectedInputLanguage,
-        voiceName,
-        audioDataUrl,
-        sizeBytes,
-      });
-
-      return res.status(201).json(updated);
-    } catch (err) {
-      console.error('Failed to append voice thread message:', err);
-      return res.status(500).json({ error: 'Could not save voice message.' });
+  app.get(
+    '/api/voice/threads',
+    requireAuth,
+    requireRole('FOUNDER', 'SALON_OWNER'),
+    (req: AuthenticatedRequest, res) => {
+      const authUser = req.authUser!;
+      const requestedSalonId =
+        typeof req.query.salonId === 'string' ? sanitizePlainText(req.query.salonId, 60) : undefined;
+      // Strict tenant isolation when logged in as SALON_OWNER
+      const salonFilter =
+        authUser.userRole === 'SALON_OWNER'
+          ? authUser.salonId || '__none__'
+          : requestedSalonId;
+      return res.json(listVoiceThreads(salonFilter));
     }
-  });
+  );
 
-  app.patch('/api/voice/threads/:threadId/read', (req, res) => {
-    const threadId = sanitizePlainText(req.params.threadId, 60);
-    const unread = Boolean(req.body?.unread);
-    return res.json(markVoiceThreadRead(threadId, unread));
-  });
+  app.post(
+    '/api/voice/threads/message',
+    requireAuth,
+    requireRole('FOUNDER', 'SALON_OWNER'),
+    (req: AuthenticatedRequest, res) => {
+      try {
+        const authUser = req.authUser!;
+        const body = req.body || {};
+        // Derive senderRole strictly from verified session cookie (prevents role spoofing)
+        const senderRole: 'FOUNDER' | 'SALON_OWNER' =
+          authUser.userRole === 'FOUNDER' ? 'FOUNDER' : 'SALON_OWNER';
 
-  app.get('/api/health/whatsapp', (_req, res) => {
+        const threadId =
+          typeof body.threadId === 'string' ? sanitizePlainText(body.threadId, 60) : undefined;
+        const salonId =
+          authUser.userRole === 'SALON_OWNER' && authUser.salonId
+            ? authUser.salonId
+            : typeof body.salonId === 'string'
+            ? sanitizePlainText(body.salonId, 60)
+            : undefined;
+        const salonName =
+          authUser.userRole === 'SALON_OWNER' && authUser.salonName
+            ? authUser.salonName
+            : typeof body.salonName === 'string'
+            ? sanitizePlainText(body.salonName, 100)
+            : undefined;
+        const ownerName =
+          authUser.userRole === 'SALON_OWNER'
+            ? authUser.displayName
+            : typeof body.ownerName === 'string'
+            ? sanitizePlainText(body.ownerName, 80)
+            : undefined;
+        const city = typeof body.city === 'string' ? sanitizePlainText(body.city, 80) : undefined;
+        const targetLocale = resolveTargetLocale(
+          typeof body.targetLocale === 'string' ? body.targetLocale : undefined,
+          typeof body.targetDialect === 'string' ? body.targetDialect : undefined
+        );
+        const originalText = sanitizePlainText(body.originalText, 1000) || '(Compressed Opus Voice Note)';
+        const translatedText = sanitizePlainText(body.translatedText, 1200) || originalText;
+        const detectedInputLanguage = sanitizePlainText(body.detectedInputLanguage, 40) || 'Auto';
+        const voiceName = typeof body.voiceName === 'string' ? sanitizePlainText(body.voiceName, 60) : undefined;
+        const audioDataUrl =
+          typeof body.audioDataUrl === 'string' && body.audioDataUrl.startsWith('data:audio/')
+            ? body.audioDataUrl.slice(0, 2 * 1024 * 1024)
+            : undefined;
+        const sizeBytes = Number(body.sizeBytes || 0) || undefined;
+
+        const updated = appendVoiceMessage({
+          threadId,
+          salonId,
+          salonName,
+          ownerName,
+          city,
+          targetLocale,
+          senderRole,
+          originalText,
+          translatedText,
+          detectedInputLanguage,
+          voiceName,
+          audioDataUrl,
+          sizeBytes,
+        });
+
+        return res.status(201).json(updated);
+      } catch (err) {
+        console.error('Failed to append voice thread message:', err);
+        return res.status(500).json({ error: 'Could not save voice message.' });
+      }
+    }
+  );
+
+  app.patch(
+    '/api/voice/threads/:threadId/read',
+    requireAuth,
+    requireRole('FOUNDER', 'SALON_OWNER'),
+    (req: AuthenticatedRequest, res) => {
+      const authUser = req.authUser!;
+      const threadId = sanitizePlainText(req.params.threadId, 60);
+      if (authUser.userRole === 'SALON_OWNER' && authUser.salonId) {
+        const ownThreads = listVoiceThreads(authUser.salonId).threads;
+        if (!ownThreads.some((t) => t.id === threadId)) {
+          return res.status(403).json({ error: 'Forbidden: cannot mark another salon thread.' });
+        }
+      }
+      const unread = Boolean(req.body?.unread);
+      return res.json(markVoiceThreadRead(threadId, unread));
+    }
+  );
+
+  app.get('/api/health/whatsapp', requireAuth, (_req, res) => {
     return res.json(getWhatsAppHeartbeatStatus());
   });
 
@@ -674,6 +832,180 @@ export function createApiApp(port = 3000): express.Express {
     const ok = req.body?.ok !== false;
     const reason = typeof req.body?.reason === 'string' ? sanitizePlainText(req.body.reason, 180) : undefined;
     return res.json(recordWhatsAppGatewayHeartbeat(ok, reason));
+  });
+
+  // ===========================================================================
+  // PERSISTENT FINANCE LEDGER, AGENT CASH, CO-AGENT SPLITS, SETTINGS & QR
+  // ===========================================================================
+  app.get(
+    '/api/finance/summary',
+    requireAuth,
+    requireRole('FOUNDER', 'AGENT'),
+    (req: AuthenticatedRequest, res) => {
+      const agentId = req.authUser?.agentId || 'agent-pk-1';
+      return res.json(getFinanceAndAgentSummary(agentId));
+    }
+  );
+
+  app.post(
+    '/api/agent/cash/collect',
+    requireAuth,
+    requireRole('FOUNDER', 'AGENT'),
+    (req: AuthenticatedRequest, res) => {
+      const agentId = req.authUser?.agentId || 'agent-pk-1';
+      const amount = Number(req.body?.amount || 0);
+      const salonName = sanitizePlainText(req.body?.salonName, 100) || 'Partner Salon';
+      const tid = sanitizePlainText(req.body?.tid, 60) || `CASH-${Date.now()}`;
+      const proofHash = sanitizePlainText(req.body?.proofHash, 80) || 'sha256:biometric';
+      const coAgentId =
+        typeof req.body?.coAgentId === 'string' && req.body.coAgentId.trim()
+          ? sanitizePlainText(req.body.coAgentId, 60)
+          : undefined;
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ error: 'Valid positive collection amount is required.' });
+      }
+      return res.status(201).json(
+        recordAgentCashCollection({ agentId, salonName, amount, tid, proofHash, coAgentId })
+      );
+    }
+  );
+
+  app.post(
+    '/api/agent/cash/remit',
+    requireAuth,
+    requireRole('FOUNDER', 'AGENT'),
+    (req: AuthenticatedRequest, res) => {
+      const agentId = req.authUser?.agentId || 'agent-pk-1';
+      const tid = sanitizePlainText(req.body?.tid, 80);
+      const amount = Number(req.body?.amount || 0) || undefined;
+      if (!tid) {
+        return res.status(400).json({ error: 'Bank / Deposit TID reference is required.' });
+      }
+      return res.json(recordAgentCashRemittance({ agentId, tid, amount }));
+    }
+  );
+
+  app.get(
+    '/api/agent/co-agents',
+    requireAuth,
+    requireRole('FOUNDER', 'AGENT'),
+    (req: AuthenticatedRequest, res) => {
+      const agentId = req.authUser?.agentId || 'agent-pk-1';
+      return res.json({ coAgents: getFinanceAndAgentSummary(agentId).coAgents });
+    }
+  );
+
+  app.post(
+    '/api/agent/co-agents',
+    requireAuth,
+    requireRole('FOUNDER', 'AGENT'),
+    (req: AuthenticatedRequest, res) => {
+      const leadAgentId = req.authUser?.agentId || 'agent-pk-1';
+      const leadAgentName = req.authUser?.displayName || 'Lead Field Agent';
+      const name = sanitizePlainText(req.body?.name, 80);
+      const phone = sanitizePhone(req.body?.phone);
+      const city = sanitizePlainText(req.body?.city, 100) || 'Assigned Territory';
+      const splitPct = Number(req.body?.splitPctOfAgentShare || 50);
+      if (!name || !phone) {
+        return res.status(400).json({ error: 'Co-Agent name and WhatsApp phone are required.' });
+      }
+      const created = createCoAgentRecord({
+        leadAgentId,
+        leadAgentName,
+        name,
+        phone,
+        city,
+        splitPctOfAgentShare: splitPct,
+      });
+      return res.status(201).json({ coAgent: created });
+    }
+  );
+
+  app.post(
+    '/api/agent/co-agents/:coAgentId/handoff',
+    requireAuth,
+    requireRole('FOUNDER', 'AGENT'),
+    (req: AuthenticatedRequest, res) => {
+      const leadAgentId = req.authUser?.agentId || 'agent-pk-1';
+      const coAgentId = sanitizePlainText(req.params.coAgentId, 60);
+      const referenceTid = sanitizePlainText(req.body?.referenceTid, 60) || `HO-${Date.now()}`;
+      const outcome = recordCoAgentCashHandoff({ leadAgentId, coAgentId, referenceTid });
+      if (!outcome) {
+        return res.status(404).json({ error: 'Co-Agent record not found.' });
+      }
+      return res.json(outcome);
+    }
+  );
+
+  app.get('/api/founder/settings', requireAuth, requireRole('FOUNDER'), (_req, res) => {
+    return res.json(getFounderSettings());
+  });
+
+  app.put('/api/founder/settings/report-phone', requireAuth, requireRole('FOUNDER'), (req, res) => {
+    const phone = typeof req.body?.phone === 'string' ? req.body.phone : '';
+    const updated = updateFounderReportPhone(phone);
+    if (!updated) {
+      return res.status(400).json({ error: 'Valid report phone number is required.' });
+    }
+    return res.json(updated);
+  });
+
+  app.post('/api/founder/broadcast', requireAuth, requireRole('FOUNDER'), (req, res) => {
+    const title = sanitizePlainText(req.body?.title, 160);
+    const messageEn = sanitizePlainText(req.body?.messageEn, 800);
+    const regionFilter = sanitizePlainText(req.body?.regionFilter, 20) || 'ALL';
+    const tierFilter = sanitizePlainText(req.body?.tierFilter, 20) || 'ALL';
+    const recipientCount = Number(req.body?.recipientCount || 24);
+    if (!title || !messageEn) {
+      return res.status(400).json({ error: 'Broadcast title and message are required.' });
+    }
+    const entry = recordFounderBroadcastDispatch({
+      title,
+      messageEn,
+      regionFilter,
+      tierFilter,
+      recipientCount,
+    });
+    return res.status(201).json({ entry });
+  });
+
+  app.get('/api/founder/pairing-qr', requireAuth, requireRole('FOUNDER'), async (req, res) => {
+    try {
+      const rotate = req.query.rotate === '1';
+      const settings = rotate ? rotateFounderPairingKey() : getFounderSettings();
+      const host = String(req.header('host') || 'workcraft-app.vercel.app');
+      const proto = req.header('x-forwarded-proto') || (req.secure ? 'https' : 'http');
+      const qrPayload = `${proto}://${host}/?pair_key=${encodeURIComponent(settings.pairingKey)}`;
+      const qrDataUrl = await QRCode.toDataURL(qrPayload, {
+        width: 240,
+        margin: 1,
+        color: { dark: '#0D1117', light: '#FFFFFF' },
+      });
+      return res.json({
+        pairingKey: settings.pairingKey,
+        pairingUpdatedAt: settings.pairingUpdatedAt,
+        qrPayload,
+        qrDataUrl,
+      });
+    } catch {
+      return res.status(500).json({ error: 'Could not generate pairing QR.' });
+    }
+  });
+
+  // Scheduled Daily Autonomous Cron Handler (Vercel Cron Authorization or Webhook Secret)
+  app.get('/api/cron/daily-maintenance', (req, res) => {
+    const cronSecret = (process.env.CRON_SECRET || '').trim();
+    const authHeader = req.header('authorization') || '';
+    const webhookHeader = req.header('x-workcraft-webhook-secret') || '';
+    const validCron =
+      (cronSecret && authHeader === `Bearer ${cronSecret}`) ||
+      (process.env.WORKCRAFT_WEBHOOK_SECRET &&
+        webhookHeader === process.env.WORKCRAFT_WEBHOOK_SECRET);
+    if (process.env.VERCEL && !validCron && (cronSecret || process.env.WORKCRAFT_WEBHOOK_SECRET)) {
+      return res.status(401).json({ error: 'Unauthorized cron trigger.' });
+    }
+    const usage = sweepExpiredVoiceBlobs();
+    return res.json({ ok: true, sweptAt: usage.lastCleanupAt, purgedClipCount: usage.purgedCount });
   });
 
   // ===========================================================================
@@ -1027,6 +1359,73 @@ export function createApiApp(port = 3000): express.Express {
       } catch (err) {
         console.error('Counter sleep toggle error:', err);
         return res.status(500).json({ error: 'Failed to update counter sleep state.' });
+      }
+    }
+  );
+
+  // Persistent Salon Owner Maintenance Settlement & Zero-Loss Package Upgrade
+  app.post(
+    '/api/salons/:salonId/payments/maintenance',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const body = req.body || {};
+        const amount = Number(body.amount || 0);
+        const currency = sanitizePlainText(body.currency, 8) || 'PKR';
+        const method = sanitizePlainText(body.method, 80) || 'EasyPaisa Webhook';
+        const referenceTid = sanitizePlainText(body.tid, 80) || `EP-${Date.now()}`;
+        const current = getSalonConciergeState(salonId);
+        const entry = recordSalonFinancialPayment({
+          type: 'MAINT_PAYMENT',
+          salonId,
+          salonName: sanitizePlainText(body.salonName, 100) || current.settings.salonName,
+          amount,
+          currency,
+          method,
+          referenceTid,
+          note: `10% maintenance settled (${referenceTid})`,
+        });
+        const state = setSalonBillingStatus(salonId, 'ACTIVE');
+        return res.status(201).json({ entry, state });
+      } catch (err) {
+        console.error('Maintenance payment route error:', err);
+        return res.status(500).json({ error: 'Failed to record maintenance payment.' });
+      }
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/payments/upgrade',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const body = req.body || {};
+        const rawTier = sanitizePlainText(body.packageTier, 20).toUpperCase();
+        const packageTier: 'STARTER' | 'PRO' | 'PRO++' =
+          rawTier === 'STARTER' ? 'STARTER' : rawTier === 'PRO' || rawTier === 'GROWTH' ? 'PRO' : 'PRO++';
+        const differenceAmount = Number(body.differenceAmount || 0);
+        const currency = sanitizePlainText(body.currency, 8) || 'PKR';
+        const method = sanitizePlainText(body.method, 80) || 'Digital Settlement';
+        const referenceTid = sanitizePlainText(body.tid, 80) || `UP-${Date.now()}`;
+        const updatedSettings = updateRetentionSettings(salonId, { packageTier });
+        const entry = recordSalonFinancialPayment({
+          type: 'PACKAGE_UPGRADE',
+          salonId,
+          salonName: sanitizePlainText(body.salonName, 100) || updatedSettings.settings.salonName,
+          amount: differenceAmount,
+          currency,
+          method,
+          referenceTid,
+          note: `Zero-loss upgrade to ${packageTier} (difference paid: ${currency} ${differenceAmount})`,
+        });
+        return res.status(201).json({ entry, state: updatedSettings });
+      } catch (err) {
+        console.error('Package upgrade route error:', err);
+        return res.status(500).json({ error: 'Failed to persist package upgrade.' });
       }
     }
   );
