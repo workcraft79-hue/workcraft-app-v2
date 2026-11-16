@@ -6,6 +6,12 @@
       "includeFiles": "server/**"
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/daily-maintenance",
+      "schedule": "0 4 * * *"
+    }
+  ],
   "rewrites": [
     { "source": "/api/translate-voice", "destination": "/api/translate-voice" },
     { "source": "/api/(.*)", "destination": "/api/index" },
