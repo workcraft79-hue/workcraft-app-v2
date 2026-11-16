@@ -41,20 +41,17 @@ import { FieldAgentHub, OnboardedSalonPayload } from './components/FieldAgentHub
 import { SalonOwnerDashboard } from './components/SalonOwnerDashboard';
 import { SilentSelfHealingBoundary } from './components/SilentSelfHealingBoundary';
 import {
+  FounderBiometricEnrollPrompt,
+  FounderUnlockGate,
+  detectMobileFounderDevice,
+  loadStoredFounderBiometric,
+  supportsPlatformBiometric,
+} from './components/FounderUnlockGate';
+import {
   FinancialReportModal,
   PaymentRoutingModal,
   NotificationsDrawer,
 } from './components/Modals';
-
-const DEFAULT_FOUNDER_USER: AuthUser = {
-  userId: 'usr-founder-1',
-  userRole: 'FOUNDER',
-  displayName: 'Farhan Abid',
-  email: 'farhanabidraja1979@gmail.com',
-  phone: '+92 300 0000001',
-  salonId: null,
-  agentId: null,
-};
 
 const SOCIAL_CAMPAIGN_SOURCE_MAP: Record<string, string> = {
   fb: 'Facebook Ads Campaign',
@@ -136,15 +133,10 @@ export default function App() {
       !initialRoute.sessionOnboardingLocked
   );
 
-  // Verified Session State: Immediately initialized to Founder on standard root load; non-blocking server sync runs in background
-  const [authUser, setAuthUser] = useState<AuthUser | null>(() =>
-    initialRoute.isAgentInviteRoute || shouldStartPublicOnboarding
-      ? null
-      : DEFAULT_FOUNDER_USER
-  );
-  const [isCheckingSession, setIsCheckingSession] = useState<boolean>(
-    () => initialRoute.isAgentInviteRoute
-  );
+  // Verified Session State: Always starts unauthenticated and verifies server session (zero auto-bypass for Founder)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [isCheckingSession, setIsCheckingSession] = useState<boolean>(true);
+  const [showMobileBiometricPrompt, setShowMobileBiometricPrompt] = useState(false);
   const [initialEnrollAgentData, setInitialEnrollAgentData] = useState<{
     id?: string;
     name?: string;
@@ -253,7 +245,7 @@ export default function App() {
         }
       }
 
-      // Non-blocking background sync with /api/auth/session (fallback stays safely in client Founder state on static hosts)
+      // Check existing verified session cookie (Founder, Agent, or Salon Owner)
       let existingUser: AuthUser | null = null;
       try {
         const sessionRes = await fetchWithTimeout('/api/auth/session', undefined, 3000);
@@ -268,7 +260,7 @@ export default function App() {
           }
         }
       } catch {
-        // Non-blocking fallback: static deployments (e.g. Vercel SPA) continue cleanly in client state
+        // Offline or unreachable server: leaves unauthenticated gate cleanly
       }
       if (cancelled) return;
 
@@ -281,39 +273,9 @@ export default function App() {
       }
 
       if (existingUser) {
-        if (existingUser.userRole !== 'FOUNDER') {
-          applyVerifiedSession(existingUser);
-        } else {
-          setAuthUser(existingUser);
-        }
-        setIsCheckingSession(false);
-        return;
+        applyVerifiedSession(existingUser);
       }
-
-      // Background cookie mint for full-stack servers; never blocks client UI if unavailable or timed out
-      try {
-        const founderRes = await fetchWithTimeout(
-          '/api/auth/founder-session',
-          { method: 'POST' },
-          3000
-        );
-        const contentType = founderRes.headers.get('content-type') || '';
-        if (founderRes.ok && contentType.includes('application/json')) {
-          const founderData = (await founderRes.json()) as {
-            authenticated?: boolean;
-            user?: AuthUser | null;
-          };
-          if (!cancelled && founderData?.authenticated && founderData.user) {
-            setAuthUser(founderData.user);
-          }
-        }
-      } catch {
-        // Non-blocking fallback: client DEFAULT_FOUNDER_USER remains active
-      } finally {
-        if (!cancelled) {
-          setIsCheckingSession(false);
-        }
-      }
+      setIsCheckingSession(false);
     };
 
     void boot();
@@ -418,6 +380,7 @@ export default function App() {
     } catch {}
     setFounderPreviewMode('NONE');
     setIsSidebarOpen(false);
+    setShowMobileBiometricPrompt(false);
     setInspectSalonName(undefined);
     setOnboardedSalonName(undefined);
     setCompletedOnboardingData(null);
@@ -432,24 +395,9 @@ export default function App() {
       return;
     }
 
-    applyVerifiedSession(DEFAULT_FOUNDER_USER);
-    try {
-      const founderRes = await fetchWithTimeout(
-        '/api/auth/founder-session',
-        { method: 'POST' },
-        2500
-      );
-      const contentType = founderRes.headers.get('content-type') || '';
-      if (founderRes.ok && contentType.includes('application/json')) {
-        const founderData = (await founderRes.json()) as {
-          authenticated?: boolean;
-          user?: AuthUser;
-        };
-        if (founderData?.authenticated && founderData.user) {
-          setAuthUser(founderData.user);
-        }
-      }
-    } catch {}
+    setAuthUser(null);
+    setActiveRole('FOUNDER');
+    setActiveTab('Overview');
   };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -472,6 +420,10 @@ export default function App() {
   const [isCountryPauseOpen, setIsCountryPauseOpen] = useState(false);
   const [whatsAppHealth, setWhatsAppHealth] = useState<'HEALTHY' | 'ISSUE'>('HEALTHY');
   const [isPairingModalOpen, setIsPairingModalOpen] = useState(false);
+  const [pairingModalQr, setPairingModalQr] = useState<{
+    pairingKey: string;
+    qrDataUrl: string | null;
+  }>({ pairingKey: 'WC-7892-SYS', qrDataUrl: null });
   const [isPaymentPaid, setIsPaymentPaid] = useState(false);
   const [detailSheet, setDetailSheet] = useState<string | null>(null);
 
@@ -521,14 +473,39 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (isCheckingSession) return;
+    if (isCheckingSession || !authUser) return;
     void refreshVoiceAndUsage();
+    if (authUser.userRole === 'FOUNDER' || authUser.userRole === 'AGENT') {
+      fetch('/api/finance/summary')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { cashHeld?: number } | null) => {
+          if (typeof data?.cashHeld === 'number') {
+            setKamranCashHeld(data.cashHeld);
+          }
+        })
+        .catch(() => {});
+    }
     if (activeRole !== 'FOUNDER') return;
     const interval = window.setInterval(() => {
       void refreshVoiceAndUsage();
     }, 30000);
     return () => window.clearInterval(interval);
-  }, [isCheckingSession, activeRole, refreshVoiceAndUsage]);
+  }, [isCheckingSession, authUser, activeRole, refreshVoiceAndUsage]);
+
+  useEffect(() => {
+    if (!isPairingModalOpen) return;
+    fetch('/api/founder/pairing-qr')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { pairingKey?: string; qrDataUrl?: string } | null) => {
+        if (data?.pairingKey) {
+          setPairingModalQr({
+            pairingKey: data.pairingKey,
+            qrDataUrl: data.qrDataUrl || null,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [isPairingModalOpen]);
 
   const handleLaunchFounderPreview = (mode: 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE') => {
     if (authUser?.userRole !== 'FOUNDER') return;
@@ -858,31 +835,21 @@ export default function App() {
     }
 
     return (
-      <main className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-[#30363D] bg-[#161B22] p-6 text-center space-y-4">
-          <p className="text-xs font-mono text-[#8B949E]">
-            Founder workspace ready.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              applyVerifiedSession(DEFAULT_FOUNDER_USER);
-              fetchWithTimeout('/api/auth/founder-session', { method: 'POST' }, 2500)
-                .then(async (res) => {
-                  const contentType = res.headers.get('content-type') || '';
-                  if (res.ok && contentType.includes('application/json')) {
-                    const d = await res.json();
-                    if (d?.user) setAuthUser(d.user);
-                  }
-                })
-                .catch(() => {});
-            }}
-            className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-bold uppercase transition"
-          >
-            Open Founder Command Center
-          </button>
-        </div>
-      </main>
+      <FounderUnlockGate
+        onUnlocked={(user, unlockedVia) => {
+          applyVerifiedSession(user);
+          if (
+            unlockedVia === 'PIN' &&
+            detectMobileFounderDevice() &&
+            supportsPlatformBiometric() &&
+            !loadStoredFounderBiometric()
+          ) {
+            setShowMobileBiometricPrompt(true);
+          } else {
+            setShowMobileBiometricPrompt(false);
+          }
+        }}
+      />
     );
   }
 
@@ -1072,7 +1039,7 @@ export default function App() {
         {/* Main Application Body */}
         <section className="min-w-0 flex-1 flex flex-col pb-32 lg:pb-10">
           {/* Top Bar Header with WORKCRAFT Watermark + DASHBOARD */}
-          <header className="sticky top-0 z-30 grid h-[72px] grid-cols-[auto_1fr_auto] items-center border-b border-[#30363D] bg-[#0D1117]/95 backdrop-blur-md px-4 sm:px-7 gap-3">
+          <header className="sticky top-0 z-30 grid min-h-[72px] pt-safe grid-cols-[auto_1fr_auto] items-center border-b border-[#30363D] bg-[#0D1117]/95 backdrop-blur-md px-4 sm:px-7 gap-3">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setIsSidebarOpen(true)}
@@ -1254,6 +1221,15 @@ export default function App() {
 
           {/* Body Content Container */}
           <div className="mx-auto max-w-[1440px] w-full p-4 sm:p-7 pb-28 lg:pb-10 flex-1 overflow-x-hidden">
+            {showMobileBiometricPrompt && authUser.userRole === 'FOUNDER' && (
+              <FounderBiometricEnrollPrompt
+                onEnrolled={() => {
+                  setShowMobileBiometricPrompt(false);
+                  showToast('✓ Mobile Biometric saved! Future mobile logins offer both PIN & Biometric.');
+                }}
+                onDismiss={() => setShowMobileBiometricPrompt(false)}
+              />
+            )}
             {/* View Mode Header & Status Bar (Kept compact for onboarded Salon Owners so Top Status Strip leads immediately) */}
             {!(activeRole === 'SALON_OWNER' && hasCompletedSalonOnboarding) && (
               <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -1436,6 +1412,7 @@ export default function App() {
                     go={handleTabChange}
                     setPaymentRouting={setPaymentRoutingMethod}
                     usageMeter={usageMeter}
+                    kamranCashHeld={kamranCashHeld}
                     onRefreshUsage={refreshVoiceAndUsage}
                     onInspectSalon={handleInspectSalon}
                     onLaunchFounderPreview={handleLaunchFounderPreview}
@@ -1450,7 +1427,7 @@ export default function App() {
 
       {/* Floating Bottom Navigation Bar for Mobile */}
       <nav
-        className="fixed inset-x-3 bottom-3 z-40 flex items-center justify-around rounded-2xl border border-[#30363D] bg-[#161B22]/95 p-1.5 backdrop-blur-md lg:hidden"
+        className="fixed inset-x-3 bottom-3 z-40 safe-bottom-nav flex items-center justify-around rounded-2xl border border-[#30363D] bg-[#161B22]/95 p-1.5 backdrop-blur-md lg:hidden"
         aria-label="Quick navigation"
       >
         {activeRole === 'SALON_OWNER' && hasCompletedSalonOnboarding ? (
@@ -1532,6 +1509,7 @@ export default function App() {
         onClose={() => setIsReportModalOpen(false)}
         usageMeter={usageMeter}
         unreadVoiceCount={unreadVoiceCount}
+        kamranCashHeld={kamranCashHeld}
       />
 
       <PaymentRoutingModal
@@ -1598,25 +1576,18 @@ export default function App() {
               </button>
             </div>
 
-            <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-5 text-[#0D1117] border border-[#30363D]">
-              <svg viewBox="0 0 100 100" className="w-full h-full text-slate-950">
-                <rect x="5" y="5" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="4" rx="2" />
-                <rect x="11" y="11" width="12" height="12" fill="currentColor" rx="1" />
-                <rect x="71" y="5" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="4" rx="2" />
-                <rect x="77" y="11" width="12" height="12" fill="currentColor" rx="1" />
-                <rect x="5" y="71" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="4" rx="2" />
-                <rect x="11" y="77" width="12" height="12" fill="currentColor" rx="1" />
-                <circle cx="36" cy="17" r="3" fill="currentColor" />
-                <circle cx="50" cy="17" r="3" fill="currentColor" />
-                <circle cx="64" cy="17" r="3" fill="currentColor" />
-                <circle cx="20" cy="50" r="3" fill="currentColor" />
-                <circle cx="50" cy="50" r="3" fill="currentColor" />
-                <circle cx="80" cy="50" r="3" fill="currentColor" />
-                <circle cx="36" cy="83" r="3" fill="currentColor" />
-                <circle cx="50" cy="83" r="3" fill="currentColor" />
-                <circle cx="64" cy="83" r="3" fill="currentColor" />
-                <rect x="42" y="42" width="16" height="16" fill="#D29922" rx="2" />
-              </svg>
+            <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-3 text-[#0D1117] border border-[#30363D]">
+              {pairingModalQr.qrDataUrl ? (
+                <img
+                  src={pairingModalQr.qrDataUrl}
+                  alt="WorkCraft WhatsApp Pairing QR"
+                  className="w-full h-full object-contain rounded-lg"
+                />
+              ) : (
+                <div className="text-center font-mono text-xs text-slate-700 p-4">
+                  Generating Live QR...
+                </div>
+              )}
             </div>
 
             <div className="space-y-1 font-mono">
@@ -1624,7 +1595,7 @@ export default function App() {
                 Scan via WhatsApp ➔ Linked Devices ➔ Link a Device
               </p>
               <p className="text-[11px] text-cyan-400 break-all [overflow-wrap:break-word]">
-                Alternative Alphanumeric Key: <strong className="break-all">WC-7892-SYS</strong>
+                Alternative Alphanumeric Key: <strong className="break-all">{pairingModalQr.pairingKey}</strong>
               </p>
               <p className="text-[10px] text-[#6E7681]">
                 Central SIM Protection Active · Instant Connection
