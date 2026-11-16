@@ -1280,15 +1280,27 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       }
     };
     void syncThread();
+    const pollTimer = window.setInterval(() => {
+      void syncThread();
+    }, 20000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void syncThread();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       cancelled = true;
+      window.clearInterval(pollTimer);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [activeVoiceSalonId]);
 
+  const normalizedActiveSalonKey = activeVoiceSalonId.replace(/^salon-/, '').toLowerCase();
   const activeFounderVoiceThread: VoiceThreadItem =
     salonVoiceThreads.find(
       (t) =>
-        t.salonId === activeVoiceSalonId ||
+        t.salonId.replace(/^salon-/, '').toLowerCase() === normalizedActiveSalonKey ||
         t.salonName.trim().toLowerCase() === currentSalon.name.trim().toLowerCase()
     ) || {
       id: `wc-${activeVoiceSalonId}`,
