@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Archive,
   CreditCard,
@@ -19,6 +19,8 @@ import {
   Scissors,
   Send,
   UsersRound,
+  Fingerprint,
+  RefreshCw,
 } from 'lucide-react';
 import { TabName } from '../types/workcraft';
 import {
@@ -29,16 +31,26 @@ import {
   type LiveUsageMeter,
 } from '../data/portalData';
 import { PortalCard } from './PortalCard';
+import {
+  clearStoredFounderBiometric,
+  detectMobileFounderDevice,
+  enrollFounderBiometricDevice,
+  loadStoredFounderBiometric,
+  supportsPlatformBiometric,
+  type StoredFounderBiometric,
+} from './FounderUnlockGate';
 
 interface TabsSectionProps {
   active: TabName;
   go: (tab: TabName) => void;
   setPaymentRouting: (method: string) => void;
   usageMeter?: LiveUsageMeter;
+  kamranCashHeld?: number;
   onRefreshUsage?: () => void;
   onInspectSalon?: (salonName: string) => void;
   onLaunchFounderPreview?: (mode: 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE') => void;
   onTestSocialLaunch?: (source: 'Facebook' | 'Instagram' | 'TikTok' | 'WhatsApp') => void;
+  onBiometricUpdated?: () => void;
 }
 
 export const TabsSection: React.FC<TabsSectionProps> = ({
@@ -46,17 +58,38 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
   go,
   setPaymentRouting,
   usageMeter = DEFAULT_USAGE_METER,
+  kamranCashHeld = 25000,
   onRefreshUsage,
   onInspectSalon,
   onLaunchFounderPreview,
   onTestSocialLaunch,
+  onBiometricUpdated,
 }) => {
+  const portalOrigin =
+    typeof window !== 'undefined' ? window.location.origin : 'https://workcraft-app.vercel.app';
+
   // Contact search state (Query 3)
   const [clientSearch, setClientSearch] = useState('');
 
   // Founder alert report phone state (Query 4)
   const [founderAlertPhone, setFounderAlertPhone] = useState('+92 321 0000000');
   const [savedPhoneToast, setSavedPhoneToast] = useState(false);
+
+  // Pairing QR State
+  const [pairingQrData, setPairingQrData] = useState<{
+    pairingKey: string;
+    qrDataUrl: string | null;
+  }>({ pairingKey: 'WC-7892-SYS', qrDataUrl: null });
+  const [isLoadingPairingQr, setIsLoadingPairingQr] = useState(false);
+
+  // Founder Mobile Biometric Management State
+  const isMobileDevice = React.useMemo(() => detectMobileFounderDevice(), []);
+  const canBiometric = React.useMemo(() => supportsPlatformBiometric(), []);
+  const [savedBiometric, setSavedBiometric] = useState<StoredFounderBiometric | null>(() =>
+    loadStoredFounderBiometric()
+  );
+  const [biometricStatusMsg, setBiometricStatusMsg] = useState<string | null>(null);
+  const [isProcessingBiometric, setIsProcessingBiometric] = useState(false);
 
   // Founder Social Campaign Link Copy & Custom Generator State
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
@@ -78,6 +111,35 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
     tierLabel: string;
     time: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (active === 'Settings') {
+      setSavedBiometric(loadStoredFounderBiometric());
+      fetch('/api/founder/settings')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { reportPhone?: string; pairingKey?: string } | null) => {
+          if (data?.reportPhone) setFounderAlertPhone(data.reportPhone);
+          if (data?.pairingKey) {
+            setPairingQrData((prev) => ({ ...prev, pairingKey: data.pairingKey! }));
+          }
+        })
+        .catch(() => {});
+    } else if (active === 'Pairing') {
+      setIsLoadingPairingQr(true);
+      fetch('/api/founder/pairing-qr')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { pairingKey?: string; qrDataUrl?: string } | null) => {
+          if (data?.pairingKey) {
+            setPairingQrData({
+              pairingKey: data.pairingKey,
+              qrDataUrl: data.qrDataUrl || null,
+            });
+          }
+        })
+        .catch(() => {})
+        .finally(() => setIsLoadingPairingQr(false));
+    }
+  }, [active]);
 
   const handleCopyLink = (id: string, url: string, label: string) => {
     try {
@@ -482,7 +544,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     </div>
                     <button
                       onClick={() => go('Pairing')}
-                      className="min-h-[36px] px-2 text-[10px] font-mono font-bold text-[#06B6D4] hover:underline shrink-0"
+                      className="min-h-[44px] px-3 text-xs font-mono font-bold text-[#06B6D4] hover:underline shrink-0"
                     >
                       Reactivate
                     </button>
@@ -520,7 +582,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                   In-Hand Cash Held (Kamran)
                 </p>
                 <p className="mt-2 text-2xl font-bold font-mono text-[#D29922]">
-                  PKR 25,000
+                  PKR {kamranCashHeld.toLocaleString()}
                 </p>
                 <div className="mt-2 flex items-center justify-between">
                   <span className="text-[10px] font-mono text-[#8B949E]">Target: 40h Handover</span>
@@ -653,31 +715,50 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
         {/* 3. Pairing Tab */}
         {active === 'Pairing' && (
           <div className="space-y-4">
-            <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-5 text-[#0D1117] border-2 border-[#06B6D4]">
-              <svg viewBox="0 0 100 100" className="w-full h-full text-slate-900">
-                <rect x="5" y="5" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="3" rx="2" />
-                <rect x="10" y="10" width="12" height="12" fill="currentColor" rx="1" />
-                <rect x="73" y="5" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="3" rx="2" />
-                <rect x="78" y="10" width="12" height="12" fill="currentColor" rx="1" />
-                <rect x="5" y="73" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="3" rx="2" />
-                <rect x="10" y="78" width="12" height="12" fill="currentColor" rx="1" />
-                <circle cx="34" cy="12" r="2.5" fill="currentColor" />
-                <circle cx="50" cy="12" r="2.5" fill="currentColor" />
-                <circle cx="66" cy="12" r="2.5" fill="currentColor" />
-                <circle cx="12" cy="34" r="2.5" fill="currentColor" />
-                <circle cx="12" cy="50" r="2.5" fill="currentColor" />
-                <circle cx="12" cy="66" r="2.5" fill="currentColor" />
-                <rect x="42" y="42" width="16" height="16" fill="#D29922" rx="2" />
-              </svg>
+            <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-3 text-[#0D1117] border-2 border-[#06B6D4]">
+              {pairingQrData.qrDataUrl ? (
+                <img
+                  src={pairingQrData.qrDataUrl}
+                  alt="WorkCraft WhatsApp Device Pairing QR"
+                  className="w-full h-full object-contain rounded-lg"
+                />
+              ) : (
+                <div className="text-center font-mono text-xs text-slate-700 p-4">
+                  {isLoadingPairingQr ? 'Generating Live QR...' : 'QR Ready'}
+                </div>
+              )}
             </div>
 
-            <div className="text-center space-y-1">
+            <div className="text-center space-y-2">
               <p className="text-xs font-mono font-bold text-[#F0F6FC]">
                 Scan with WhatsApp on Salon Terminal
               </p>
               <p className="text-[11px] font-mono text-[#3FB950]">
-                Active Alphanumeric Pairing Key: <span className="text-[#06B6D4] font-bold">WC-7892-SYS</span>
+                Active Alphanumeric Pairing Key:{' '}
+                <span className="text-[#06B6D4] font-bold">{pairingQrData.pairingKey}</span>
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsLoadingPairingQr(true);
+                  fetch('/api/founder/pairing-qr?rotate=1')
+                    .then((res) => (res.ok ? res.json() : null))
+                    .then((data: { pairingKey?: string; qrDataUrl?: string } | null) => {
+                      if (data?.pairingKey) {
+                        setPairingQrData({
+                          pairingKey: data.pairingKey,
+                          qrDataUrl: data.qrDataUrl || null,
+                        });
+                      }
+                    })
+                    .catch(() => {})
+                    .finally(() => setIsLoadingPairingQr(false));
+                }}
+                className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-4 py-2 text-xs font-mono font-bold text-[#06B6D4] transition"
+              >
+                <RefreshCw className={`size-3.5 ${isLoadingPairingQr ? 'animate-spin' : ''}`} />
+                <span>Rotate Live Pairing QR</span>
+              </button>
             </div>
 
             <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 text-xs text-[#8B949E] text-center space-y-1 font-mono">
@@ -797,7 +878,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                       setBroadcastMessageEn(tpl.msg);
                       setBroadcastDispatchedReceipt(null);
                     }}
-                    className="min-h-[34px] rounded-lg border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] px-3 py-1 text-[11px] font-mono font-bold text-[#D29922] transition"
+                    className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] px-3 py-1.5 text-xs font-mono font-bold text-[#D29922] transition"
                   >
                     Use: {tpl.label}
                   </button>
@@ -810,14 +891,14 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                   value={broadcastTitle}
                   onChange={(e) => setBroadcastTitle(e.target.value)}
                   placeholder="Announcement Title..."
-                  className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs font-mono font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
                 />
                 <textarea
                   value={broadcastMessageEn}
                   onChange={(e) => setBroadcastMessageEn(e.target.value)}
                   rows={3}
                   placeholder="Write your announcement once—WorkCraft delivers it to each salon in their saved onboarding language (Urdu, Arabic, or English)..."
-                  className="w-full rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-xs font-sans text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                  className="w-full rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-sm font-sans text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
                 />
               </div>
 
@@ -858,7 +939,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 <button
                   type="button"
                   disabled={!broadcastMessageEn.trim()}
-                  onClick={() => {
+                  onClick={async () => {
                     const baseByRegion =
                       broadcastRegionFilter === 'PK'
                         ? 15
@@ -871,6 +952,21 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                       broadcastTierFilter === 'ALL'
                         ? baseByRegion
                         : Math.max(1, Math.round(baseByRegion / 3));
+                    try {
+                      await fetch('/api/founder/broadcast', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          title: broadcastTitle,
+                          messageEn: broadcastMessageEn,
+                          regionFilter: broadcastRegionFilter,
+                          tierFilter: broadcastTierFilter,
+                          recipientCount: count,
+                        }),
+                      });
+                    } catch {
+                      // non-blocking persistence fallback
+                    }
                     setBroadcastDispatchedReceipt({
                       count,
                       regionLabel:
@@ -942,7 +1038,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     name: 'Facebook Ads & Meta Stories',
                     badge: 'FACEBOOK ADS · NEW SIGNUPS',
                     badgeColor: 'border-[#1877F2]/40 bg-[#1877F2]/15 text-[#58A6FF]',
-                    url: 'https://portal.workcraft.local/?onboard=true&ref=fb&utm_source=facebook&utm_medium=cpc&utm_campaign=salon_signup_q4',
+                    url: `${portalOrigin}/?onboard=true&ref=fb&utm_source=facebook&utm_medium=cpc&utm_campaign=salon_signup_q4`,
                     stats: '14.8% CTR · 38 Salons Onboarded · High Conversion',
                     desc: 'Drop prospective salon owners straight into Step 1 self-onboarding from Facebook Feed or Story ads.',
                   },
@@ -952,7 +1048,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     name: 'Instagram Reels & Bio Link',
                     badge: 'INSTAGRAM REELS · NEW SIGNUPS',
                     badgeColor: 'border-[#E1306C]/40 bg-[#E1306C]/15 text-[#FF7B72]',
-                    url: 'https://portal.workcraft.local/?onboard=true&ref=ig&utm_source=instagram&utm_medium=cpc&utm_campaign=salon_signup_q4',
+                    url: `${portalOrigin}/?onboard=true&ref=ig&utm_source=instagram&utm_medium=cpc&utm_campaign=salon_signup_q4`,
                     stats: '18.2% CTR · 46 Salons Onboarded · Visual Barbers',
                     desc: 'Designed for Instagram salon transformation reels and bio links. Lands prospective owners in Step 1.',
                   },
@@ -962,7 +1058,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     name: 'TikTok Viral Video Campaigns',
                     badge: 'TIKTOK VIRAL · NEW SIGNUPS',
                     badgeColor: 'border-[#00F2FE]/40 bg-[#00F2FE]/15 text-cyan-300',
-                    url: 'https://portal.workcraft.local/?onboard=true&ref=tiktok&utm_source=tiktok&utm_medium=cpc&utm_campaign=salon_signup_q4',
+                    url: `${portalOrigin}/?onboard=true&ref=tiktok&utm_source=tiktok&utm_medium=cpc&utm_campaign=salon_signup_q4`,
                     stats: '21.5% CTR · 52 Salons Onboarded · Gen-Z Stylists',
                     desc: 'High-speed mobile funnel for short video promos. Lands prospects straight into Step 1 on mobile.',
                   },
@@ -972,7 +1068,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     name: 'WhatsApp Groups & New Salon Referral',
                     badge: 'NEW SALON SIGNUP LINK',
                     badgeColor: 'border-[#25D366]/40 bg-[#25D366]/15 text-[#3FB950]',
-                    url: 'https://portal.workcraft.local/?onboard=true&ref=whatsapp&utm_source=whatsapp',
+                    url: `${portalOrigin}/?onboard=true&ref=whatsapp&utm_source=whatsapp`,
                     stats: '34.0% Conversion · 1-to-1 Trusted Referral',
                     desc: 'Share in salon owner WhatsApp groups so unregistered owners can click and onboard themselves (not for broadcasting to existing clients—use Broadcast panel above).',
                   },
@@ -1090,7 +1186,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
 
               {/* Generated Result Card */}
               {(() => {
-                const generatedUrl = `https://portal.workcraft.local/?onboard=true&ref=social&utm_source=custom&utm_campaign=${encodeURIComponent(
+                const generatedUrl = `${portalOrigin}/?onboard=true&ref=social&utm_source=custom&utm_campaign=${encodeURIComponent(
                   customCampaignName.trim() || 'promo'
                 )}&category=${customCampaignCategory.toLowerCase()}&lang=${customCampaignLanguage.toLowerCase()}`;
                 const isCustomCopied = copiedLinkId === 'custom';
@@ -1340,6 +1436,81 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
               </div>
             </div>
 
+            {/* Founder Access: PIN + Mobile Biometric Device Security */}
+            <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-[#06B6D4]">
+                  <Fingerprint className="size-4 shrink-0" />
+                  <h4 className="text-xs font-mono font-bold uppercase tracking-wider">
+                    Founder Access Security · PIN &amp; Mobile Biometric
+                  </h4>
+                </div>
+                <span
+                  className={`rounded-md border px-2.5 py-0.5 text-[10px] font-mono font-bold ${
+                    savedBiometric
+                      ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
+                      : 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
+                  }`}
+                >
+                  {savedBiometric ? 'PIN + BIOMETRIC ACTIVE' : 'PIN ACTIVE (WC3118)'}
+                </span>
+              </div>
+              <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
+                Laptops &amp; new devices unlock via your 6-character Founder PIN (<strong className="text-[#F0F6FC] font-mono">WC3118</strong>). On mobile phones, after logging in with PIN once, you can save <strong className="text-[#F0F6FC]">Thumb / Face ID</strong> so future mobile logins offer both Biometric and PIN.
+              </p>
+
+              {biometricStatusMsg && (
+                <p className="text-xs font-mono text-[#06B6D4]">{biometricStatusMsg}</p>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                {canBiometric && !savedBiometric && (
+                  <button
+                    type="button"
+                    disabled={isProcessingBiometric}
+                    onClick={async () => {
+                      setIsProcessingBiometric(true);
+                      setBiometricStatusMsg(null);
+                      const label = isMobileDevice ? 'Founder Mobile Biometric' : 'Founder Device Passkey';
+                      const res = await enrollFounderBiometricDevice(label);
+                      setIsProcessingBiometric(false);
+                      if (!res.ok) {
+                        setBiometricStatusMsg('error' in res ? res.error : 'Biometric setup failed.');
+                        return;
+                      }
+                      setSavedBiometric(res.stored);
+                      onBiometricUpdated?.();
+                      setBiometricStatusMsg('✓ Mobile Biometric (Thumb / Face ID) saved to this device!');
+                    }}
+                    className="min-h-[48px] inline-flex items-center gap-2 rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-60 px-4 py-2 text-xs font-mono font-black text-[#0D1117] uppercase transition"
+                  >
+                    <Fingerprint className="size-4" />
+                    <span>{isProcessingBiometric ? 'Scanning...' : 'Register Thumb / Face ID on This Device'}</span>
+                  </button>
+                )}
+                {savedBiometric && (
+                  <button
+                    type="button"
+                    disabled={isProcessingBiometric}
+                    onClick={async () => {
+                      setIsProcessingBiometric(true);
+                      try {
+                        await fetch('/api/auth/founder-webauthn/revoke', { method: 'POST' });
+                      } catch {}
+                      clearStoredFounderBiometric();
+                      setSavedBiometric(null);
+                      onBiometricUpdated?.();
+                      setIsProcessingBiometric(false);
+                      setBiometricStatusMsg('Mobile Biometric credential removed. Unlocking via PIN remains active.');
+                    }}
+                    className="min-h-[48px] inline-flex items-center gap-2 rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#612324] px-4 py-2 text-xs font-mono font-bold text-[#F85149] transition"
+                  >
+                    <span>Remove Saved Mobile Biometric</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* Single Founder Alert Phone Field */}
             <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
               <h4 className="text-xs font-mono font-bold text-[#06B6D4] uppercase tracking-wider">
@@ -1356,7 +1527,14 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 </label>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
+                    try {
+                      await fetch('/api/founder/settings/report-phone', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phone: founderAlertPhone }),
+                      });
+                    } catch {}
                     setSavedPhoneToast(true);
                     setTimeout(() => setSavedPhoneToast(false), 3000);
                   }}
