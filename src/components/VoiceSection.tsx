@@ -213,12 +213,13 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
       });
-      const mime =
-        MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-          ? 'audio/ogg;codecs=opus'
-          : '';
+      const mimeCandidates = [
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/webm',
+      ];
+      const mime = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || '';
       const recorder = new MediaRecorder(
         stream,
         mime ? { mimeType: mime, audioBitsPerSecond: 20000 } : { audioBitsPerSecond: 20000 }
@@ -231,7 +232,7 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
       };
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
-        const resolvedMime = recorder.mimeType || mime || 'audio/webm;codecs=opus';
+        const resolvedMime = recorder.mimeType || mime || 'audio/mp4';
         const blob = new Blob(rowChunksRef.current, { type: resolvedMime });
         const url = URL.createObjectURL(blob);
         const reader = new FileReader();
