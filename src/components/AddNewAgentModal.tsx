@@ -104,7 +104,7 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
   if (!isOpen) return null;
 
   const resolvedCountryName = agentCountry.trim() || detectedCountry.name;
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://portal.workcraft.local';
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://workcraft-app.vercel.app';
   const previewEnrollUrl =
     mintedEnrollUrl || `${origin}/enroll/agent?token=single-use-${generatedId.toLowerCase()}`;
 
