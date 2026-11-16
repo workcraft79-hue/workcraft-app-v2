@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { translateAndSynthesizeVoice } from '../server/voiceTranslator.js';
+import { recordAiVoiceApiUsage } from '../server/voiceInboxStore.js';
 
 export const config = {
   runtime: 'nodejs',
@@ -68,7 +69,12 @@ export default async function handler(req: JsonRequest, res: ServerResponse) {
       targetDialect,
     });
 
-    sendJson(res, 200, result);
+    const usage = recordAiVoiceApiUsage(
+      result.translationSource !== 'fallback',
+      result.ttsSource === 'msedge-tts'
+    );
+
+    sendJson(res, 200, { ...result, usage });
   } catch (err) {
     console.error('Vercel /api/translate-voice error:', err);
     sendJson(res, 500, { error: 'Voice translation & TTS synthesis failed.' });
