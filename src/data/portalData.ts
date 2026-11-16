@@ -170,7 +170,7 @@ export const INITIAL_VOICE_THREADS: VoiceThreadItem[] = [
   {
     id: 'wc-102',
     serialNumber: '102',
-    salonId: 'salon-2',
+    salonId: 'salon-5',
     ownerName: 'Ayesha',
     salonName: 'Noor Beauty Lounge',
     city: 'Karachi Clifton',
