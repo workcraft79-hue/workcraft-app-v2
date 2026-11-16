@@ -1102,6 +1102,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     'STAFF' | 'SERVICES' | 'HOURS' | 'AUTOMATION' | 'POSTER'
   >('STAFF');
   const [showManageAdvancedTools, setShowManageAdvancedTools] = useState(false);
+  const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
+  const sharedAudioCtxRef = useRef<AudioContext | null>(null);
   const [expandedDepositReceiptId, setExpandedDepositReceiptId] = useState<string | null>(null);
   const [pendingDeposits, setPendingDeposits] = useState<PendingDepositAlert[]>([
     {
@@ -1405,11 +1407,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           const trData = (await trRes.json()) as {
             transcript?: string;
             translatedText?: string;
+            detectedInputLanguage?: string;
             detectedLanguage?: string;
           };
           if (trData.transcript) resolvedTranscript = trData.transcript;
           if (trData.translatedText) resolvedReplyText = trData.translatedText;
-          if (trData.detectedLanguage) resolvedDetectedLang = trData.detectedLanguage;
+          if (trData.detectedInputLanguage || trData.detectedLanguage) {
+            resolvedDetectedLang =
+              trData.detectedInputLanguage || trData.detectedLanguage || resolvedDetectedLang;
+          }
         }
       } catch {
         // Proceed smoothly if offline
@@ -1621,14 +1627,61 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }
   };
 
-  // Free $0/mo Web Audio Alert Chime with Rush-Hour Loudspeaker Boost + Web Speech API Reader
+  // Free $0/mo Web Audio Alert Chime with iOS/Android tap unlock + Rush-Hour Loudspeaker Boost
+  const ensureUnlockedAudioContext = async (): Promise<AudioContext | null> => {
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return null;
+      if (!sharedAudioCtxRef.current || sharedAudioCtxRef.current.state === 'closed') {
+        sharedAudioCtxRef.current = new AudioCtx();
+      }
+      if (sharedAudioCtxRef.current.state === 'suspended') {
+        await sharedAudioCtxRef.current.resume();
+      }
+      if (sharedAudioCtxRef.current.state === 'running') {
+        setIsAudioUnlocked(true);
+      }
+      return sharedAudioCtxRef.current;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleUnlockMobileAudio = async () => {
+    const ctx = await ensureUnlockedAudioContext();
+    if (ctx) {
+      playFreeNotificationChime(false);
+    }
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        const silentUtt = new SpeechSynthesisUtterance('');
+        silentUtt.volume = 0;
+        window.speechSynthesis.speak(silentUtt);
+      }
+    } catch {}
+    setIsAudioUnlocked(true);
+    setMaintToast('🔊 Hands-free mobile chimes & voice announcements enabled.');
+    setTimeout(() => setMaintToast(null), 3500);
+  };
+
   const playFreeNotificationChime = (isBoost = false) => {
     try {
       const AudioCtx =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+      const ctx = sharedAudioCtxRef.current && sharedAudioCtxRef.current.state !== 'closed'
+        ? sharedAudioCtxRef.current
+        : new AudioCtx();
+      sharedAudioCtxRef.current = ctx;
+      if (ctx.state === 'suspended') {
+        void ctx.resume().catch(() => {});
+      }
+      if (ctx.state === 'running') {
+        setIsAudioUnlocked(true);
+      }
       const now = ctx.currentTime;
       const boostGain = isBoost ? 2.5 : 1.0;
 
@@ -1854,29 +1907,42 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     isLockedOut: false,
   };
 
-  const handleAutoClearMaintenance = () => {
+  const handleAutoClearMaintenance = async () => {
     setIsPayingMaint(true);
-    setTimeout(() => {
-      const tid = `${currentSalon.phone.startsWith('+92') ? 'EP' : 'ST'}-${Math.floor(
-        10000000000 + Math.random() * 90000000000
-      )}`;
-      setIsPayingMaint(false);
-      setMaintCycleStage('PAID_ACTIVE');
-      setMaintTid(tid);
-      setMaintPaidDate(
-        new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
-      );
-      const localizedSuccess: Record<VoiceLang, string> = {
-        en: `Auto-Match Cleared: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} paid from ${currentSalon.phone}. Metrics Box unlocked & Tier-1 Priority restored!`,
-        ur: `ادائیگی خودکار تصدیق ہو گئی: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${currentSalon.phone})۔ آپ کا میٹرکس باکس اور Tier-1 ترجیحی نظام بحال کر دیا گیا ہے!`,
-        ar: `تم التحقق التلقائي من الدفع: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${currentSalon.phone}). تم فتح الإحصائيات واستعادة الأولوية الفورية!`,
-      };
-      setMaintToast(localizedSuccess[ownerLang]);
-      setTimeout(() => setMaintToast(null), 6000);
-    }, 650);
+    const tid = `${currentSalon.phone.startsWith('+92') ? 'EP' : 'ST'}-${Math.floor(
+      10000000000 + Math.random() * 90000000000
+    )}`;
+    try {
+      await fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/payments/maintenance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          salonName: currentSalon.name,
+          amount: currentSalon.maint,
+          currency: currentSalon.phone.startsWith('+92') ? 'PKR' : regionConfig.currency,
+          method: regionConfig.paymentChannels[0]?.label || 'Auto-Match Webhook',
+          tid,
+        }),
+      });
+    } catch {
+      // non-blocking offline/static fallback
+    }
+    setIsPayingMaint(false);
+    setMaintCycleStage('PAID_ACTIVE');
+    setMaintTid(tid);
+    setMaintPaidDate(
+      new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+    );
+    const localizedSuccess: Record<VoiceLang, string> = {
+      en: `Auto-Match Cleared: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} paid from ${currentSalon.phone}. Metrics Box unlocked & Tier-1 Priority restored!`,
+      ur: `ادائیگی خودکار تصدیق ہو گئی: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${currentSalon.phone})۔ آپ کا میٹرکس باکس اور Tier-1 ترجیحی نظام بحال کر دیا گیا ہے!`,
+      ar: `تم التحقق التلقائي من الدفع: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${currentSalon.phone}). تم فتح الإحصائيات واستعادة الأولوية الفورية!`,
+    };
+    setMaintToast(localizedSuccess[ownerLang]);
+    setTimeout(() => setMaintToast(null), 6000);
   };
 
-  const handleConfirmMaintPayment = () => {
+  const handleConfirmMaintPayment = async () => {
     setIsPayingMaint(true);
     const chosenTid =
       maintPaymentTidInput.trim() ||
@@ -1887,52 +1953,72 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       regionConfig.paymentChannels.find((c) => c.id === maintPaymentChannel)?.label ||
       maintPaymentChannel;
 
-    setTimeout(() => {
-      setIsPayingMaint(false);
-      setIsMaintPaymentModalOpen(false);
-      setMaintCycleStage('PAID_ACTIVE');
-      setMaintTid(chosenTid);
-      setMaintPaidDate(
-        new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/payments/maintenance`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            salonName: currentSalon.name,
+            amount: currentSalon.maint,
+            currency: currentSalon.phone.startsWith('+92') ? 'PKR' : regionConfig.currency,
+            method: channelName,
+            tid: chosenTid,
+          }),
+        }
       );
-      setMaintPaymentTidInput('');
+      if (res.ok) {
+        const data = (await res.json()) as { state?: SalonConciergeStateResponse };
+        if (data?.state) setConciergeState(data.state);
+      }
+    } catch {
+      // non-blocking offline/static fallback
+    }
 
-      const i18n = MAINT_MODAL_I18N[ownerLang];
-      const localizedGreeting = i18n.whatsappNotice(
-        currentSalon.owner,
-        currentSalon.name,
-        regionConfig.symbol,
-        currentSalon.maint,
-        channelName,
-        chosenTid
-      );
+    setIsPayingMaint(false);
+    setIsMaintPaymentModalOpen(false);
+    setMaintCycleStage('PAID_ACTIVE');
+    setMaintTid(chosenTid);
+    setMaintPaidDate(
+      new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+    );
+    setMaintPaymentTidInput('');
 
-      setMaintToast(
+    const i18n = MAINT_MODAL_I18N[ownerLang];
+    const localizedGreeting = i18n.whatsappNotice(
+      currentSalon.owner,
+      currentSalon.name,
+      regionConfig.symbol,
+      currentSalon.maint,
+      channelName,
+      chosenTid
+    );
+
+    setMaintToast(
+      ownerLang === 'ur'
+        ? `ادائیگی تصدیق ہو گئی: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${chosenTid})۔ لائیو میٹرکس اور Tier-1 ترجیح بحال!`
+        : ownerLang === 'ar'
+        ? `تم تأكيد سداد الصيانة: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${chosenTid}). تم فتح الإحصائيات الفورية والأولوية!`
+        : `Maintenance Paid: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${chosenTid}). Live metrics & Tier-1 priority restored!`
+    );
+
+    setWhatsAppReceiptNotice({
+      title:
         ownerLang === 'ur'
-          ? `ادائیگی تصدیق ہو گئی: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${chosenTid})۔ لائیو میٹرکس اور Tier-1 ترجیح بحال!`
+          ? 'واٹس ایپ رسید · مینٹیننس فیس وصولی'
           : ownerLang === 'ar'
-          ? `تم تأكيد سداد الصيانة: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${chosenTid}). تم فتح الإحصائيات الفورية والأولوية!`
-          : `Maintenance Paid: ${regionConfig.symbol}${currentSalon.maint.toLocaleString()} (${chosenTid}). Live metrics & Tier-1 priority restored!`
-      );
+          ? 'إشعار واتساب · سداد رسوم الصيانة بنجاح'
+          : 'WhatsApp Receipt · Maintenance Payment Cleared',
+      body: localizedGreeting,
+      phone: currentSalon.phone,
+      timestamp: 'Just now',
+    });
 
-      // Automated WhatsApp Receipt Message to Salon Owner's phone
-      setWhatsAppReceiptNotice({
-        title:
-          ownerLang === 'ur'
-            ? 'واٹس ایپ رسید · مینٹیننس فیس وصولی'
-            : ownerLang === 'ar'
-            ? 'إشعار واتساب · سداد رسوم الصيانة بنجاح'
-            : 'WhatsApp Receipt · Maintenance Payment Cleared',
-        body: localizedGreeting,
-        phone: currentSalon.phone,
-        timestamp: 'Just now',
-      });
-
-      setTimeout(() => setMaintToast(null), 8000);
-    }, 650);
+    setTimeout(() => setMaintToast(null), 8000);
   };
 
-  const handleConfirmPackageUpgrade = () => {
+  const handleConfirmPackageUpgrade = async () => {
     if (!selectedUpgradeTargetId) return;
     const targetPkg = regionConfig.packages.find((p) => p.id === selectedUpgradeTargetId);
     if (!targetPkg) return;
@@ -1940,48 +2026,71 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     const chosenTid =
       upgradeTidInput.trim() ||
       `UP-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+    const backendTier =
+      targetPkg.id === 'STARTER' ? 'STARTER' : targetPkg.id === 'GROWTH' ? 'PRO' : 'PRO++';
 
     setIsProcessingUpgrade(true);
-    setTimeout(() => {
-      setSalonsState((prev) =>
-        prev.map((s) =>
-          s.id === currentSalon.id
-            ? { ...s, planId: targetPkg.id, plan: targetPkg.name, maint: targetPkg.monthlyMaint }
-            : s
-        )
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/payments/upgrade`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            salonName: currentSalon.name,
+            packageTier: backendTier,
+            differenceAmount,
+            currency: currentSalon.phone.startsWith('+92') ? 'PKR' : regionConfig.currency,
+            method: selectedUpgradeChannel,
+            tid: chosenTid,
+          }),
+        }
       );
-      setIsProcessingUpgrade(false);
-      setIsUpgradeModalOpen(false);
-      setSelectedUpgradeTargetId(null);
-      setUpgradeTidInput('');
+      if (res.ok) {
+        const data = (await res.json()) as { state?: SalonConciergeStateResponse };
+        if (data?.state) setConciergeState(data.state);
+      }
+    } catch {
+      // non-blocking offline/static fallback
+    }
 
-      const i18n = UPGRADE_MODAL_I18N[ownerLang];
-      setMaintToast(i18n.successToast(targetPkg.name, regionConfig.symbol, differenceAmount));
+    setSalonsState((prev) =>
+      prev.map((s) =>
+        s.id === currentSalon.id
+          ? { ...s, planId: targetPkg.id, plan: targetPkg.name, maint: targetPkg.monthlyMaint }
+          : s
+      )
+    );
+    setIsProcessingUpgrade(false);
+    setIsUpgradeModalOpen(false);
+    setSelectedUpgradeTargetId(null);
+    setUpgradeTidInput('');
 
-      // Automated WhatsApp Greeting and Upgrade Confirmation to Salon Owner's WhatsApp
-      const greetingMsg = i18n.whatsappGreeting(
-        currentSalon.owner,
-        currentSalon.name,
-        targetPkg.name,
-        regionConfig.symbol,
-        differenceAmount,
-        chosenTid
-      );
+    const i18n = UPGRADE_MODAL_I18N[ownerLang];
+    setMaintToast(i18n.successToast(targetPkg.name, regionConfig.symbol, differenceAmount));
 
-      setWhatsAppReceiptNotice({
-        title:
-          ownerLang === 'ur'
-            ? 'واٹس ایپ نوٹیفکیشن · پیکیج اپگریڈ تصدیق'
-            : ownerLang === 'ar'
-            ? 'إشعار واتساب · تأكيد ترقية الباقة بنجاح'
-            : 'WhatsApp Notice · Package Upgrade Confirmed',
-        body: greetingMsg,
-        phone: currentSalon.phone,
-        timestamp: 'Just now',
-      });
+    const greetingMsg = i18n.whatsappGreeting(
+      currentSalon.owner,
+      currentSalon.name,
+      targetPkg.name,
+      regionConfig.symbol,
+      differenceAmount,
+      chosenTid
+    );
 
-      setTimeout(() => setMaintToast(null), 8000);
-    }, 700);
+    setWhatsAppReceiptNotice({
+      title:
+        ownerLang === 'ur'
+          ? 'واٹس ایپ نوٹیفکیشن · پیکیج اپگریڈ تصدیق'
+          : ownerLang === 'ar'
+          ? 'إشعار واتساب · تأكيد ترقية الباقة بنجاح'
+          : 'WhatsApp Notice · Package Upgrade Confirmed',
+      body: greetingMsg,
+      phone: currentSalon.phone,
+      timestamp: 'Just now',
+    });
+
+    setTimeout(() => setMaintToast(null), 8000);
   };
 
   // Live Queue State (scheduledEndMs set in near future so initial slots stay active until 15m post-end)
@@ -3401,6 +3510,18 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             >
               {isVoiceEnabled ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
             </button>
+
+            {!isAudioUnlocked && !isFounderInspector && (
+              <button
+                type="button"
+                onClick={handleUnlockMobileAudio}
+                className="min-h-[48px] rounded-xl border border-[#06B6D4] bg-[#06B6D4]/15 hover:bg-[#06B6D4]/25 px-3 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5"
+                title="Tap once on mobile so loud chimes & spoken alerts play automatically"
+              >
+                <Volume2 className="size-4 shrink-0" />
+                <span>Tap to Enable Audio Alerts</span>
+              </button>
+            )}
 
             <button
               type="button"
