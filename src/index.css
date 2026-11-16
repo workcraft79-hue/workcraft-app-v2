@@ -32,10 +32,22 @@
   background: #484F58;
 }
 
-/* Safe area padding for mobile notches */
+/* Safe area padding for iPhone notch / Dynamic Island & Home Indicator */
 .pb-safe {
-  padding-bottom: env(safe-area-inset-bottom, 16px);
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
 }
 .pt-safe {
-  padding-top: env(safe-area-inset-top, 16px);
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.safe-bottom-nav {
+  bottom: max(12px, env(safe-area-inset-bottom, 12px));
+}
+
+/* Prevent iOS Safari auto-zoom on inputs, textareas, and selects below 16px */
+@media (max-width: 767px) {
+  input:not([type='checkbox']):not([type='radio']),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }
