@@ -316,6 +316,7 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
       }
 
       // Persist unified message into backend voice thread (syncs straight to Salon Owner Dashboard)
+      let syncedFromServer = false;
       try {
         const saveRes = await fetch('/api/voice/threads/message', {
           method: 'POST',
@@ -333,7 +334,9 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
             detectedInputLanguage: translateData.detectedInputLanguage || 'Auto',
             voiceName: finalVoiceName,
             audioDataUrl: audioDataUrl?.startsWith('data:audio/') ? audioDataUrl : undefined,
-            sizeBytes: recordedClip?.sizeBytes || (translateData.audioBase64 ? Math.round((translateData.audioBase64.length * 3) / 4) : 2048),
+            sizeBytes:
+              recordedClip?.sizeBytes ||
+              (translateData.audioBase64 ? Math.round((translateData.audioBase64.length * 3) / 4) : 2048),
           }),
         });
         if (saveRes.ok) {
@@ -343,43 +346,49 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
           };
           if (savedData.threads) {
             onThreadsUpdated(savedData.threads);
+            syncedFromServer = true;
           }
           if (savedData.usage && onUsageUpdated) {
             onUsageUpdated(savedData.usage);
           }
+        } else {
+          const errBody = (await saveRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(errBody.error || `Failed to save voice reply (HTTP ${saveRes.status}).`);
         }
-      } catch {
-        // Optimistic update below handles static fallback
+      } catch (saveErr) {
+        if (saveErr instanceof Error && saveErr.message.startsWith('Failed to save voice reply')) {
+          throw saveErr;
+        }
+        // Offline / static host fallback handled cleanly below
       }
 
-      // Ensure local UI updates immediately even if backend is unavailable
-      const localNewMsg = {
-        id: `vmsg-${Date.now()}`,
-        senderRole: 'FOUNDER' as const,
-        senderLabel: 'WorkCraft Founder (Private Line)',
-        originalText: finalTranscript,
-        translatedText: finalTranslated,
-        detectedInputLanguage: translateData.detectedInputLanguage || 'Auto',
-        targetLocale: activeThread.targetLocale,
-        voiceName: finalVoiceName,
-        audioDataUrl,
-        sizeBytes: recordedClip?.sizeBytes || 2048,
-        createdAtMs: Date.now(),
-        expiresAtMs: Date.now() + 7 * 24 * 60 * 60 * 1000,
-      };
-      onThreadsUpdated(
-        threads.map((t) =>
-          t.id === activeThread.id
-            ? {
-                ...t,
-                unread: false,
-                messages: t.messages.some((m) => m.translatedText === localNewMsg.translatedText && Date.now() - m.createdAtMs < 3000)
-                  ? t.messages
-                  : [...t.messages, localNewMsg],
-              }
-            : t
-        )
-      );
+      if (!syncedFromServer) {
+        const localNewMsg = {
+          id: `vmsg-${Date.now()}`,
+          senderRole: 'FOUNDER' as const,
+          senderLabel: 'WorkCraft Founder (Private Line)',
+          originalText: finalTranscript,
+          translatedText: finalTranslated,
+          detectedInputLanguage: translateData.detectedInputLanguage || 'Auto',
+          targetLocale: activeThread.targetLocale,
+          voiceName: finalVoiceName,
+          audioDataUrl,
+          sizeBytes: recordedClip?.sizeBytes || 2048,
+          createdAtMs: Date.now(),
+          expiresAtMs: Date.now() + 7 * 24 * 60 * 60 * 1000,
+        };
+        onThreadsUpdated(
+          threads.map((t) =>
+            t.id === activeThread.id
+              ? {
+                  ...t,
+                  unread: false,
+                  messages: [...t.messages, localNewMsg],
+                }
+              : t
+          )
+        );
+      }
 
       setRecordedClip(null);
       setFounderInputText('');
