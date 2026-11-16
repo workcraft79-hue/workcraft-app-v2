@@ -28,7 +28,6 @@ interface MonthData {
   duesAtRisk: string;
   atRiskSalonsCount: number;
   pairedSalons: number;
-  cashEntries: string;
   // Payment Method Breakup
   methods: {
     easypaisa: string;
@@ -37,8 +36,8 @@ interface MonthData {
     jazzcashSalons: number;
     bank: string;
     bankSalons: number;
-    cash: string;
-    cashSalons: number;
+    stripe: string;
+    stripeSalons: number;
   };
   // Product Offering Breakup
   products: {
@@ -46,8 +45,6 @@ interface MonthData {
     maintenanceSalons: number;
     newServices: string;
     newServicesSalons: number;
-    dealVideo: string;
-    dealVideoSalons: number;
   };
 }
 
@@ -56,27 +53,24 @@ const MONTHLY_REPORTS: Record<string, MonthData> = {
     month: 'October 2026',
     mrrCollected: 'PKR 108,000',
     collectedDues: 'PKR 108,000',
-    duesAtRisk: 'PKR 13,500',
+    duesAtRisk: 'PKR 6,000',
     atRiskSalonsCount: 3,
-    pairedSalons: 27,
-    cashEntries: 'PKR 25,000',
+    pairedSalons: 24,
     methods: {
-      easypaisa: 'PKR 24,000',
+      easypaisa: 'PKR 26,000',
       easypaisaSalons: 6,
-      jazzcash: 'PKR 13,000',
+      jazzcash: 'PKR 14,000',
       jazzcashSalons: 4,
-      bank: 'PKR 46,000',
-      bankSalons: 9,
-      cash: 'PKR 25,000',
-      cashSalons: 5,
+      bank: 'PKR 52,000',
+      bankSalons: 10,
+      stripe: 'PKR 16,000',
+      stripeSalons: 2,
     },
     products: {
-      maintenancePaid: 'PKR 85,500',
-      maintenanceSalons: 19,
-      newServices: 'PKR 13,500',
-      newServicesSalons: 3,
-      dealVideo: 'PKR 9,000',
-      dealVideoSalons: 2,
+      maintenancePaid: 'PKR 43,000',
+      maintenanceSalons: 18,
+      newServices: 'PKR 65,000',
+      newServicesSalons: 4,
     },
   },
   'September 2026': {
@@ -85,25 +79,22 @@ const MONTHLY_REPORTS: Record<string, MonthData> = {
     collectedDues: 'PKR 99,000',
     duesAtRisk: 'PKR 4,500',
     atRiskSalonsCount: 1,
-    pairedSalons: 24,
-    cashEntries: 'PKR 20,000',
+    pairedSalons: 22,
     methods: {
       easypaisa: 'PKR 22,000',
       easypaisaSalons: 6,
       jazzcash: 'PKR 12,000',
       jazzcashSalons: 3,
-      bank: 'PKR 45,000',
-      bankSalons: 9,
-      cash: 'PKR 20,000',
-      cashSalons: 4,
+      bank: 'PKR 49,000',
+      bankSalons: 10,
+      stripe: 'PKR 16,000',
+      stripeSalons: 2,
     },
     products: {
-      maintenancePaid: 'PKR 81,000',
-      maintenanceSalons: 18,
-      newServices: 'PKR 9,000',
-      newServicesSalons: 2,
-      dealVideo: 'PKR 9,000',
-      dealVideoSalons: 2,
+      maintenancePaid: 'PKR 42,000',
+      maintenanceSalons: 17,
+      newServices: 'PKR 57,000',
+      newServicesSalons: 3,
     },
   },
   'August 2026': {
@@ -112,25 +103,22 @@ const MONTHLY_REPORTS: Record<string, MonthData> = {
     collectedDues: 'PKR 85,500',
     duesAtRisk: 'PKR 0',
     atRiskSalonsCount: 0,
-    pairedSalons: 21,
-    cashEntries: 'PKR 15,000',
+    pairedSalons: 20,
     methods: {
       easypaisa: 'PKR 19,000',
       easypaisaSalons: 5,
       jazzcash: 'PKR 10,500',
       jazzcashSalons: 3,
-      bank: 'PKR 41,000',
-      bankSalons: 8,
-      cash: 'PKR 15,000',
-      cashSalons: 3,
+      bank: 'PKR 44,000',
+      bankSalons: 9,
+      stripe: 'PKR 12,000',
+      stripeSalons: 2,
     },
     products: {
-      maintenancePaid: 'PKR 72,000',
-      maintenanceSalons: 16,
-      newServices: 'PKR 9,000',
-      newServicesSalons: 2,
-      dealVideo: 'PKR 4,500',
-      dealVideoSalons: 1,
+      maintenancePaid: 'PKR 37,500',
+      maintenanceSalons: 15,
+      newServices: 'PKR 48,000',
+      newServicesSalons: 3,
     },
   },
 };
@@ -141,6 +129,7 @@ interface FinancialReportModalProps {
   onClose: () => void;
   usageMeter?: LiveUsageMeter;
   unreadVoiceCount?: number;
+  kamranCashHeld?: number;
 }
 
 export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
@@ -148,8 +137,9 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
   onClose,
   usageMeter = DEFAULT_USAGE_METER,
   unreadVoiceCount = 2,
+  kamranCashHeld = 25000,
 }) => {
-  const [selectedMonth, setSelectedMonth] = useState<string>('October 2026');
+  const [selectedMonth] = useState<string>('October 2026');
   const [activeTab, setActiveTab] = useState<'revenue' | 'health'>('revenue');
 
   if (!isOpen) return null;
@@ -226,9 +216,9 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
           </div>
 
           <div className="rounded-xl border border-[#30363D] bg-[#21262D] p-3 col-span-2 sm:col-span-2">
-            <span className="text-[10px] text-[#8B949E] uppercase">Physical Cash Entries</span>
-            <p className="mt-1 text-lg font-bold text-[#D29922]">{data.cashEntries}</p>
-            <span className="text-[9px] text-[#3FB950]">Held by Field Agent Kamran · Biometric Hash Verified</span>
+            <span className="text-[10px] text-[#8B949E] uppercase">Agent Cash Held (Kamran)</span>
+            <p className="mt-1 text-lg font-bold text-[#D29922]">PKR {kamranCashHeld.toLocaleString()}</p>
+            <span className="text-[9px] text-[#3FB950]">Live Liability Tracked · Biometric Verified</span>
           </div>
         </div>
 
@@ -278,7 +268,7 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
                   </div>
                   <div className="text-right shrink-0 ml-2">
                     <span className="text-[#D29922] font-bold">{data.methods.bank}</span>
-                    <span className="block text-[9px] text-cyan-400">42.6% PRIMARY RAIL</span>
+                    <span className="block text-[9px] text-cyan-400">48.1% PRIMARY RAIL</span>
                   </div>
                 </div>
 
@@ -291,7 +281,7 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
                   </div>
                   <div className="text-right shrink-0 ml-2">
                     <span className="text-[#D29922] font-bold">{data.methods.easypaisa}</span>
-                    <span className="block text-[9px] text-[#3FB950]">22.2% of total</span>
+                    <span className="block text-[9px] text-[#3FB950]">24.1% of total</span>
                   </div>
                 </div>
 
@@ -304,20 +294,20 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
                   </div>
                   <div className="text-right shrink-0 ml-2">
                     <span className="text-[#D29922] font-bold">{data.methods.jazzcash}</span>
-                    <span className="block text-[9px] text-[#3FB950]">12.0% of total</span>
+                    <span className="block text-[9px] text-[#3FB950]">13.0% of total</span>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between rounded-xl bg-[#0D1117] p-2.5 border border-[#30363D]">
                   <div>
-                    <span className="text-[#F0F6FC] font-bold">Field Agent Cash (Kamran)</span>
+                    <span className="text-[#F0F6FC] font-bold">Stripe / Tap Connect (Overseas)</span>
                     <p className="text-[10px] text-[#8B949E] font-sans">
-                      {data.methods.cashSalons} salons · Biometric thumbprint logged
+                      {data.methods.stripeSalons} international salons · 20/80 auto-split to bank
                     </p>
                   </div>
                   <div className="text-right shrink-0 ml-2">
-                    <span className="text-[#D29922] font-bold">{data.methods.cash}</span>
-                    <span className="block text-[9px] text-[#D29922]">23.1% (Cash liability)</span>
+                    <span className="text-[#D29922] font-bold">{data.methods.stripe}</span>
+                    <span className="block text-[9px] text-[#3FB950]">14.8% Overseas</span>
                   </div>
                 </div>
               </div>
@@ -329,23 +319,10 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
                 <span className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider">
                   2. Revenue by Service Offering ({data.month})
                 </span>
-                <span className="text-[10px] text-cyan-400">3 Product Lines</span>
+                <span className="text-[10px] text-cyan-400">2 Unified Streams</span>
               </div>
 
               <div className="space-y-2 text-xs">
-                <div className="flex items-center justify-between rounded-xl bg-[#0D1117] p-2.5 border border-[#30363D]">
-                  <div>
-                    <span className="text-[#F0F6FC] font-bold">Maintenance Paid (10% SLA Recurring)</span>
-                    <p className="text-[10px] text-[#8B949E] font-sans">
-                      Starter (PKR 1.5k), Growth (PKR 2k), VIP (PKR 2.5k) · 100% digital self-pay
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0 ml-2">
-                    <span className="text-[#3FB950] font-bold">{data.products.maintenancePaid}</span>
-                    <span className="block text-[9px] text-[#3FB950]">79.2% Recurring</span>
-                  </div>
-                </div>
-
                 <div className="flex items-center justify-between rounded-xl bg-[#0D1117] p-2.5 border border-[#30363D]">
                   <div>
                     <span className="text-[#F0F6FC] font-bold">New Salon Setups (One-Time Setup Fee)</span>
@@ -355,20 +332,20 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
                   </div>
                   <div className="text-right shrink-0 ml-2">
                     <span className="text-cyan-400 font-bold">{data.products.newServices}</span>
-                    <span className="block text-[9px] text-[#3FB950]">12.5% Expansion</span>
+                    <span className="block text-[9px] text-[#3FB950]">60.2% Expansion</span>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between rounded-xl bg-[#0D1117] p-2.5 border border-[#30363D]">
                   <div>
-                    <span className="text-[#F0F6FC] font-bold">Deal Video Add-on Revenue</span>
+                    <span className="text-[#F0F6FC] font-bold">Maintenance Paid (10% SLA Recurring)</span>
                     <p className="text-[10px] text-[#8B949E] font-sans">
-                      {data.products.dealVideoSalons} salon campaigns (1 video @ PKR 1.5k or 4 videos @ PKR 4k / 7-10 day validity)
+                      {data.products.maintenanceSalons} salons settled · Starter (1.5k), Growth (2k), VIP (2.5k)
                     </p>
                   </div>
                   <div className="text-right shrink-0 ml-2">
-                    <span className="text-[#D29922] font-bold">{data.products.dealVideo}</span>
-                    <span className="block text-[9px] text-[#3FB950]">8.3% Deal Blasts</span>
+                    <span className="text-[#3FB950] font-bold">{data.products.maintenancePaid}</span>
+                    <span className="block text-[9px] text-[#3FB950]">39.8% Recurring</span>
                   </div>
                 </div>
               </div>
@@ -502,15 +479,19 @@ export const PaymentRoutingModal: React.FC<PaymentRoutingModalProps> = ({ method
         <div className="mt-4 space-y-3 font-mono text-xs min-w-0">
           <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 overflow-hidden">
             <p className="text-[#8B949E]">WEBHOOK ENDPOINT</p>
-            <p className="text-[#58A6FF] mt-1 break-all [overflow-wrap:break-word]">https://api.workcraft.local/v1/payments/webhook</p>
+            <p className="text-[#58A6FF] mt-1 break-all [overflow-wrap:break-word]">
+              {typeof window !== 'undefined'
+                ? `${window.location.origin}/api/whatsapp/webhook`
+                : 'https://workcraft-app.vercel.app/api/whatsapp/webhook'}
+            </p>
           </div>
 
           <label className="block text-[#8B949E]">
-            SIMULATION SECRET
+            WEBHOOK SIGNING SECRET
             <input
-              defaultValue="sec_live_9942a0b4e872c"
+              value="Configured via server WORKCRAFT_WEBHOOK_SECRET Env"
               readOnly
-              className="mt-1 w-full min-h-[48px] rounded-lg border border-[#30363D] bg-[#0D1117] px-3 py-2 text-[#F0F6FC] text-sm focus:outline-none focus:border-[#06B6D4]"
+              className="mt-1 w-full min-h-[48px] rounded-lg border border-[#30363D] bg-[#0D1117] px-3 py-2 text-[#3FB950] text-xs focus:outline-none focus:border-[#06B6D4]"
             />
           </label>
 
