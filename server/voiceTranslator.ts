@@ -250,7 +250,7 @@ export async function translateAndSynthesizeVoice(
       },
     });
 
-    const modelsToTry = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+    const modelsToTry = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
     for (const modelName of modelsToTry) {
       try {
         const prompt = cleanAudioBase64
