@@ -10,6 +10,11 @@ const AGENT_INVITE_TTL_MS = 1000 * 60 * 60 * 72; // 72 hours single-use invite e
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
+// Founder Unlock PIN (Default WC3118; override via FOUNDER_PIN in production env)
+const EXPECTED_FOUNDER_PIN = (process.env.FOUNDER_PIN || process.env.FOUNDER_ACCESS_KEY || 'WC3118')
+  .trim()
+  .toUpperCase();
+
 // In production, prefer configured JWT_SECRET (>=32 chars); never crash cold starts if unset yet.
 const RUNTIME_JWT_SECRET: string = (() => {
   const configured = (process.env.JWT_SECRET || '').trim();
@@ -21,8 +26,8 @@ const RUNTIME_JWT_SECRET: string = (() => {
     const seed =
       process.env.WORKCRAFT_WEBHOOK_SECRET ||
       process.env.GEMINI_API_KEY ||
-      process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-      'workcraft-local-fallback-seed';
+      process.env.VERCEL_PROJECT_ID ||
+      crypto.randomBytes(16).toString('hex');
     return crypto.createHash('sha256').update(`wc-jwt:${seed}`).digest('hex');
   }
   return configured || crypto.randomBytes(32).toString('hex');
@@ -35,6 +40,37 @@ const RUNTIME_WEBHOOK_SECRET: string = (() => {
   // Ephemeral server-only secret for dev environment; never sent to browser JS
   return crypto.randomBytes(24).toString('hex');
 })();
+
+// Failed Founder PIN attempt guard (strictly scoped to Founder PIN guesses ONLY — never salon onboarding)
+const founderFailureTracker = new Map<string, { count: number; lockedUntil: number }>();
+
+export function verifyFounderPin(candidate: string): boolean {
+  const clean = (candidate || '').trim().toUpperCase();
+  if (!clean) return false;
+  const a = crypto.createHash('sha256').update(clean).digest();
+  const b = crypto.createHash('sha256').update(EXPECTED_FOUNDER_PIN).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+export function checkFounderPinAttemptAllowed(clientKey: string): { allowed: true } | { allowed: false; retryAfterSec: number } {
+  const rec = founderFailureTracker.get(clientKey);
+  if (!rec) return { allowed: true };
+  if (rec.lockedUntil > Date.now()) {
+    return { allowed: false, retryAfterSec: Math.max(1, Math.ceil((rec.lockedUntil - Date.now()) / 1000)) };
+  }
+  return { allowed: true };
+}
+
+export function recordFounderPinFailure(clientKey: string): void {
+  const existing = founderFailureTracker.get(clientKey);
+  const nextCount = (existing?.count || 0) + 1;
+  const lockedUntil = nextCount >= 5 ? Date.now() + 60_000 : 0;
+  founderFailureTracker.set(clientKey, { count: nextCount, lockedUntil });
+}
+
+export function clearFounderPinFailures(clientKey: string): void {
+  founderFailureTracker.delete(clientKey);
+}
 
 export interface AuthJwtClaims {
   sub: string;
@@ -431,6 +467,33 @@ export function verifySessionToken(token: string): AuthUser | null {
       agentId: claims.agent_id ?? null,
       salonName: claims.salon_name,
     };
+  } catch {
+    return null;
+  }
+}
+
+export function signServerBlob<T extends Record<string, unknown>>(payload: T): string {
+  const data = base64UrlEncode(JSON.stringify(payload));
+  const sig = base64UrlEncode(
+    crypto.createHmac('sha256', RUNTIME_JWT_SECRET).update(`wc-blob:${data}`).digest()
+  );
+  return `${data}.${sig}`;
+}
+
+export function verifyServerBlob<T extends Record<string, unknown>>(blob: string): T | null {
+  try {
+    const parts = (blob || '').split('.');
+    if (parts.length !== 2) return null;
+    const [data, sig] = parts;
+    const expectedSig = base64UrlEncode(
+      crypto.createHmac('sha256', RUNTIME_JWT_SECRET).update(`wc-blob:${data}`).digest()
+    );
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expectedSig);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return null;
+    }
+    return JSON.parse(base64UrlDecode(data).toString('utf8')) as T;
   } catch {
     return null;
   }
