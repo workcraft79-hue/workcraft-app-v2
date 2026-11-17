@@ -724,6 +724,346 @@ export function getLocalizedServiceName(name: string, lang: ClientChatLang): str
   return SERVICE_TRANSLATIONS[name]?.[lang] || name;
 }
 
+export const OWNER_UI_I18N: Record<
+  VoiceLang,
+  {
+    whatsappConnected: string;
+    liveFloor: string;
+    manage: string;
+    counterSleep: string;
+    keepCounterAwake: string;
+    wakeOn: string;
+    wakeOff: string;
+    auxBoost: string;
+    boost: string;
+    tapEnableAudio: string;
+    founder: string;
+    logOut: string;
+    activeShopTier: string;
+    todayRevenue: string;
+    reminders24_2: string;
+    activeTick: string;
+    pendingDeposits: string;
+    stop: string;
+    urgentAlerts: string;
+    actionRequired: string;
+    markResolved: string;
+    viewScreenshot: string;
+    hideProof: string;
+    verifyDeposit: string;
+    markHandled: string;
+    quickChairLock: string;
+    quickChairSub: string;
+    holdOrTapSpeakBtn: string;
+    transcribingLock: string;
+    tapStopLock: string;
+    voicePlaceholder: string;
+    parseAndLockBtn: string;
+    freeNow: string;
+    busy: string;
+    tapAgain30: string;
+    plus30: string;
+    tapAgain60: string;
+    plus60: string;
+    freeChair: string;
+    todayScheduleTitle: string;
+    unflaggedClear: string;
+    seatBtn: string;
+    markDone: string;
+    flaggedHeld: string;
+    doneTick: string;
+    reviewQueued: string;
+    walkInQueueTitle: string;
+    addWalkIn: string;
+    closeBtn: string;
+    queueGuest: string;
+    callNext: string;
+    prepaidPackagesTitle: string;
+    issuePass: string;
+    createPass: string;
+    useSession: string;
+    completedTick: string;
+    bridalTrackerTitle: string;
+    bridalLadiesTitle: string;
+    addBridalEvent: string;
+    saveBridalAdvance: string;
+    markSettled: string;
+    fullSettled: string;
+    topServicesTitle: string;
+    mostRequested: string;
+    remindersTitle: string;
+    activeBadge: string;
+    adv24h: string;
+    adv24hDesc: string;
+    arr2h: string;
+    arr2hDesc: string;
+    voiceSupportTitle: string;
+    sendToFounder: string;
+    sending: string;
+    playVoice: string;
+    stopVoice: string;
+    staffBarbers: string;
+    staffStylists: string;
+    servicesRates: string;
+    salonHours: string;
+    automationRewards: string;
+    windowQrPoster: string;
+  }
+> = {
+  en: {
+    whatsappConnected: 'WhatsApp Gateway · Connected',
+    liveFloor: 'Live Floor',
+    manage: 'Manage',
+    counterSleep: 'Counter Sleep',
+    keepCounterAwake: 'Keep Counter Awake',
+    wakeOn: 'Wake ON',
+    wakeOff: 'Wake OFF',
+    auxBoost: 'AUX Boost',
+    boost: 'Boost',
+    tapEnableAudio: 'Tap to Enable Audio Alerts',
+    founder: 'Founder',
+    logOut: 'Log Out',
+    activeShopTier: 'Active Shop / Tier:',
+    todayRevenue: "Today's Revenue",
+    reminders24_2: '24h / 2h Reminders',
+    activeTick: 'Active ✓',
+    pendingDeposits: 'Pending Deposits',
+    stop: 'Stop',
+    urgentAlerts: 'Urgent Alerts',
+    actionRequired: 'Action Required',
+    markResolved: 'Mark Resolved ✓',
+    viewScreenshot: 'View Screenshot',
+    hideProof: 'Hide Proof',
+    verifyDeposit: 'Verify Deposit ✓',
+    markHandled: 'Mark Handled ✓',
+    quickChairLock: 'Quick Chair Lock · Instant Voice & 2-Tap Pills',
+    quickChairSub:
+      'Tap or hold the mic to speak (e.g. "Hamza 30 minutes"), or use silent 2-tap duration pills to mark walk-in chairs busy automatically.',
+    holdOrTapSpeakBtn: 'Tap or Hold to Speak Lock (30s)',
+    transcribingLock: 'Transcribing Voice Lock...',
+    tapStopLock: 'Tap to Lock Now',
+    voicePlaceholder: 'Say or type e.g. "Hamza 7 to 8 PM" or "Aslam 30 minutes"',
+    parseAndLockBtn: 'Parse & Lock Chair',
+    freeNow: 'FREE NOW',
+    busy: 'BUSY',
+    tapAgain30: 'Tap Again: Confirm +30m',
+    plus30: '+30m Busy',
+    tapAgain60: 'Tap Again: Confirm +1h',
+    plus60: '+1h Busy',
+    freeChair: 'Free Chair',
+    todayScheduleTitle: "Today's Live Schedule & Chair Timeline",
+    unflaggedClear: 'Unflagged entries clear automatically',
+    seatBtn: 'Seat',
+    markDone: 'Mark Done ✓',
+    flaggedHeld: 'Flagged · Held',
+    doneTick: 'Done ✓',
+    reviewQueued: 'T+2h Review Queued',
+    walkInQueueTitle: 'Live Walk-In Queue & ETA',
+    addWalkIn: 'Add Walk-In',
+    closeBtn: 'Close',
+    queueGuest: 'Queue Guest ✓',
+    callNext: 'Call Next',
+    prepaidPackagesTitle: 'Prepaid Session Packages & Passes',
+    issuePass: 'Issue Pass',
+    createPass: 'Create Prepaid Pass ✓',
+    useSession: 'Use 1 Session',
+    completedTick: 'Completed ✓',
+    bridalTrackerTitle: 'Bridal / Groom Event Advance Tracker',
+    bridalLadiesTitle: 'Bridal Suite & Female-Only Event Advance Tracker',
+    addBridalEvent: 'Add Bridal / Event',
+    saveBridalAdvance: 'Save Bridal Advance ✓',
+    markSettled: 'Mark Settled ✓',
+    fullSettled: 'Full Settled ✓',
+    topServicesTitle: 'Top Booked Services · Stylist Breakdown',
+    mostRequested: 'Most Requested',
+    remindersTitle: '24h & 2h Automated Reminders',
+    activeBadge: 'ACTIVE',
+    adv24h: '24-Hour Advance Reminder',
+    adv24hDesc: "Sent automatically day prior in client's locked language",
+    arr2h: '2-Hour Chair Arrival Ping',
+    arr2hDesc: 'Confirms arrival or announces 15m late replies aloud',
+    voiceSupportTitle: 'Voice Support with Founder',
+    sendToFounder: 'Send to Founder',
+    sending: 'Sending...',
+    playVoice: 'Play Voice',
+    stopVoice: 'Stop',
+    staffBarbers: 'Staff & Barbers',
+    staffStylists: 'Staff & Stylists',
+    servicesRates: 'Services & Rates',
+    salonHours: 'Salon Hours',
+    automationRewards: 'Automation & Rewards',
+    windowQrPoster: 'Window QR Poster',
+  },
+  ur: {
+    whatsappConnected: 'واٹس ایپ گیٹ وے · فعال',
+    liveFloor: 'لائیو فلور',
+    manage: 'مینج کریں',
+    counterSleep: 'کاؤنٹر سلیپ',
+    keepCounterAwake: 'کاؤنٹر بیدار کریں',
+    wakeOn: 'اسکرین آن',
+    wakeOff: 'اسکرین آف',
+    auxBoost: 'آکس بوسٹ',
+    boost: 'بوسٹ',
+    tapEnableAudio: 'آڈیو الرٹس آن کریں',
+    founder: 'فاؤنڈر',
+    logOut: 'لاگ آؤٹ',
+    activeShopTier: 'فعال شاپ / پیکج:',
+    todayRevenue: 'آج کی آمدنی',
+    reminders24_2: '24 گھنٹے / 2 گھنٹے ریمائنڈر',
+    activeTick: 'فعال ✓',
+    pendingDeposits: 'باقی ایڈوانس',
+    stop: 'روکیں',
+    urgentAlerts: 'فوری الرٹس',
+    actionRequired: 'کارروائی درکار',
+    markResolved: 'حل شدہ ✓',
+    viewScreenshot: 'اسکرین شاٹ دیکھیں',
+    hideProof: 'ثبوت چھپائیں',
+    verifyDeposit: 'ڈپازٹ تصدیق کریں ✓',
+    markHandled: 'ہینڈل ہو گیا ✓',
+    quickChairLock: 'فوری چیئر لاک · آواز اور 2-ٹیپ بٹن',
+    quickChairSub:
+      'بولنے کے لیے مائیک دبائیں یا ٹیپ کریں (مثلاً "حمزہ 30 منٹ") یا بغیر آواز 2-ٹیپ سے واک ان چیئر مصروف کریں۔',
+    holdOrTapSpeakBtn: 'بول کر چیئر لاک کریں (30s)',
+    transcribingLock: 'آواز سمجھی جا رہی ہے...',
+    tapStopLock: 'لاک کرنے کے لیے ٹیپ کریں',
+    voicePlaceholder: 'بولیں یا لکھیں مثلاً "Hamza 7 to 8 PM" یا "Aslam 30 minutes"',
+    parseAndLockBtn: 'چیئر لاک کریں',
+    freeNow: 'فارغ ہے',
+    busy: 'مصروف',
+    tapAgain30: 'دوبارہ دبائیں: +30 منٹ',
+    plus30: '+30 منٹ مصروف',
+    tapAgain60: 'دوبارہ دبائیں: +1 گھنٹہ',
+    plus60: '+1 گھنٹہ مصروف',
+    freeChair: 'چیئر فارغ کریں',
+    todayScheduleTitle: 'آج کا لائیو شیڈول اور چیئر ٹائم لائن',
+    unflaggedClear: 'غیر نشان زد انٹریز خودکار مکمل ہوں گی',
+    seatBtn: 'سیٹ پر بٹھائیں',
+    markDone: 'مکمل ✓',
+    flaggedHeld: 'نشان زد · روکا گیا',
+    doneTick: 'مکمل ✓',
+    reviewQueued: '2 گھنٹے بعد ریویو شیڈول',
+    walkInQueueTitle: 'لائیو واک ان قطار اور وقت',
+    addWalkIn: 'واک ان شامل کریں',
+    closeBtn: 'بند کریں',
+    queueGuest: 'قطار میں شامل کریں ✓',
+    callNext: 'اگلا گاہک بلائیں',
+    prepaidPackagesTitle: 'پری پیڈ سیشن پیکجز اور پاس',
+    issuePass: 'پاس جاری کریں',
+    createPass: 'پری پیڈ پاس بنائیں ✓',
+    useSession: '1 سیشن استعمال کریں',
+    completedTick: 'مکمل ✓',
+    bridalTrackerTitle: 'برائیڈل / گروم ایونٹ ایڈوانس ٹریکر',
+    bridalLadiesTitle: 'برائیڈل سوئٹ اور لیڈیز ایونٹ ایڈوانس',
+    addBridalEvent: 'نیا ایونٹ شامل کریں',
+    saveBridalAdvance: 'ایڈوانس محفوظ کریں ✓',
+    markSettled: 'مکمل ادا شدہ ✓',
+    fullSettled: 'مکمل تصفیہ ✓',
+    topServicesTitle: 'سب سے زیادہ بک ہونے والی سروسز',
+    mostRequested: 'زیادہ طلب',
+    remindersTitle: '24 گھنٹے اور 2 گھنٹے خودکار ریمائنڈرز',
+    activeBadge: 'فعال',
+    adv24h: '24 گھنٹے پہلے ریمائنڈر',
+    adv24hDesc: 'ایک دن پہلے گاہک کی زبان میں خودکار بھیجا جاتا ہے',
+    arr2h: '2 گھنٹے پہلے آمد کی یاددہانی',
+    arr2hDesc: 'آمد کی تصدیق یا 15 منٹ تاخیر آواز میں سناتا ہے',
+    voiceSupportTitle: 'فاؤنڈر کے ساتھ وائس سپورٹ',
+    sendToFounder: 'فاؤنڈر کو بھیجیں',
+    sending: 'بھیجا جا رہا ہے...',
+    playVoice: 'آواز چلائیں',
+    stopVoice: 'روکیں',
+    staffBarbers: 'اسٹاف اور باربرز',
+    staffStylists: 'اسٹاف اور اسٹائلسٹ',
+    servicesRates: 'سروسز اور ریٹس',
+    salonHours: 'سیلون کے اوقات',
+    automationRewards: 'آٹومیشن اور ریوارڈز',
+    windowQrPoster: 'ونڈو QR پوسٹر',
+  },
+  ar: {
+    whatsappConnected: 'بوابة واتساب · متصل',
+    liveFloor: 'الصالة المباشرة',
+    manage: 'الإدارة',
+    counterSleep: 'وضع السكون',
+    keepCounterAwake: 'إيقاظ الكاونتر',
+    wakeOn: 'الشاشة مفعلة',
+    wakeOff: 'الشاشة متوقفة',
+    auxBoost: 'تضخيم AUX',
+    boost: 'تضخيم',
+    tapEnableAudio: 'اضغط لتفعيل التنبيهات الصوتية',
+    founder: 'المؤسس',
+    logOut: 'تسجيل الخروج',
+    activeShopTier: 'الصالون / الباقة النشطة:',
+    todayRevenue: 'إيرادات اليوم',
+    reminders24_2: 'تذكيرات 24س / 2س',
+    activeTick: 'مفعل ✓',
+    pendingDeposits: 'العربون المعلق',
+    stop: 'إيقاف',
+    urgentAlerts: 'تنبيهات عاجلة',
+    actionRequired: 'يتطلب إجراء',
+    markResolved: 'تم الحل ✓',
+    viewScreenshot: 'عرض الإيصال',
+    hideProof: 'إخفاء الإثبات',
+    verifyDeposit: 'تأكيد العربون ✓',
+    markHandled: 'تمت المعالجة ✓',
+    quickChairLock: 'قفل الكرسي السريع · بالصوت أو بنقرتين',
+    quickChairSub:
+      'اضغط أو ثبت الميكروفون للتحدث (مثال: "Hamza 30 minutes") أو استخدم أزرار المدة لقفل كرسي الزبون الحضوري فوراً.',
+    holdOrTapSpeakBtn: 'اضغط أو ثبت للتحدث والقفل (30ث)',
+    transcribingLock: 'جاري تحويل الصوت...',
+    tapStopLock: 'اضغط للإيقاف والقفل',
+    voicePlaceholder: 'قل أو اكتب مثال: "Hamza 7 to 8 PM" أو "Aslam 30 minutes"',
+    parseAndLockBtn: 'تحليل وقفل الكرسي',
+    freeNow: 'متاح الآن',
+    busy: 'مشغول',
+    tapAgain30: 'اضغط مجدداً: تأكيد +30د',
+    plus30: '+30د مشغول',
+    tapAgain60: 'اضغط مجدداً: تأكيد +1س',
+    plus60: '+1س مشغول',
+    freeChair: 'تحرير الكرسي',
+    todayScheduleTitle: 'جدول اليوم المباشر وحالة الكراسي',
+    unflaggedClear: 'تكتمل المواعيد غير المعلمة تلقائياً',
+    seatBtn: 'إجلاس',
+    markDone: 'إنهاء ✓',
+    flaggedHeld: 'معلم · محجوز',
+    doneTick: 'مكتمل ✓',
+    reviewQueued: 'طلب تقييم بعد ساعتين',
+    walkInQueueTitle: 'قائمة انتظار الحضور المباشر',
+    addWalkIn: 'إضافة حضور',
+    closeBtn: 'إغلاق',
+    queueGuest: 'إضافة للانتظار ✓',
+    callNext: 'استدعاء التالي',
+    prepaidPackagesTitle: 'باقات الجلسات المسبقة والبطاقات',
+    issuePass: 'إصدار باقة',
+    createPass: 'إنشاء الباقة ✓',
+    useSession: 'خصم جلسة واحدة',
+    completedTick: 'مكتمل ✓',
+    bridalTrackerTitle: 'متابعة عربون مناسبات العرائس والفرسان',
+    bridalLadiesTitle: 'متابعة عربون باقات العرائس والمناسبات',
+    addBridalEvent: 'إضافة مناسبة',
+    saveBridalAdvance: 'حفظ العربون ✓',
+    markSettled: 'تمت التصفية ✓',
+    fullSettled: 'مدفوع بالكامل ✓',
+    topServicesTitle: 'أكثر الخدمات طلباً · أداء الموظفين',
+    mostRequested: 'الأكثر طلباً',
+    remindersTitle: 'تذكيرات تلقائية قبل 24س وساعتين',
+    activeBadge: 'مفعل',
+    adv24h: 'تذكير قبل 24 ساعة',
+    adv24hDesc: 'يُرسل تلقائياً قبل الموعد بيوم بلغة العميل المسجلة',
+    arr2h: 'تأكيد الوصول قبل ساعتين',
+    arr2hDesc: 'يؤكد الحضور أو يذيع رد التأخير 15 دقيقة صوتياً',
+    voiceSupportTitle: 'الدعم الصوتي المباشر مع المؤسس',
+    sendToFounder: 'إرسال للمؤسس',
+    sending: 'جاري الإرسال...',
+    playVoice: 'تشغيل الصوت',
+    stopVoice: 'إيقاف',
+    staffBarbers: 'الموظفون والحلاقون',
+    staffStylists: 'الموظفات والخبيرات',
+    servicesRates: 'الخدمات والأسعار',
+    salonHours: 'ساعات العمل',
+    automationRewards: 'الأتمتة والمكافآت',
+    windowQrPoster: 'ملصق QR للواجهة',
+  },
+};
+
 export const UPGRADE_MODAL_I18N: Record<
   VoiceLang,
   {
@@ -968,6 +1308,7 @@ interface SalonOwnerDashboardProps {
   isFounderInspector?: boolean;
   sectionMode?: 'LIVE' | 'MANAGE';
   onSectionModeChange?: (mode: 'LIVE' | 'MANAGE') => void;
+  onOwnerLangChange?: (lang: 'en' | 'ur' | 'ar') => void;
   onOpenSimulator?: () => void;
   onClose?: () => void;
   voiceThreads?: VoiceThreadItem[];
@@ -984,6 +1325,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   isFounderInspector = false,
   sectionMode,
   onSectionModeChange,
+  onOwnerLangChange,
   onClose,
   voiceThreads,
   onVoiceThreadsUpdated,
@@ -1201,6 +1543,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
   // Owner Onboarding / Voice Language & Shop-Floor Loudspeaker Controls
   const [ownerLang, setOwnerLang] = useState<VoiceLang>(currentSalon.onboardingLanguage);
+  useEffect(() => {
+    onOwnerLangChange?.(ownerLang);
+  }, [ownerLang, onOwnerLangChange]);
+  const ui = OWNER_UI_I18N[ownerLang];
+  const isOwnerRtl = ownerLang === 'ur' || ownerLang === 'ar';
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
   const [voiceFilter, setVoiceFilter] = useState<'ALL' | 'URGENT_ONLY'>('ALL');
   const [isWakeLockActive, setIsWakeLockActive] = useState(true);
@@ -1208,6 +1555,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [currentlySpeakingText, setCurrentlySpeakingText] = useState<string | null>(null);
   const wakeLockRef = useRef<{ release?: () => Promise<void> } | null>(null);
   const speakDelayTimerRef = useRef<number | null>(null);
+  const ttsAudioCacheRef = useRef<Map<string, string>>(new Map());
+  const activeTtsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const speechKeepAliveRef = useRef<number | null>(null);
+  const activeSpeakTokenRef = useRef<number>(0);
 
   // Sleep-Window Mode & Overnight Queue (Silent when sleeping, Catch-up Replay when woken)
   const [isCounterSleeping, setIsCounterSleeping] = useState(false);
@@ -1227,8 +1578,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   // Stylist / Barber Top Services Breakdown Selection
   const [selectedBarberForServices, setSelectedBarberForServices] = useState<string>('ALL');
 
-  // $0.00 Zero-Cost Browser Voice Chair Blocker + 2-Tap Quick Duration Pills
+  // $0.00 Zero-Cost Browser Voice Chair Blocker + 2-Tap Quick Duration Pills + MediaRecorder Fallback
   const [isListeningMic, setIsListeningMic] = useState(false);
+  const [isTranscribingChairMic, setIsTranscribingChairMic] = useState(false);
   const [micElapsedSecs, setMicElapsedSecs] = useState(0);
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [armedQuickPill, setArmedQuickPill] = useState<{
@@ -1238,6 +1590,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const recognitionRef = useRef<any>(null);
   const micTimerRef = useRef<number | null>(null);
   const latestTranscriptRef = useRef<string>('');
+  const micPressStartRef = useRef<number>(0);
+  const micMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const micAudioChunksRef = useRef<Blob[]>([]);
+  const micMediaStreamRef = useRef<MediaStream | null>(null);
 
   // Query 6: Voice Support with Founder (Compressed Opus -> /api/translate-voice -> Unified Voice Inbox)
   const founderVoiceCardRef = useRef<HTMLDivElement | null>(null);
@@ -1483,57 +1839,36 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         }),
       });
 
-      if (msgRes.ok) {
-        const saved = (await msgRes.json()) as {
-          thread?: VoiceThreadItem;
-          threads?: VoiceThreadItem[];
-        };
-        if (Array.isArray(saved.threads) && saved.threads.length > 0) {
-          setSalonVoiceThreads(saved.threads);
-          onVoiceThreadsUpdated?.(saved.threads);
-        } else if (saved.thread) {
-          const nextThreads = salonVoiceThreads.some((t) => t.id === saved.thread!.id)
-            ? salonVoiceThreads.map((t) => (t.id === saved.thread!.id ? saved.thread! : t))
-            : [saved.thread!, ...salonVoiceThreads];
-          setSalonVoiceThreads(nextThreads);
-          onVoiceThreadsUpdated?.(nextThreads);
-        }
-      } else {
-        const nowMs = Date.now();
-        const localMessage = {
-          id: `msg-${nowMs}`,
-          senderRole: 'SALON_OWNER' as const,
-          senderLabel: `${currentSalon.owner} (${currentSalon.name})`,
-          originalText: resolvedTranscript,
-          translatedText: resolvedReplyText,
-          detectedInputLanguage: resolvedDetectedLang,
-          targetLocale: activeOwnerVoiceLocale,
-          audioDataUrl: resolvedAudioDataUrl || undefined,
-          sizeBytes: ownerRecordedClip?.sizeBytes || 0,
-          createdAtMs: nowMs,
-          expiresAtMs: nowMs + 7 * 24 * 60 * 60 * 1000,
-        };
-        const updatedThread: VoiceThreadItem = {
-          ...activeFounderVoiceThread,
-          unread: true,
-          receivedAgo: 'Just now',
-          transcript: resolvedTranscript,
-          speechPlayText: resolvedReplyText,
-          messages: [...activeFounderVoiceThread.messages, localMessage],
-        };
-        const nextThreads = salonVoiceThreads.some((t) => t.id === updatedThread.id)
-          ? salonVoiceThreads.map((t) => (t.id === updatedThread.id ? updatedThread : t))
-          : [updatedThread, ...salonVoiceThreads];
+      if (!msgRes.ok) {
+        const errPayload = (await msgRes.json().catch(() => ({}))) as { error?: string };
+        setFounderVoiceError(
+          errPayload.error || `Could not deliver voice note to Founder (HTTP ${msgRes.status}).`
+        );
+        return;
+      }
+
+      const saved = (await msgRes.json()) as {
+        thread?: VoiceThreadItem;
+        threads?: VoiceThreadItem[];
+      };
+      if (Array.isArray(saved.threads) && saved.threads.length > 0) {
+        setSalonVoiceThreads(saved.threads);
+        onVoiceThreadsUpdated?.(saved.threads);
+      } else if (saved.thread) {
+        const nextThreads = [
+          saved.thread!,
+          ...salonVoiceThreads.filter((t) => t.id !== saved.thread!.id),
+        ];
         setSalonVoiceThreads(nextThreads);
         onVoiceThreadsUpdated?.(nextThreads);
       }
 
       setOwnerRecordedClip(null);
       setOwnerVoiceDraft('');
-      setMaintToast('🎙️ Voice note sent to Founder Voice Inbox.');
+      setMaintToast('🎙️ Voice note delivered to Founder Voice Inbox.');
       window.setTimeout(() => setMaintToast(null), 3500);
     } catch {
-      setFounderVoiceError('Unable to send voice note right now. Please try again.');
+      setFounderVoiceError('Unable to reach server to deliver voice note. Please check connection and retry.');
     } finally {
       setIsSendingFounderVoice(false);
     }
@@ -1548,7 +1883,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       ownerVoiceLang: 'ur',
       summary: 'New 03:30 PM booking · Barber: Master Aslam · Master Haircut & Skin Fade',
       spokenText:
-        'Hamza Sahab! Master Aslam ki nayi appointment Bilal Ahmed kay sath 3:30 PM par confirm ho gayi hai: Master Haircut and Skin Fade.',
+        'حمزہ صاحب! ماسٹر اسلم کی نئی اپائنٹمنٹ بلال احمد کے ساتھ 3:30 PM پر کنفرم ہو گئی ہے: ماسٹر ہیئر کٹ اور سکن فید۔',
       time: '03:15 PM',
       isUrgent: false,
     },
@@ -1975,55 +2310,23 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }
   };
 
-  // Strict Localized Bluetooth/AUX Voice Engine: Speaks strictly in ur-PK, ar-SA, or en-US
-  // Plays Bluetooth wake-up chime + 320ms pre-speech buffer so external speakers don't clip opening words
-  const speakHandsFree = (text: string, lang: VoiceLang = ownerLang) => {
-    if (!isVoiceEnabled || isFounderInspector || isCounterSleepingRef.current) return;
-    playFreeNotificationChime(isLoudspeakerBoostActive);
-    setCurrentlySpeakingText(text);
-
-    if (speakDelayTimerRef.current) {
-      window.clearTimeout(speakDelayTimerRef.current);
-    }
-
-    const strictLangCode = lang === 'ur' ? 'ur-PK' : lang === 'ar' ? 'ar-SA' : 'en-US';
-    const strictPrefix = lang === 'ur' ? 'ur' : lang === 'ar' ? 'ar' : 'en';
-
-    speakDelayTimerRef.current = window.setTimeout(() => {
-      try {
-        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-          window.speechSynthesis.cancel();
-          const voices = window.speechSynthesis.getVoices() || [];
-          const matchedVoice = voices.find((v) =>
-            v.lang.toLowerCase().startsWith(strictPrefix)
-          );
-
-          const utterance = new SpeechSynthesisUtterance(text);
-          if (matchedVoice) utterance.voice = matchedVoice;
-          // Strictly preserve owner's selected language (never downgrade ur-PK / ar-SA to en-US)
-          utterance.lang = strictLangCode;
-          utterance.rate = isLoudspeakerBoostActive ? 0.92 : 0.96;
-          utterance.pitch = 1.0;
-          utterance.volume = 1.0;
-          utterance.onend = () => setCurrentlySpeakingText(null);
-          utterance.onerror = () => setCurrentlySpeakingText(null);
-          window.speechSynthesis.speak(utterance);
-          setTimeout(() => {
-            setCurrentlySpeakingText((prev) => (prev === text ? null : prev));
-          }, 12000);
-        } else {
-          setTimeout(() => setCurrentlySpeakingText(null), 5000);
-        }
-      } catch {
-        setTimeout(() => setCurrentlySpeakingText(null), 5000);
-      }
-    }, 320);
-  };
-
+  // Stop all active human neural MP3 or WebSpeech announcements cleanly
   const stopSpeaking = () => {
+    activeSpeakTokenRef.current += 1;
     if (speakDelayTimerRef.current) {
       window.clearTimeout(speakDelayTimerRef.current);
       speakDelayTimerRef.current = null;
+    }
+    if (speechKeepAliveRef.current) {
+      window.clearInterval(speechKeepAliveRef.current);
+      speechKeepAliveRef.current = null;
+    }
+    if (activeTtsAudioRef.current) {
+      try {
+        activeTtsAudioRef.current.pause();
+        activeTtsAudioRef.current.currentTime = 0;
+      } catch {}
+      activeTtsAudioRef.current = null;
     }
     try {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -2033,6 +2336,138 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       // Ignore
     }
     setCurrentlySpeakingText(null);
+  };
+
+  // Pure Human Neural Voice Engine (/api/voice/tts -> ur-PK-AsadNeural / ar-AE-HamdanNeural / en-US-AndrewNeural)
+  // Fallback to sentence-chunked Web Speech with keep-alive so full messages never cut off prematurely
+  const speakHandsFree = (text: string, lang: VoiceLang = ownerLang) => {
+    if (!isVoiceEnabled || isFounderInspector || isCounterSleepingRef.current || !text.trim()) return;
+    stopSpeaking();
+    const speakToken = activeSpeakTokenRef.current;
+
+    playFreeNotificationChime(isLoudspeakerBoostActive);
+    setCurrentlySpeakingText(text);
+
+    const strictLangCode = lang === 'ur' ? 'ur-PK' : lang === 'ar' ? 'ar-AE' : 'en-US';
+    const strictPrefix = lang === 'ur' ? 'ur' : lang === 'ar' ? 'ar' : 'en';
+
+    const playBrowserFallback = () => {
+      if (activeSpeakTokenRef.current !== speakToken) return;
+      try {
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const voices = window.speechSynthesis.getVoices() || [];
+          const matchedVoice =
+            voices.find((v) => v.lang.toLowerCase().startsWith(strictPrefix)) ||
+            (strictPrefix === 'ur'
+              ? voices.find((v) => v.lang.toLowerCase().startsWith('hi'))
+              : undefined);
+
+          // Split into natural clauses so Chrome/Android never drops mid-sentence on long Urdu/Arabic alerts
+          const clauses = text
+            .split(/(?<=[.!?۔،؟:])\s+/)
+            .map((c) => c.trim())
+            .filter(Boolean);
+          const parts = clauses.length > 0 ? clauses : [text];
+
+          // Chrome pause/resume keep-alive workaround prevents 15s silent cutoff bug
+          speechKeepAliveRef.current = window.setInterval(() => {
+            try {
+              if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+                window.speechSynthesis.pause();
+                window.speechSynthesis.resume();
+              }
+            } catch {}
+          }, 5000);
+
+          let idx = 0;
+          const speakNext = () => {
+            if (activeSpeakTokenRef.current !== speakToken) return;
+            if (idx >= parts.length) {
+              if (speechKeepAliveRef.current) {
+                window.clearInterval(speechKeepAliveRef.current);
+                speechKeepAliveRef.current = null;
+              }
+              setCurrentlySpeakingText((prev) => (prev === text ? null : prev));
+              return;
+            }
+            const u = new SpeechSynthesisUtterance(parts[idx++]);
+            if (matchedVoice) u.voice = matchedVoice;
+            u.lang = strictPrefix === 'ar' ? 'ar-SA' : strictLangCode;
+            u.rate = isLoudspeakerBoostActive ? 0.92 : 0.96;
+            u.pitch = 1.0;
+            u.volume = 1.0;
+            u.onend = () => speakNext();
+            u.onerror = () => speakNext();
+            window.speechSynthesis.speak(u);
+          };
+          speakNext();
+
+          const safetyMs = Math.max(25000, text.length * 160);
+          window.setTimeout(() => {
+            if (activeSpeakTokenRef.current === speakToken) {
+              stopSpeaking();
+            }
+          }, safetyMs);
+          return;
+        }
+      } catch {
+        // ignore fallback errors
+      }
+      window.setTimeout(() => {
+        setCurrentlySpeakingText((prev) => (prev === text ? null : prev));
+      }, 6000);
+    };
+
+    speakDelayTimerRef.current = window.setTimeout(async () => {
+      if (activeSpeakTokenRef.current !== speakToken) return;
+      const cacheKey = `${strictLangCode}::${text}`;
+      try {
+        let dataUrl = ttsAudioCacheRef.current.get(cacheKey);
+        if (!dataUrl) {
+          const res = await fetch('/api/voice/tts', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, locale: strictLangCode }),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as {
+              audioBase64?: string;
+              audioMimeType?: string;
+            };
+            if (data.audioBase64) {
+              dataUrl = `data:${data.audioMimeType || 'audio/mpeg'};base64,${data.audioBase64}`;
+              ttsAudioCacheRef.current.set(cacheKey, dataUrl);
+            }
+          }
+        }
+
+        if (activeSpeakTokenRef.current !== speakToken) return;
+        if (dataUrl) {
+          const audio = new Audio(dataUrl);
+          activeTtsAudioRef.current = audio;
+          audio.playbackRate = isLoudspeakerBoostActive ? 0.96 : 1.0;
+          audio.onended = () => {
+            if (activeSpeakTokenRef.current === speakToken) {
+              activeTtsAudioRef.current = null;
+              setCurrentlySpeakingText((prev) => (prev === text ? null : prev));
+            }
+          };
+          audio.onerror = () => {
+            if (activeSpeakTokenRef.current === speakToken) {
+              activeTtsAudioRef.current = null;
+              playBrowserFallback();
+            }
+          };
+          await audio.play();
+          return;
+        }
+      } catch {
+        // Fallback smoothly below
+      }
+      playBrowserFallback();
+    }, 320);
   };
 
   const toggleScreenWakeLock = async () => {
@@ -3313,6 +3748,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     try {
       recognitionRef.current?.stop?.();
     } catch {}
+    if (micMediaRecorderRef.current && micMediaRecorderRef.current.state !== 'inactive') {
+      try {
+        micMediaRecorderRef.current.stop();
+      } catch {}
+    }
     setIsListeningMic(false);
     setMicElapsedSecs(0);
 
@@ -3329,6 +3769,100 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }
   };
 
+  const startMediaRecorderChairFallback = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMaintToast('Microphone unavailable. Please allow mic access or type below / use +30m/+1h pills.');
+      setTimeout(() => setMaintToast(null), 5000);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      });
+      micMediaStreamRef.current = stream;
+      const mimeCandidates = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm'];
+      const mime = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || '';
+      const recorder = new MediaRecorder(
+        stream,
+        mime ? { mimeType: mime, audioBitsPerSecond: 20000 } : { audioBitsPerSecond: 20000 }
+      );
+      micAudioChunksRef.current = [];
+      micMediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (ev) => {
+        if (ev.data.size > 0) micAudioChunksRef.current.push(ev.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        micMediaStreamRef.current = null;
+        micMediaRecorderRef.current = null;
+        const resolvedMime = recorder.mimeType || mime || 'audio/webm';
+        const blob = new Blob(micAudioChunksRef.current, { type: resolvedMime });
+        if (blob.size < 400) return;
+
+        setIsTranscribingChairMic(true);
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          try {
+            const raw = typeof reader.result === 'string' ? reader.result : '';
+            const comma = raw.indexOf(',');
+            const base64 = comma >= 0 ? raw.slice(comma + 1) : raw;
+            if (!base64) return;
+
+            const res = await fetch('/api/voice/chair-intent', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                audioBase64: base64,
+                audioMimeType: resolvedMime,
+                lang: ownerLang,
+              }),
+            });
+            const data = (await res.json().catch(() => ({}))) as { transcript?: string; error?: string };
+            if (res.ok && data.transcript?.trim()) {
+              const phrase = data.transcript.trim();
+              setVoiceTranscript(phrase);
+              const intent = parseVoiceChairIntent(phrase, barbersList);
+              executeChairLock({
+                ...intent,
+                source: 'VOICE',
+                transcript: phrase,
+                silent: false,
+              });
+            } else {
+              setMaintToast(data.error || 'Could not recognize voice command. Try typing or use +30m/+1h pills.');
+              setTimeout(() => setMaintToast(null), 5000);
+            }
+          } catch {
+            setMaintToast('Could not transcribe voice lock right now. Use Quick Command bar or +30m/+1h pills.');
+            setTimeout(() => setMaintToast(null), 5000);
+          } finally {
+            setIsTranscribingChairMic(false);
+          }
+        };
+        reader.readAsDataURL(blob);
+      };
+
+      recorder.start(250);
+      setIsListeningMic(true);
+      setMicElapsedSecs(0);
+      micTimerRef.current = window.setInterval(() => {
+        setMicElapsedSecs((prev) => {
+          if (prev + 1 >= 30) {
+            stopHoldToSpeakMic();
+            return 30;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch {
+      setIsListeningMic(false);
+      setMaintToast('Microphone permission denied. Please allow mic access or use +30m/+1h pills.');
+      setTimeout(() => setMaintToast(null), 4500);
+    }
+  };
+
   const startHoldToSpeakMic = () => {
     if (isListeningMic) return;
     const SpeechRec =
@@ -3341,10 +3875,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setVoiceTranscript('');
 
     if (!SpeechRec) {
-      setMaintToast(
-        'Native SpeechRecognition unavailable in this browser preview. Use Quick Voice Command bar or +30m/+1h pills.'
-      );
-      setTimeout(() => setMaintToast(null), 5000);
+      void startMediaRecorderChairFallback();
       return;
     }
 
@@ -3363,7 +3894,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         setVoiceTranscript(combined.trim());
       };
 
-      recognition.onerror = () => {
+      recognition.onerror = (ev: any) => {
+        const code = ev?.error || '';
+        if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture') {
+          if (micTimerRef.current) {
+            window.clearInterval(micTimerRef.current);
+            micTimerRef.current = null;
+          }
+          setIsListeningMic(false);
+          void startMediaRecorderChairFallback();
+          return;
+        }
         stopHoldToSpeakMic();
       };
 
@@ -3391,9 +3932,26 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         });
       }, 1000);
     } catch {
-      setIsListeningMic(false);
-      setMaintToast('Could not access browser microphone. Use Quick Voice Command or +30m/+1h pills.');
-      setTimeout(() => setMaintToast(null), 4000);
+      void startMediaRecorderChairFallback();
+    }
+  };
+
+  const handleChairMicPointerDown = () => {
+    if (isTranscribingChairMic) return;
+    if (isListeningMic) {
+      stopHoldToSpeakMic();
+      return;
+    }
+    micPressStartRef.current = Date.now();
+    startHoldToSpeakMic();
+  };
+
+  const handleChairMicPointerUp = () => {
+    if (!isListeningMic) return;
+    const heldMs = Date.now() - micPressStartRef.current;
+    // Quick tap (< 450ms): keep listening hands-free until second tap; Hold (>= 450ms): release to lock immediately
+    if (heldMs >= 450) {
+      stopHoldToSpeakMic();
     }
   };
 
@@ -3701,7 +4259,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center gap-2 rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950]">
               <span className="size-2 rounded-full bg-[#3FB950]" />
-              <span>WhatsApp Gateway · Connected</span>
+              <span>{ui.whatsappConnected}</span>
             </div>
             <span
               className={`rounded-xl border px-2.5 py-1.5 text-[11px] font-mono font-bold ${
@@ -3729,7 +4287,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 }`}
               >
                 <Scissors className="size-3.5" />
-                <span>Live Floor</span>
+                <span>{ui.liveFloor}</span>
               </button>
               <button
                 type="button"
@@ -3741,7 +4299,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 }`}
               >
                 <SlidersHorizontal className="size-3.5" />
-                <span>Manage</span>
+                <span>{ui.manage}</span>
               </button>
             </div>
 
@@ -3775,7 +4333,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               {isCounterSleeping ? (
                 <>
                   <Sun className="size-4 shrink-0" />
-                  <span>Keep Counter Awake</span>
+                  <span>{ui.keepCounterAwake}</span>
                   {overnightQueue.length > 0 && (
                     <span className="rounded bg-[#0D1117] px-1.5 py-0.5 text-[10px] text-[#D29922]">
                       {overnightQueue.length}
@@ -3785,7 +4343,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               ) : (
                 <>
                   <Moon className="size-4 shrink-0" />
-                  <span>Counter Sleep</span>
+                  <span>{ui.counterSleep}</span>
                 </>
               )}
             </button>
@@ -3801,7 +4359,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               title="Keep shop screen awake for hands-free announcements"
             >
               <Zap className="size-3.5 shrink-0" />
-              <span className="hidden sm:inline">{isWakeLockActive ? 'Wake ON' : 'Wake OFF'}</span>
+              <span className="hidden sm:inline">{isWakeLockActive ? ui.wakeOn : ui.wakeOff}</span>
             </button>
 
             <button
@@ -3824,7 +4382,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               title="Boost chime & Bluetooth speaker clarity for noisy salon hours"
             >
               <BellRing className="size-3.5 shrink-0" />
-              <span className="hidden sm:inline">{isLoudspeakerBoostActive ? 'AUX Boost' : 'Boost'}</span>
+              <span className="hidden sm:inline">{isLoudspeakerBoostActive ? ui.auxBoost : ui.boost}</span>
             </button>
 
             <button
@@ -3849,7 +4407,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 title="Tap once on mobile so loud chimes & spoken alerts play automatically"
               >
                 <Volume2 className="size-4 shrink-0" />
-                <span>Tap to Enable Audio Alerts</span>
+                <span>{ui.tapEnableAudio}</span>
               </button>
             )}
 
@@ -3861,7 +4419,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               aria-label="Voice Support with Founder"
             >
               <Mic className="size-4 shrink-0" />
-              <span className="hidden sm:inline">Founder</span>
+              <span className="hidden sm:inline">{ui.founder}</span>
               {hasFounderVoiceReply && (
                 <span className="size-2 rounded-full bg-[#06B6D4]" aria-hidden="true" />
               )}
@@ -3875,7 +4433,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 title="Sign out"
               >
                 <LogOut className="size-3.5" />
-                <span className="hidden sm:inline">Log Out</span>
+                <span className="hidden sm:inline">{ui.logOut}</span>
               </button>
             )}
 
@@ -3921,7 +4479,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         {!onboardedData && !lockedSalonId && authUser?.userRole === 'FOUNDER' && (
           <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#21262D]">
             <span className="text-[10px] font-mono font-bold uppercase text-[#8B949E]">
-              Active Shop / Tier:
+              {ui.activeShopTier}
             </span>
             {salonsState.map((s) => {
               const sTier: SalonPackageTier =
@@ -3946,7 +4504,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         )}
 
         {/* Salon Title + Today's Total Revenue & Tier-Gated Secondary Metric */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-[#21262D]">
+        <div
+          dir={isOwnerRtl ? 'rtl' : 'ltr'}
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-[#21262D]"
+        >
           <div className="min-w-0">
             <h1 className="text-lg sm:text-xl font-black text-[#F0F6FC] truncate">
               {currentSalon.name}
@@ -3959,9 +4520,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           <div className="grid grid-cols-2 gap-2.5 sm:flex sm:items-center shrink-0">
             <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2">
               <span className="text-[10px] font-mono uppercase tracking-wider text-[#8B949E] block">
-                Today&apos;s Revenue
+                {ui.todayRevenue}
               </span>
-              <span className="text-base sm:text-lg font-black font-mono tabular-nums text-[#D29922]">
+              <span dir="ltr" className="text-base sm:text-lg font-black font-mono tabular-nums text-[#D29922]">
                 {regionConfig.symbol}
                 {todayTotalRevenue.toLocaleString()}
               </span>
@@ -3969,18 +4530,18 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             {packageTier === 'STARTER' ? (
               <div className="rounded-xl border border-[#116329] bg-[#0D3822] px-3.5 py-2">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-[#3FB950] block">
-                  24h / 2h Reminders
+                  {ui.reminders24_2}
                 </span>
                 <span className="text-base sm:text-lg font-black font-mono tabular-nums text-[#3FB950]">
-                  Active ✓
+                  {ui.activeTick}
                 </span>
               </div>
             ) : (
               <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-[#8B949E] block">
-                  Pending Deposits
+                  {ui.pendingDeposits}
                 </span>
-                <span className="text-base sm:text-lg font-black font-mono tabular-nums text-[#D29922]">
+                <span dir="ltr" className="text-base sm:text-lg font-black font-mono tabular-nums text-[#D29922]">
                   {regionConfig.symbol}
                   {pendingDepositsTotal.toLocaleString()}
                 </span>
@@ -3999,7 +4560,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   Counter Sleep Active since {counterSleptAt || 'Closing'} · Audio Silenced
                 </p>
                 <p className="text-[#F0F6FC]/90 font-sans mt-0.5">
-                  {overnightQueue.length} overnight WhatsApp message(s) queued quietly. Tap &ldquo;Keep Counter Awake&rdquo; in the morning to replay aloud.
+                  {overnightQueue.length} overnight WhatsApp message(s) queued quietly. Tap &ldquo;{ui.keepCounterAwake}&rdquo; in the morning to replay aloud.
                 </p>
               </div>
             </div>
@@ -4008,7 +4569,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               onClick={handleToggleCounterSleep}
               className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-black uppercase shrink-0 transition"
             >
-              Keep Counter Awake ({overnightQueue.length})
+              {ui.keepCounterAwake} ({overnightQueue.length})
             </button>
           </div>
         )}
@@ -4030,7 +4591,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               onClick={stopSpeaking}
               className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 text-[11px] font-mono text-[#F0F6FC] shrink-0"
             >
-              Stop
+              {ui.stop}
             </button>
           </div>
         )}
@@ -4098,17 +4659,18 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           {totalUrgentCount > 0 && (
             <section
               aria-label="Urgent Floor Alerts"
+              dir={isOwnerRtl ? 'rtl' : 'ltr'}
               className="rounded-2xl border border-[#9E6A03] bg-[#161B22] p-4 sm:p-5 space-y-3"
             >
               <div className="flex items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="size-4 text-[#D29922] shrink-0" />
                   <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
-                    Urgent Alerts
+                    {ui.urgentAlerts}
                   </h2>
                 </div>
                 <span className="rounded-lg border border-[#9E6A03] bg-[#3B2E0B] px-2.5 py-0.5 text-[11px] font-mono font-bold text-[#D29922]">
-                  {totalUrgentCount} Action Required
+                  {totalUrgentCount} {ui.actionRequired}
                 </span>
               </div>
 
@@ -4140,7 +4702,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                       onClick={() => handleResolveOwnerAlert(alert.id)}
                       className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#3FB950] px-4 py-2 text-xs font-mono font-bold text-[#3FB950] shrink-0 transition"
                     >
-                      Mark Resolved ✓
+                      {ui.markResolved}
                     </button>
                   </div>
                 ))}
@@ -4161,12 +4723,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                               <span>{dep.method} Deposit Screenshot</span>
                             </span>
                             <span className="text-[11px] font-mono text-[#8B949E]">
-                              {dep.receivedAt} · Slot {dep.timeSlot}
+                              {dep.receivedAt} · {dep.timeSlot}
                             </span>
                           </div>
                           <p className="text-sm font-bold text-[#F0F6FC]">
                             {dep.clientName} ·{' '}
-                            <span className="font-mono text-[#D29922] tabular-nums">
+                            <span dir="ltr" className="font-mono text-[#D29922] tabular-nums">
                               {regionConfig.symbol}
                               {dep.amount.toLocaleString()}
                             </span>
@@ -4184,7 +4746,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             }
                             className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3 py-2 text-xs font-mono font-bold text-[#06B6D4] transition"
                           >
-                            {isExpanded ? 'Hide Proof' : 'View Screenshot'}
+                            {isExpanded ? ui.hideProof : ui.viewScreenshot}
                           </button>
                           <button
                             type="button"
@@ -4201,7 +4763,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             }}
                             className="min-h-[48px] rounded-xl bg-[#0D3822] border border-[#116329] hover:bg-[#116329]/50 px-4 py-2 text-xs font-mono font-bold text-[#3FB950] transition"
                           >
-                            Verify Deposit ✓
+                            {ui.verifyDeposit}
                           </button>
                         </div>
                       </div>
@@ -4255,7 +4817,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                       }}
                       className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-4 py-2 text-xs font-mono font-bold text-[#06B6D4] shrink-0 transition"
                     >
-                      Mark Handled ✓
+                      {ui.markHandled}
                     </button>
                   </div>
                 ))}
@@ -4263,9 +4825,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             </section>
           )}
 
-          {/* 2. QUICK CHAIR LOCK ($0.00 ZERO-COST VOICE BLOCKER + 2-TAP PILLS + WHATSAPP BUSY-REROUTE) */}
+          {/* 2. QUICK CHAIR LOCK (VOICE BLOCKER + 2-TAP PILLS + WHATSAPP BUSY-REROUTE) */}
           <section
             aria-label="Quick Chair Lock"
+            dir={isOwnerRtl ? 'rtl' : 'ltr'}
             className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-4"
           >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#30363D] pb-3.5">
@@ -4273,40 +4836,44 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 <div className="flex flex-wrap items-center gap-2">
                   <Lock className="size-4 text-[#58A6FF] shrink-0" />
                   <h2 className="text-base sm:text-lg font-black text-[#F0F6FC]">
-                    Quick Chair Lock · $0.00 Local Voice &amp; 2-Tap Pills
+                    {ui.quickChairLock}
                   </h2>
                 </div>
                 <p className="text-xs text-[#8B949E] font-sans mt-0.5">
-                  Block walk-in chairs hands-free with native browser SpeechRecognition ({ownerLang === 'ur' ? 'ur-PK' : ownerLang === 'ar' ? 'ar-SA' : 'en-US'}) or silent 2-tap duration pills. WhatsApp automatically marks busy barbers &amp; reroutes clients.
+                  {ui.quickChairSub}
                 </p>
               </div>
 
-              {/* Hold-to-Speak Mic Button (min-h-[48px], up to 30s continuous capture) */}
+              {/* Tap OR Hold to Speak Mic Button (supports Tap-to-Start / Tap-to-Stop & MediaRecorder fallback) */}
               <button
                 type="button"
-                onPointerDown={startHoldToSpeakMic}
-                onPointerUp={stopHoldToSpeakMic}
-                onPointerCancel={stopHoldToSpeakMic}
-                onClick={() => {
-                  if (isListeningMic) stopHoldToSpeakMic();
-                }}
-                className={`min-h-[48px] rounded-xl px-5 py-2.5 text-xs font-mono font-black uppercase transition flex items-center justify-center gap-2 shrink-0 select-none ${
+                disabled={isTranscribingChairMic}
+                onPointerDown={handleChairMicPointerDown}
+                onPointerUp={handleChairMicPointerUp}
+                className={`min-h-[48px] rounded-xl px-5 py-2.5 text-xs font-mono font-black uppercase transition flex items-center justify-center gap-2 shrink-0 select-none touch-manipulation ${
                   isListeningMic
                     ? 'bg-[#F85149] text-[#0D1117]'
+                    : isTranscribingChairMic
+                    ? 'bg-[#06B6D4] text-[#0D1117] opacity-80'
                     : 'bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117]'
                 }`}
               >
-                {isListeningMic ? (
+                {isTranscribingChairMic ? (
+                  <>
+                    <RefreshCw className="size-4 animate-spin" />
+                    <span>{ui.transcribingLock}</span>
+                  </>
+                ) : isListeningMic ? (
                   <>
                     <MicOff className="size-4" />
-                    <span className="tabular-nums">
-                      Listening 00:{String(micElapsedSecs).padStart(2, '0')} / 00:30 · Release to Lock
+                    <span dir="ltr" className="tabular-nums">
+                      00:{String(micElapsedSecs).padStart(2, '0')} / 00:30 · {ui.tapStopLock}
                     </span>
                   </>
                 ) : (
                   <>
                     <Mic className="size-4" />
-                    <span>Hold to Speak Chair Lock (30s)</span>
+                    <span>{ui.holdOrTapSpeakBtn}</span>
                   </>
                 )}
               </button>
@@ -4333,14 +4900,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 dir="ltr"
                 value={voiceTranscript}
                 onChange={(e) => setVoiceTranscript(e.target.value)}
-                placeholder='Say or type e.g. "Hamza 7 to 8 PM" or "Aslam 30 minutes"'
+                placeholder={ui.voicePlaceholder}
                 className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder:text-[#484F58] focus:border-[#06B6D4] focus:outline-none"
               />
               <button
                 type="submit"
                 className="min-h-[48px] rounded-xl border border-[#1F6FEB] bg-[#0D2138] hover:bg-[#132e4d] px-4 py-2 text-xs font-mono font-bold text-[#58A6FF] shrink-0 transition"
               >
-                Parse &amp; Lock Chair
+                {ui.parseAndLockBtn}
               </button>
             </form>
 
@@ -4372,11 +4939,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                       </div>
                       {activeLock ? (
                         <span className="rounded-md border border-[#1F6FEB] bg-[#0D1117] px-2 py-0.5 text-[10px] font-mono font-bold text-[#58A6FF] shrink-0">
-                          BUSY {activeLock.startTimeSlot}–{activeLock.endTimeSlot}
+                          {ui.busy} <span dir="ltr">{activeLock.startTimeSlot}–{activeLock.endTimeSlot}</span>
                         </span>
                       ) : (
                         <span className="rounded-md border border-[#116329] bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950] shrink-0">
-                          FREE NOW
+                          {ui.freeNow}
                         </span>
                       )}
                     </div>
@@ -4391,7 +4958,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             : 'border-[#30363D] bg-[#161B22] hover:border-[#58A6FF] text-[#F0F6FC]'
                         }`}
                       >
-                        {isArmed30 ? 'Tap Again: Confirm +30m' : '+30m Busy'}
+                        {isArmed30 ? ui.tapAgain30 : ui.plus30}
                       </button>
                       <button
                         type="button"
@@ -4402,7 +4969,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             : 'border-[#30363D] bg-[#161B22] hover:border-[#58A6FF] text-[#F0F6FC]'
                         }`}
                       >
-                        {isArmed60 ? 'Tap Again: Confirm +1h' : '+1h Busy'}
+                        {isArmed60 ? ui.tapAgain60 : ui.plus60}
                       </button>
                       {activeLock && (
                         <button
@@ -4410,7 +4977,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           onClick={() => handleReleaseChairLock(activeLock.id, barber)}
                           className="min-h-[48px] rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-2 text-xs font-mono font-bold text-[#3FB950] transition"
                         >
-                          Free Chair
+                          {ui.freeChair}
                         </button>
                       )}
                     </div>
@@ -4423,6 +4990,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           {/* 3. TODAY'S LIVE SCHEDULE & CHAIR TIMELINE (AUTO-COMPLETE +15M & SOURCE BADGES) */}
           <section
             aria-label="Today's Live Schedule and Chair Timeline"
+            dir={isOwnerRtl ? 'rtl' : 'ltr'}
             className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-4"
           >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#30363D] pb-3.5">
@@ -4430,7 +4998,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 <div className="flex items-center gap-2">
                   <Calendar className="size-4 text-[#06B6D4]" />
                   <h2 className="text-base sm:text-lg font-black text-[#F0F6FC]">
-                    Today&apos;s Live Schedule &amp; Chair Timeline
+                    {ui.todayScheduleTitle}
                   </h2>
                 </div>
                 <p className="text-xs text-[#8B949E] font-mono mt-0.5 tabular-nums">
@@ -4439,7 +5007,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 </p>
               </div>
               <span className="rounded-lg border border-[#30363D] bg-[#0D1117] px-3 py-1.5 text-[11px] font-mono text-[#8B949E]">
-                Unflagged entries clear automatically
+                {ui.unflaggedClear}
               </span>
             </div>
 
@@ -4565,7 +5133,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             onClick={() => handleUpdateStatus(booking.id, 'IN_CHAIR')}
                             className="min-h-[48px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-3 py-2 text-xs font-mono font-bold text-[#D29922] transition"
                           >
-                            Seat
+                            {ui.seatBtn}
                           </button>
                         )}
 
@@ -4575,13 +5143,13 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             onClick={() => handleUpdateStatus(booking.id, 'COMPLETED')}
                             className="min-h-[48px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/60 px-3.5 py-2 text-xs font-mono font-bold text-[#3FB950] transition active:scale-95"
                           >
-                            Mark Done ✓
+                            {ui.markDone}
                           </button>
                         ) : (
                           <span className="min-h-[48px] inline-flex items-center gap-1.5 rounded-xl border border-[#116329] bg-[#0D3822]/50 px-3 py-2 text-[11px] font-mono font-bold text-[#3FB950]">
                             <CheckCircle2 className="size-3.5" />
                             <span>
-                              {packageTier === 'STARTER' ? 'Done ✓' : 'T+2h Review Queued'}
+                              {packageTier === 'STARTER' ? ui.doneTick : ui.reviewQueued}
                             </span>
                           </span>
                         )}
@@ -4594,7 +5162,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           </section>
 
           {/* 3B. WALK-IN WAITLIST QUEUE ETA + PREPAID MULTI-SESSION PACKAGES + BRIDAL ADVANCE TRACKER */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" dir={isOwnerRtl ? 'rtl' : 'ltr'}>
             {/* Live Walk-In Waitlist Queue ETA */}
             <section
               aria-label="Live Walk-In Waitlist Queue"
@@ -4604,7 +5172,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 <div className="flex items-center gap-2">
                   <Clock className="size-4 text-[#06B6D4] shrink-0" />
                   <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
-                    Live Walk-In Queue &amp; ETA
+                    {ui.walkInQueueTitle}
                   </h2>
                 </div>
                 <button
@@ -4613,7 +5181,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   className="min-h-[40px] inline-flex items-center gap-1 rounded-xl border border-[#06B6D4] bg-[#0D1117] px-3 py-1 text-[11px] font-mono font-bold text-[#06B6D4] transition"
                 >
                   <Plus className="size-3.5" />
-                  <span>{showWalkInForm ? 'Close' : 'Add Walk-In'}</span>
+                  <span>{showWalkInForm ? ui.closeBtn : ui.addWalkIn}</span>
                 </button>
               </div>
 
@@ -4726,7 +5294,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 <div className="flex items-center gap-2">
                   <Award className="size-4 text-[#D29922] shrink-0" />
                   <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
-                    Prepaid Session Packages &amp; Passes
+                    {ui.prepaidPackagesTitle}
                   </h2>
                 </div>
                 <button
@@ -4735,7 +5303,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   className="min-h-[40px] inline-flex items-center gap-1 rounded-xl border border-[#D29922] bg-[#0D1117] px-3 py-1 text-[11px] font-mono font-bold text-[#D29922] transition"
                 >
                   <Plus className="size-3.5" />
-                  <span>{showPackageForm ? 'Close' : 'Issue Pass'}</span>
+                  <span>{showPackageForm ? ui.closeBtn : ui.issuePass}</span>
                 </button>
               </div>
 
@@ -4845,7 +5413,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   <div className="flex items-center gap-2">
                     <Sparkles className="size-4 text-[#D29922] shrink-0" />
                     <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
-                      {isLadies ? 'Bridal Suite &amp; Female-Only Event Advance Tracker' : 'Bridal / Groom Event Advance Tracker'}
+                      {isLadies ? ui.bridalLadiesTitle : ui.bridalTrackerTitle}
                     </h2>
                   </div>
                   {isLadies && (
@@ -4860,7 +5428,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   className="min-h-[40px] inline-flex items-center gap-1 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-3 py-1.5 text-[11px] font-mono font-black uppercase transition"
                 >
                   <Plus className="size-3.5" />
-                  <span>{showBridalForm ? 'Close' : 'Add Bridal / Event'}</span>
+                  <span>{showBridalForm ? ui.closeBtn : ui.addBridalEvent}</span>
                 </button>
               </div>
 
@@ -4937,7 +5505,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                       disabled={isSavingOpsCard}
                       className="min-h-[44px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 py-2 text-xs font-mono font-black uppercase"
                     >
-                      Save Bridal Advance ✓
+                      {ui.saveBridalAdvance}
                     </button>
                   </div>
                 </form>
@@ -4980,11 +5548,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           onClick={() => void handleSettleBridalBooking(ev.id)}
                           className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/60 px-4 py-2 text-xs font-mono font-bold text-[#3FB950] shrink-0"
                         >
-                          Mark Settled ✓
+                          {ui.markSettled}
                         </button>
                       ) : (
                         <span className="rounded-xl border border-[#116329] bg-[#0D3822]/40 px-3 py-2 text-xs font-mono font-bold text-[#3FB950] shrink-0">
-                          Full Settled ✓
+                          {ui.fullSettled}
                         </span>
                       )}
                     </div>
@@ -4995,7 +5563,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           )}
 
           {/* 4. TOP BOOKED SERVICES + STYLIST / BARBER BREAKDOWN & 24H/2H REMINDERS */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" dir={isOwnerRtl ? 'rtl' : 'ltr'}>
             <section
               aria-label="Top Booked Services with Stylist Breakdown"
               className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3"
@@ -5004,11 +5572,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 <div className="flex items-center gap-2">
                   <TrendingUp className="size-4 text-[#D29922] shrink-0" />
                   <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
-                    Top Booked Services · Stylist Breakdown
+                    {ui.topServicesTitle}
                   </h2>
                 </div>
                 <span className="text-[10px] font-mono text-[#8B949E] uppercase">
-                  Most Requested
+                  {ui.mostRequested}
                 </span>
               </div>
 
@@ -5043,29 +5611,29 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 <div className="flex items-center gap-2">
                   <Clock className="size-4 text-[#3FB950] shrink-0" />
                   <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
-                    24h &amp; 2h Automated Reminders
+                    {ui.remindersTitle}
                   </h2>
                 </div>
                 <span className="rounded-md border border-[#116329] bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
-                  ACTIVE
+                  {ui.activeBadge}
                 </span>
               </div>
 
               <div className="space-y-2.5 text-xs">
                 <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex items-center justify-between gap-2">
                   <div>
-                    <p className="font-bold text-[#F0F6FC]">24-Hour Advance Reminder</p>
+                    <p className="font-bold text-[#F0F6FC]">{ui.adv24h}</p>
                     <p className="text-[11px] text-[#8B949E] font-sans">
-                      Sent automatically day prior in client&apos;s locked language
+                      {ui.adv24hDesc}
                     </p>
                   </div>
                   <span className="font-mono font-bold text-[#3FB950] shrink-0">T-24h ✓</span>
                 </div>
                 <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex items-center justify-between gap-2">
                   <div>
-                    <p className="font-bold text-[#F0F6FC]">2-Hour Chair Arrival Ping</p>
+                    <p className="font-bold text-[#F0F6FC]">{ui.arr2h}</p>
                     <p className="text-[11px] text-[#8B949E] font-sans">
-                      Confirms arrival or announces 15m late replies aloud
+                      {ui.arr2hDesc}
                     </p>
                   </div>
                   <span className="font-mono font-bold text-[#3FB950] shrink-0">T-2h ✓</span>
@@ -5080,11 +5648,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       {/* VIEW 2: DEDICATED "MANAGE" SECTION (SHOP SETUP & RULES)                   */}
       {/* ========================================================================= */}
       {currentSectionMode === 'MANAGE' && (
-        <div className="space-y-4">
+        <div className="space-y-4" dir={isOwnerRtl ? 'rtl' : 'ltr'}>
           {/* Query 6: Compact Matte Obsidian "Voice Support with Founder" Card */}
           <div ref={founderVoiceCardRef}>
             <PortalCard
-              title="Voice Support with Founder"
+              title={ui.voiceSupportTitle}
               kicker={`DIRECT FOUNDER VOICE DESK · #${activeFounderVoiceThread.serialNumber} · ${activeOwnerVoiceLocale}`}
             >
               <div className="space-y-3">
@@ -5118,7 +5686,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 px-4 py-2 text-xs font-mono font-bold uppercase text-[#0D1117] transition flex items-center justify-center gap-2 shrink-0"
                   >
                     <Send className="size-4" />
-                    <span>{isSendingFounderVoice ? 'Sending...' : 'Send to Founder'}</span>
+                    <span>{isSendingFounderVoice ? ui.sending : ui.sendToFounder}</span>
                   </button>
                 </div>
 
@@ -5178,7 +5746,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                                     className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 text-[11px] font-mono font-bold text-[#F0F6FC] hover:border-[#06B6D4] flex items-center gap-1"
                                   >
                                     {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-                                    <span>{isPlaying ? 'Stop' : 'Play Voice'}</span>
+                                    <span>{isPlaying ? ui.stopVoice : ui.playVoice}</span>
                                   </button>
                                 )}
                               </div>
@@ -5219,11 +5787,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           {/* Sub-Section Switcher Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1.5 rounded-2xl border border-[#30363D] bg-[#161B22]">
             {[
-              { id: 'STAFF' as const, label: isLadies ? 'Staff & Stylists' : 'Staff & Barbers', icon: Scissors },
-              { id: 'SERVICES' as const, label: 'Services & Rates', icon: Receipt },
-              { id: 'HOURS' as const, label: 'Salon Hours', icon: Clock },
-              { id: 'AUTOMATION' as const, label: 'Automation & Rewards', icon: Settings2 },
-              { id: 'POSTER' as const, label: 'Window QR Poster', icon: QrCode },
+              { id: 'STAFF' as const, label: isLadies ? ui.staffStylists : ui.staffBarbers, icon: Scissors },
+              { id: 'SERVICES' as const, label: ui.servicesRates, icon: Receipt },
+              { id: 'HOURS' as const, label: ui.salonHours, icon: Clock },
+              { id: 'AUTOMATION' as const, label: ui.automationRewards, icon: Settings2 },
+              { id: 'POSTER' as const, label: ui.windowQrPoster, icon: QrCode },
             ].map((sub) => {
               const Icon = sub.icon;
               const isActive = manageSubSection === sub.id;
