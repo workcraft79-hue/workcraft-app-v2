@@ -753,9 +753,17 @@ export function createApiApp(port = 3000): express.Express {
       });
 
       const usage = recordAiVoiceApiUsage(
-        result.translationSource !== 'fallback',
-        result.ttsSource === 'msedge-tts'
+        result.translationSource !== 'error',
+        result.ttsSource !== 'unavailable'
       );
+
+      if (result.translationSource === 'error') {
+        return res.status(503).json({
+          ...result,
+          error: result.translationError || 'Voice translation failed.',
+          usage,
+        });
+      }
 
       return res.json({
         ...result,
