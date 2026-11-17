@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { kvGetJson, kvSetJson } from './kvBridge.js';
 import type { SupportedVoiceLocale } from './voiceTranslator.js';
 
 function normalizeSalonKey(raw?: string): string {
@@ -249,6 +250,24 @@ function buildSeedThreads(now: number): VoiceInboxThreadRecord[] {
 let storeCache: PersistedVoiceStore | null = null;
 let cleanupTimerStarted = false;
 
+export async function hydrateVoiceStoreFromKv(): Promise<void> {
+  const remote = await kvGetJson<Partial<PersistedVoiceStore>>('wc:voice:v1');
+  if (!remote || !Array.isArray(remote.threads) || remote.threads.length === 0) return;
+  const now = Date.now();
+  storeCache = {
+    threads: remote.threads,
+    purgedClipCount: Number(remote.purgedClipCount || 0),
+    lastCleanupAt: remote.lastCleanupAt || new Date(now).toISOString(),
+    geminiRequestsToday: Number(remote.geminiRequestsToday || 2),
+    edgeTtsRequestsToday: Number(remote.edgeTtsRequestsToday || 2),
+    usageDayKey: remote.usageDayKey || getTodayKey(),
+    autoAlertWhatsAppSent: Boolean(remote.autoAlertWhatsAppSent),
+    lastHeartbeatMs: Number(remote.lastHeartbeatMs || now),
+    lineSimulatedDown: Boolean(remote.lineSimulatedDown),
+    lineReason: remote.lineReason || 'Connected & Healthy via Central WorkCraft Gateway',
+  };
+}
+
 function persistStore(store: PersistedVoiceStore): void {
   try {
     const filePath = resolveStoreFilePath();
@@ -257,6 +276,7 @@ function persistStore(store: PersistedVoiceStore): void {
   } catch {
     // Non-fatal in read-only serverless environments
   }
+  void kvSetJson('wc:voice:v1', store);
 }
 
 function loadStore(): PersistedVoiceStore {
