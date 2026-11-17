@@ -377,9 +377,9 @@ const REGION_CONFIGS: Record<
       {
         id: 'STARTER',
         name: 'Starter Setup',
-        setupFee: 15000,
-        monthlyMaint: 1500,
-        bookingsLimit: '500 bookings/mo',
+        setupFee: 17500,
+        monthlyMaint: 1750,
+        bookingsLimit: '750 bookings/mo',
         badge: 'Entry',
         features: [
           '24/7 WhatsApp Auto-Reply Concierge (Urdu / Roman Urdu / English)',
@@ -390,8 +390,8 @@ const REGION_CONFIGS: Record<
       {
         id: 'GROWTH',
         name: 'Growth Automation',
-        setupFee: 20000,
-        monthlyMaint: 2000,
+        setupFee: 25000,
+        monthlyMaint: 2500,
         bookingsLimit: '1,500 bookings/mo',
         badge: 'Popular',
         features: [
@@ -403,8 +403,8 @@ const REGION_CONFIGS: Record<
       {
         id: 'VIP',
         name: 'VIP Executive',
-        setupFee: 25000,
-        monthlyMaint: 2500,
+        setupFee: 35000,
+        monthlyMaint: 3500,
         bookingsLimit: '3,000 bookings/mo',
         badge: 'Best Value',
         features: [
@@ -416,13 +416,13 @@ const REGION_CONFIGS: Record<
       {
         id: 'CUSTOM',
         name: 'Custom Enterprise',
-        setupFee: 35000,
-        monthlyMaint: 3500,
-        bookingsLimit: 'Unlimited / Multi-Branch',
+        setupFee: 50000,
+        monthlyMaint: 5000,
+        bookingsLimit: '> 3,000 bookings/mo',
         badge: 'Enterprise',
         features: [
           'Everything in VIP Executive',
-          'Multi-Branch & Multi-Barber Voice Routing',
+          'Unlimited Staff Chairs & High-Volume Single Salon Routing',
           'Priority Support & Fast Video Approval',
         ],
       },
@@ -446,9 +446,9 @@ const REGION_CONFIGS: Record<
       {
         id: 'STARTER',
         name: 'Starter Setup',
-        setupFee: 275,
-        monthlyMaint: 28,
-        bookingsLimit: '500 bookings/mo',
+        setupFee: 290,
+        monthlyMaint: 55,
+        bookingsLimit: '750 bookings/mo',
         badge: 'Entry',
         features: [
           '24/7 WhatsApp Auto-Reply Concierge (Arabic & English)',
@@ -459,8 +459,8 @@ const REGION_CONFIGS: Record<
       {
         id: 'GROWTH',
         name: 'Growth Automation',
-        setupFee: 405,
-        monthlyMaint: 41,
+        setupFee: 475,
+        monthlyMaint: 92,
         bookingsLimit: '1,500 bookings/mo',
         badge: 'Popular',
         features: [
@@ -472,8 +472,8 @@ const REGION_CONFIGS: Record<
       {
         id: 'VIP',
         name: 'VIP Executive',
-        setupFee: 590,
-        monthlyMaint: 59,
+        setupFee: 620,
+        monthlyMaint: 129,
         bookingsLimit: '3,000 bookings/mo',
         badge: 'Best Value',
         features: [
@@ -486,12 +486,12 @@ const REGION_CONFIGS: Record<
         id: 'CUSTOM',
         name: 'Custom Enterprise',
         setupFee: 920,
-        monthlyMaint: 92,
-        bookingsLimit: 'Unlimited / Multi-Branch',
+        monthlyMaint: 184,
+        bookingsLimit: '> 3,000 bookings/mo',
         badge: 'Enterprise',
         features: [
           'Everything in VIP Executive',
-          'Multi-Branch & Multi-Barber Voice Routing',
+          'Unlimited Staff Chairs & High-Volume Single Salon Routing',
           'Priority Support & Fast Video Approval',
         ],
       },
@@ -514,9 +514,9 @@ const REGION_CONFIGS: Record<
       {
         id: 'STARTER',
         name: 'Starter Setup',
-        setupFee: 280,
-        monthlyMaint: 28,
-        bookingsLimit: '500 bookings/mo',
+        setupFee: 295,
+        monthlyMaint: 56,
+        bookingsLimit: '750 bookings/mo',
         badge: 'Entry',
         features: [
           '24/7 WhatsApp Auto-Reply Concierge (Arabic & English)',
@@ -527,8 +527,8 @@ const REGION_CONFIGS: Record<
       {
         id: 'GROWTH',
         name: 'Growth Automation',
-        setupFee: 415,
-        monthlyMaint: 42,
+        setupFee: 485,
+        monthlyMaint: 94,
         bookingsLimit: '1,500 bookings/mo',
         badge: 'Popular',
         features: [
@@ -540,8 +540,8 @@ const REGION_CONFIGS: Record<
       {
         id: 'VIP',
         name: 'VIP Executive',
-        setupFee: 600,
-        monthlyMaint: 60,
+        setupFee: 635,
+        monthlyMaint: 131,
         bookingsLimit: '3,000 bookings/mo',
         badge: 'Best Value',
         features: [
@@ -554,12 +554,12 @@ const REGION_CONFIGS: Record<
         id: 'CUSTOM',
         name: 'Custom Enterprise',
         setupFee: 940,
-        monthlyMaint: 94,
-        bookingsLimit: 'Unlimited / Multi-Branch',
+        monthlyMaint: 188,
+        bookingsLimit: '> 3,000 bookings/mo',
         badge: 'Enterprise',
         features: [
           'Everything in VIP Executive',
-          'Multi-Branch & Multi-Barber Voice Routing',
+          'Unlimited Staff Chairs & High-Volume Single Salon Routing',
           'Priority Support & Fast Video Approval',
         ],
       },
@@ -579,9 +579,9 @@ const REGION_CONFIGS: Record<
       {
         id: 'STARTER',
         name: 'Starter Setup',
-        setupFee: 60,
-        monthlyMaint: 6,
-        bookingsLimit: '500 bookings/mo',
+        setupFee: 62,
+        monthlyMaint: 12,
+        bookingsLimit: '750 bookings/mo',
         badge: 'Entry',
         features: [
           '24/7 WhatsApp Auto-Reply Concierge (English)',
@@ -592,8 +592,8 @@ const REGION_CONFIGS: Record<
       {
         id: 'GROWTH',
         name: 'Growth Automation',
-        setupFee: 85,
-        monthlyMaint: 8.5,
+        setupFee: 102,
+        monthlyMaint: 20,
         bookingsLimit: '1,500 bookings/mo',
         badge: 'Popular',
         features: [
@@ -605,8 +605,8 @@ const REGION_CONFIGS: Record<
       {
         id: 'VIP',
         name: 'VIP Executive',
-        setupFee: 125,
-        monthlyMaint: 12.5,
+        setupFee: 134,
+        monthlyMaint: 28,
         bookingsLimit: '3,000 bookings/mo',
         badge: 'Best Value',
         features: [
@@ -618,13 +618,13 @@ const REGION_CONFIGS: Record<
       {
         id: 'CUSTOM',
         name: 'Custom Enterprise',
-        setupFee: 195,
-        monthlyMaint: 19.5,
-        bookingsLimit: 'Unlimited / Multi-Branch',
+        setupFee: 198,
+        monthlyMaint: 40,
+        bookingsLimit: '> 3,000 bookings/mo',
         badge: 'Enterprise',
         features: [
           'Everything in VIP Executive',
-          'Multi-Branch & Multi-Barber Voice Routing',
+          'Unlimited Staff Chairs & High-Volume Single Salon Routing',
           'Priority Support & Fast Video Approval',
         ],
       },
@@ -648,9 +648,9 @@ const REGION_CONFIGS: Record<
       {
         id: 'STARTER',
         name: 'Starter Setup',
-        setupFee: 75,
-        monthlyMaint: 7.5,
-        bookingsLimit: '500 bookings/mo',
+        setupFee: 79,
+        monthlyMaint: 15,
+        bookingsLimit: '750 bookings/mo',
         badge: 'Entry',
         features: [
           '24/7 WhatsApp Auto-Reply Concierge (English, Arabic & Urdu)',
@@ -661,8 +661,8 @@ const REGION_CONFIGS: Record<
       {
         id: 'GROWTH',
         name: 'Growth Automation',
-        setupFee: 110,
-        monthlyMaint: 11,
+        setupFee: 129,
+        monthlyMaint: 25,
         bookingsLimit: '1,500 bookings/mo',
         badge: 'Popular',
         features: [
@@ -674,8 +674,8 @@ const REGION_CONFIGS: Record<
       {
         id: 'VIP',
         name: 'VIP Executive',
-        setupFee: 160,
-        monthlyMaint: 16,
+        setupFee: 169,
+        monthlyMaint: 35,
         bookingsLimit: '3,000 bookings/mo',
         badge: 'Best Value',
         features: [
@@ -688,12 +688,12 @@ const REGION_CONFIGS: Record<
         id: 'CUSTOM',
         name: 'Custom Enterprise',
         setupFee: 250,
-        monthlyMaint: 25,
-        bookingsLimit: 'Unlimited / Multi-Branch',
+        monthlyMaint: 50,
+        bookingsLimit: '> 3,000 bookings/mo',
         badge: 'Enterprise',
         features: [
           'Everything in VIP Executive',
-          'Multi-Branch & Multi-Barber Voice Routing',
+          'Unlimited Staff Chairs & High-Volume Single Salon Routing',
           'Priority Support & Fast Video Approval',
         ],
       },
@@ -751,7 +751,7 @@ export const UPGRADE_MODAL_I18N: Record<
       `آپ کی موجودہ ${pkg} سیٹ اپ فیس (${sym}${fee.toLocaleString()}) کا 100% کریڈٹ ایڈجسٹ کر دیا گیا ہے۔ صرف بقایا فرق ادا کریں۔`,
     fullPrice: 'مکمل قیمت:',
     payDiff: (sym, amt) => `صرف فرق ادا کریں: ${sym}${amt.toLocaleString()}`,
-    newMaintFee: (sym, amt) => `نئی 10% ماہانہ مینٹیننس فیس: ${sym}${amt.toLocaleString()} / ماہ`,
+    newMaintFee: (sym, amt) => `نئی ماہانہ مینٹیننس فیس: ${sym}${amt.toLocaleString()} / ماہ`,
     paymentChannelTitle: (curr) => `ادائیگی کا چینل منتخب کریں (${curr})`,
     differencePayLabel: (sym, amt) => `بقایا فرق: ${sym}${amt.toLocaleString()}`,
     tidLabel: 'ٹرانزیکشن ریفرنس / ادائیگی کی تفصیل:',
@@ -771,7 +771,7 @@ export const UPGRADE_MODAL_I18N: Record<
       `تم اعتماد 100% من رسوم تأسيس باقتك الحالية ${pkg} (${sym}${fee.toLocaleString()}). ادفع فقط الفرق المتبقي.`,
     fullPrice: 'السعر الكامل:',
     payDiff: (sym, amt) => `ادفع الفرق فقط: ${sym}${amt.toLocaleString()}`,
-    newMaintFee: (sym, amt) => `رسوم الصيانة الشهرية الجديدة (10%): ${sym}${amt.toLocaleString()} / شهرياً`,
+    newMaintFee: (sym, amt) => `رسوم الصيانة الشهرية الجديدة: ${sym}${amt.toLocaleString()} / شهرياً`,
     paymentChannelTitle: (curr) => `اختر وسيلة الدفع المعتمدة (${curr})`,
     differencePayLabel: (sym, amt) => `المبلغ المتبقي: ${sym}${amt.toLocaleString()}`,
     tidLabel: 'تفاصيل الدفع / رقم الحوالة:',
@@ -791,7 +791,7 @@ export const UPGRADE_MODAL_I18N: Record<
       `Your current ${pkg} setup fee (${sym}${fee.toLocaleString()}) is credited 100%. Pay only the remaining difference.`,
     fullPrice: 'Full Price:',
     payDiff: (sym, amt) => `Pay Difference: ${sym}${amt.toLocaleString()}`,
-    newMaintFee: (sym, amt) => `New 10% Monthly Maintenance: ${sym}${amt.toLocaleString()}/mo`,
+    newMaintFee: (sym, amt) => `New Monthly Maintenance Fee: ${sym}${amt.toLocaleString()}/mo`,
     paymentChannelTitle: (curr) => `Select Payment Channel (${curr})`,
     differencePayLabel: (sym, amt) => `Remaining Difference: ${sym}${amt.toLocaleString()}`,
     tidLabel: 'Payment Reference / Transaction Proof:',
@@ -824,10 +824,10 @@ export const MAINT_MODAL_I18N: Record<
   }
 > = {
   ur: {
-    kicker: 'ماہانہ 10% مینٹیننس فیس ادائیگی · خودکار سسٹم بحالی',
+    kicker: 'ماہانہ مینٹیننس فیس ادائیگی · خودکار سسٹم بحالی',
     title: (salon) => `${salon} کی مینٹیننس فیس ادا کریں`,
     description: (sym, amt, phone) =>
-      `ماہانہ 10% مینٹیننس فیس (${sym}${amt.toLocaleString()}) اپنے رجسٹرڈ واٹس ایپ نمبر (${phone}) سے کسی بھی چینل کے ذریعے ادا کر کے فوری Tier-1 ترجیح اور لائیو میٹرکس بحال کریں۔`,
+      `ماہانہ مینٹیننس فیس (${sym}${amt.toLocaleString()}) اپنے رجسٹرڈ واٹس ایپ نمبر (${phone}) سے کسی بھی چینل کے ذریعے ادا کر کے فوری Tier-1 ترجیح اور لائیو میٹرکس بحال کریں۔`,
     feeHeading: 'مقررہ ماہانہ فیس:',
     dueDateHeading: 'آخری تاریخ: ہر ماہ کی 5 تاریخ',
     channelHeading: (curr) => `ادائیگی کا چینل منتخب کریں (${curr})`,
@@ -837,10 +837,10 @@ export const MAINT_MODAL_I18N: Record<
     processingBtn: 'تصدیق ہو رہی ہے...',
     cancelBtn: 'منسوخ کریں',
     whatsappNotice: (owner, salon, sym, amt, ch, tid) =>
-      `محترم ${owner} صاحب! السلام علیکم۔ آپ کے سیلون "${salon}" کی ماہانہ 10% مینٹیننس فیس (${sym}${amt.toLocaleString()}) بذریعہ ${ch} کامیابی سے موصول ہو گئی ہے۔ (TID: ${tid})۔ آپ کا لائیو ڈیش بورڈ، میٹرکس اور Tier-1 ترجیحی واٹس ایپ سپورٹ مکمل بحال ہے۔ شکریہ!`,
+      `محترم ${owner} صاحب! السلام علیکم۔ آپ کے سیلون "${salon}" کی ماہانہ مینٹیننس فیس (${sym}${amt.toLocaleString()}) بذریعہ ${ch} کامیابی سے موصول ہو گئی ہے۔ (TID: ${tid})۔ آپ کا لائیو ڈیش بورڈ، میٹرکس اور Tier-1 ترجیحی واٹس ایپ سپورٹ مکمل بحال ہے۔ شکریہ!`,
   },
   ar: {
-    kicker: 'سداد رسوم الصيانة الشهرية 10% · استعادة الأولوية',
+    kicker: 'سداد رسوم الصيانة الشهرية · استعادة الأولوية',
     title: (salon) => `سداد رسوم صيانة ${salon}`,
     description: (sym, amt, phone) =>
       `سدد رسوم الصيانة الشهرية (${sym}${amt.toLocaleString()}) عبر القنوات المعتمدة لحساب صالونك المسجل (${phone}) لاستعادة الإحصائيات الحية والدعم ذي الأولوية فوراً.`,
@@ -856,10 +856,10 @@ export const MAINT_MODAL_I18N: Record<
       `مرحباً بك يا ${owner}! تم استلام رسوم الصيانة الشهرية (${sym}${amt.toLocaleString()}) لصالون "${salon}" بنجاح عبر ${ch}. (رقم الإيصال: ${tid}). تم فتح لوحة الإحصائيات واستعادة الأولوية الفورية للواتساب. شكراً لكم!`,
   },
   en: {
-    kicker: '10% MONTHLY MAINTENANCE PAYMENT · AUTO PRIORITY RESTORATION',
+    kicker: 'MONTHLY MAINTENANCE PAYMENT · AUTO PRIORITY RESTORATION',
     title: (salon) => `Pay Maintenance Fee for ${salon}`,
     description: (sym, amt, phone) =>
-      `Clear your 10% monthly maintenance fee (${sym}${amt.toLocaleString()}) from your registered SIM (${phone}) to unlock live metrics and maintain Tier-1 priority auto-replies.`,
+      `Clear your monthly maintenance fee (${sym}${amt.toLocaleString()}) from your registered SIM (${phone}) to unlock live metrics and maintain Tier-1 priority auto-replies.`,
     feeHeading: 'Monthly Due Fee:',
     dueDateHeading: 'Due Date: 5th of Every Month',
     channelHeading: (curr) => `Select Payment Channel (${curr})`,
@@ -869,7 +869,7 @@ export const MAINT_MODAL_I18N: Record<
     processingBtn: 'Verifying Transaction...',
     cancelBtn: 'Cancel',
     whatsappNotice: (owner, salon, sym, amt, ch, tid) =>
-      `Dear ${owner}! Greetings. The 10% monthly maintenance fee of ${sym}${amt.toLocaleString()} for "${salon}" has been successfully cleared via ${ch}. (TID: ${tid}). Your live stats, business metrics, and Tier-1 concierge priority are active. Thank you!`,
+      `Dear ${owner}! Greetings. The monthly maintenance fee of ${sym}${amt.toLocaleString()} for "${salon}" has been successfully cleared via ${ch}. (TID: ${tid}). Your live stats, business metrics, and Tier-1 concierge priority are active. Thank you!`,
   },
 };
 
@@ -899,7 +899,7 @@ export const INITIAL_CLIENT_SALONS: ClientSalon[] = [
     location: 'DHA Phase 5, Lahore',
     planId: 'VIP',
     plan: 'VIP Executive',
-    maint: 2500,
+    maint: 3500,
     language: 'ur',
     onboardingLanguage: 'ur',
   },
@@ -911,7 +911,7 @@ export const INITIAL_CLIENT_SALONS: ClientSalon[] = [
     location: 'Gulberg III, Lahore',
     planId: 'STARTER',
     plan: 'Starter Setup',
-    maint: 1500,
+    maint: 1750,
     language: 'ur',
     onboardingLanguage: 'ur',
   },
@@ -923,7 +923,7 @@ export const INITIAL_CLIENT_SALONS: ClientSalon[] = [
     location: 'Jumeirah 1, Dubai, UAE',
     planId: 'VIP',
     plan: 'VIP Executive',
-    maint: 16,
+    maint: 35,
     language: 'ur', // Asian barber in MENA: hears voice & reads Founder notices in Urdu while clients chat in Arabic!
     onboardingLanguage: 'ur',
   },
@@ -935,7 +935,7 @@ export const INITIAL_CLIENT_SALONS: ClientSalon[] = [
     location: 'Soho, London, UK',
     planId: 'STARTER',
     plan: 'Starter Setup',
-    maint: 7.5,
+    maint: 15,
     language: 'en',
     onboardingLanguage: 'en',
   },
@@ -947,7 +947,7 @@ export const INITIAL_CLIENT_SALONS: ClientSalon[] = [
     location: 'Clifton Block 4, Karachi',
     planId: 'GROWTH',
     plan: 'Growth Automation',
-    maint: 2000,
+    maint: 2500,
     language: 'ur',
     onboardingLanguage: 'ur',
   },
@@ -1004,7 +1004,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       location: onboardedData?.location || 'Local Salon Branch',
       planId: onboardedData?.planId || 'GROWTH',
       plan: onboardedData?.planName || 'Growth Automation',
-      maint: onboardedData?.monthlyMaint ?? 2000,
+      maint: onboardedData?.monthlyMaint ?? 2500,
       language: onboardedData?.language || 'en',
       onboardingLanguage: onboardedData?.language || 'en',
     };
@@ -1030,7 +1030,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           location: 'Local Salon Branch',
           planId: 'GROWTH',
           plan: 'Growth Automation',
-          maint: 2000,
+          maint: 2500,
           language: 'en',
           onboardingLanguage: 'en',
         };
@@ -1173,6 +1173,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     regionConfig.paymentChannels[0].id
   );
   const [upgradeTidInput, setUpgradeTidInput] = useState('');
+  const [upgradeModalError, setUpgradeModalError] = useState<string | null>(null);
   const [isProcessingUpgrade, setIsProcessingUpgrade] = useState(false);
 
   // Query 8: Maintenance Fee Payment Modal State
@@ -1181,6 +1182,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     regionConfig.paymentChannels[0].id
   );
   const [maintPaymentTidInput, setMaintPaymentTidInput] = useState('');
+  const [maintModalError, setMaintModalError] = useState<string | null>(null);
 
   // Query 7: Clickable Location Pin and Salon Timing Modal States
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
@@ -2191,12 +2193,20 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   };
 
   const handleConfirmMaintPayment = async () => {
+    setMaintModalError(null);
+    const chosenTid = maintPaymentTidInput.trim();
+    if (!chosenTid || chosenTid.replace(/[^a-zA-Z0-9]/g, '').length < 6) {
+      setMaintModalError(
+        ownerLang === 'ur'
+          ? 'ادائیگی کی تصدیق کے لیے درست ٹرانزیکشن آئی ڈی (TID کم از کم 6 حروف/ہندسے) درج کریں۔'
+          : ownerLang === 'ar'
+          ? 'يرجى إدخال رقم معاملة صحيح (TID لا يقل عن 6 أحرف/أرقام) للتحقق.'
+          : 'Please enter a valid payment Transaction ID / reference (min 6 characters) to verify payment to WorkCraft Official Account.'
+      );
+      return;
+    }
+
     setIsPayingMaint(true);
-    const chosenTid =
-      maintPaymentTidInput.trim() ||
-      `${currentSalon.phone.startsWith('+92') ? 'EP' : 'ST'}-${Math.floor(
-        10000000000 + Math.random() * 90000000000
-      )}`;
     const channelName =
       regionConfig.paymentChannels.find((c) => c.id === maintPaymentChannel)?.label ||
       maintPaymentChannel;
@@ -2207,8 +2217,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             salonName: currentSalon.name,
+            packageId: currentSalon.planId,
             amount: currentSalon.maint,
             currency: currentSalon.phone.startsWith('+92') ? 'PKR' : regionConfig.currency,
             method: channelName,
@@ -2216,16 +2228,27 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           }),
         }
       );
-      if (res.ok) {
-        const data = (await res.json()) as { state?: SalonConciergeStateResponse };
-        if (data?.state) setConciergeState(data.state);
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        state?: SalonConciergeStateResponse;
+      };
+      if (!res.ok) {
+        setIsPayingMaint(false);
+        setMaintModalError(
+          data?.error || 'Transaction verification rejected by WorkCraft payment server.'
+        );
+        return;
       }
+      if (data?.state) setConciergeState(data.state);
     } catch {
-      // non-blocking offline/static fallback
+      setIsPayingMaint(false);
+      setMaintModalError('Unable to reach payment verification server. Please retry.');
+      return;
     }
 
     setIsPayingMaint(false);
     setIsMaintPaymentModalOpen(false);
+    setMaintModalError(null);
     setMaintCycleStage('PAID_ACTIVE');
     setMaintTid(chosenTid);
     setMaintPaidDate(
@@ -2268,12 +2291,21 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
   const handleConfirmPackageUpgrade = async () => {
     if (!selectedUpgradeTargetId) return;
+    setUpgradeModalError(null);
     const targetPkg = regionConfig.packages.find((p) => p.id === selectedUpgradeTargetId);
     if (!targetPkg) return;
     const differenceAmount = Math.max(0, targetPkg.setupFee - currentPackage.setupFee);
-    const chosenTid =
-      upgradeTidInput.trim() ||
-      `UP-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+    const chosenTid = upgradeTidInput.trim();
+    if (!chosenTid || chosenTid.replace(/[^a-zA-Z0-9]/g, '').length < 6) {
+      setUpgradeModalError(
+        ownerLang === 'ur'
+          ? 'اپگریڈ کی تصدیق کے لیے درست ٹرانزیکشن آئی ڈی (TID کم از کم 6 حروف/ہندسے) درج کریں۔'
+          : ownerLang === 'ar'
+          ? 'يرجى إدخال رقم معاملة صحيح (TID لا يقل عن 6 أحرف/أرقام) لتأكيد الترقية.'
+          : 'Please enter a valid payment Transaction ID / reference (min 6 characters) to confirm upgrade.'
+      );
+      return;
+    }
     const backendTier =
       targetPkg.id === 'STARTER' ? 'STARTER' : targetPkg.id === 'GROWTH' ? 'PRO' : 'PRO++';
 
@@ -2284,9 +2316,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             salonName: currentSalon.name,
             packageTier: backendTier,
+            previousPlanId: currentPackage.id,
+            targetPlanId: targetPkg.id,
             differenceAmount,
             currency: currentSalon.phone.startsWith('+92') ? 'PKR' : regionConfig.currency,
             method: selectedUpgradeChannel,
@@ -2294,12 +2329,22 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           }),
         }
       );
-      if (res.ok) {
-        const data = (await res.json()) as { state?: SalonConciergeStateResponse };
-        if (data?.state) setConciergeState(data.state);
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        state?: SalonConciergeStateResponse;
+      };
+      if (!res.ok) {
+        setIsProcessingUpgrade(false);
+        setUpgradeModalError(
+          data?.error || 'Upgrade payment verification rejected by WorkCraft payment server.'
+        );
+        return;
       }
+      if (data?.state) setConciergeState(data.state);
     } catch {
-      // non-blocking offline/static fallback
+      setIsProcessingUpgrade(false);
+      setUpgradeModalError('Unable to reach payment verification server. Please retry.');
+      return;
     }
 
     setSalonsState((prev) =>
@@ -2311,6 +2356,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     );
     setIsProcessingUpgrade(false);
     setIsUpgradeModalOpen(false);
+    setUpgradeModalError(null);
     setSelectedUpgradeTargetId(null);
     setUpgradeTidInput('');
 
@@ -3390,12 +3436,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   // Query 1 (New): Founder-to-Salon-Owner Official Message rendered strictly in Owner's Onboarding / Preferred Language
   const getFounderNoticeForOwner = (lang: VoiceLang) => {
     if (lang === 'ur') {
-      return `بانی (Founder) پیغام برائے ${currentSalon.owner}: آپ کا سسٹم 100% آن لائن ہے۔ ماہانہ 10% مینٹیننس ہر مہینے کی 5 تاریخ کو واجب الادا ہے اور تمام اپگریڈز صرف فرق کی رقم پر دستیاب ہیں۔`;
+      return `بانی (Founder) پیغام برائے ${currentSalon.owner}: آپ کا سسٹم 100% آن لائن ہے۔ ماہانہ مینٹیننس فیس ہر مہینے کی 5 تاریخ کو واجب الادا ہے اور تمام اپگریڈز صرف فرق کی رقم پر دستیاب ہیں۔`;
     }
     if (lang === 'ar') {
-      return `رسالة المؤسس إلى ${currentSalon.owner}: نظام الصالون يعمل بكفاءة 100%. رسوم الصيانة الشهرية 10% تستحق في 5 من كل شهر، والترقية متاحة بدفع الفرق فقط.`;
+      return `رسالة المؤسس إلى ${currentSalon.owner}: نظام الصالون يعمل بكفاءة 100%. رسوم الصيانة الشهرية تستحق في 5 من كل شهر، والترقية متاحة بدفع الفرق فقط.`;
     }
-    return `Founder Notice for ${currentSalon.owner}: Your WhatsApp node is 100% online. Monthly 10% maintenance is fixed to the 5th of every month, and tier upgrades charge only the remaining price difference.`;
+    return `Founder Notice for ${currentSalon.owner}: Your WhatsApp node is 100% online. Monthly maintenance is fixed to the 5th of every month, and tier upgrades charge only the remaining price difference.`;
   };
 
   // Query 4 (Prev): Localized 3-Stage 5th-of-Month Reminder Templates in Owner Language
@@ -3403,12 +3449,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     const amt = `${regionConfig.symbol}${currentSalon.maint.toLocaleString()}`;
     if (stage === 'STAGE_1_PREV_MONTH') {
       if (lang === 'ar') {
-        return `تذكير مبكر (نهاية الشهر): رسوم الصيانة الشهرية 10% (${amt}) تستحق في 5 من الشهر القادم من رقمك ${currentSalon.phone}.`;
+        return `تذكير مبكر (نهاية الشهر): رسوم الصيانة الشهرية (${amt}) تستحق في 5 من الشهر القادم من رقمك ${currentSalon.phone}.`;
       }
       if (lang === 'ur') {
-        return `پہلی پیشگی یاددہانی (مہینے کے آخری 2 دن): آپ کی ماہانہ 10% مینٹیننس فیس (${amt}) آنے والی 5 تاریخ کو واجب الادا ہے۔`;
+        return `پہلی پیشگی یاددہانی (مہینے کے آخری 2 دن): آپ کی ماہانہ مینٹیننس فیس (${amt}) آنے والی 5 تاریخ کو واجب الادا ہے۔`;
       }
-      return `Advance Reminder (Last 2 Days of Month): Your 10% monthly fee (${amt}) is due on the 5th via ${currentSalon.phone}.`;
+      return `Advance Reminder (Last 2 Days of Month): Your monthly maintenance fee (${amt}) is due on the 5th via ${currentSalon.phone}.`;
     }
     if (stage === 'STAGE_2_DAY_3') {
       if (lang === 'ar') {
@@ -3501,7 +3547,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 </p>
               </div>
               <div className="rounded-2xl border border-[#116329] bg-[#0D3822] p-3.5">
-                <span className="text-[10px] text-[#3FB950] uppercase block">10% MONTHLY FEE (DUE 5TH)</span>
+                <span className="text-[10px] text-[#3FB950] uppercase block">MONTHLY MAINTENANCE FEE (DUE 5TH)</span>
                 <p className="text-sm font-bold text-[#3FB950] mt-1">
                   {regionConfig.symbol}{currentSalon.maint.toLocaleString()} / mo
                 </p>
@@ -4284,10 +4330,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             >
               <input
                 type="text"
+                dir="ltr"
                 value={voiceTranscript}
                 onChange={(e) => setVoiceTranscript(e.target.value)}
                 placeholder='Say or type e.g. "Hamza 7 to 8 PM" or "Aslam 30 minutes"'
-                className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-[#F0F6FC] placeholder:text-[#484F58] focus:border-[#06B6D4] focus:outline-none"
+                className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder:text-[#484F58] focus:border-[#06B6D4] focus:outline-none"
               />
               <button
                 type="submit"
@@ -4578,34 +4625,38 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input
                       type="text"
+                      dir="ltr"
                       required
                       value={walkInName}
                       onChange={(e) => setWalkInName(e.target.value)}
                       placeholder="Guest name"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
                     />
                     <input
                       type="text"
+                      dir="ltr"
                       value={walkInService}
                       onChange={(e) => setWalkInService(e.target.value)}
                       placeholder={isLadies ? 'Service (e.g. Party Makeup)' : 'Service (e.g. Skin Fade)'}
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
                     />
                     <input
                       type="text"
+                      dir="ltr"
                       value={walkInPhone}
                       onChange={(e) => setWalkInPhone(e.target.value)}
                       placeholder="WhatsApp (optional)"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#F0F6FC]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
                     />
                     <input
                       type="number"
+                      dir="ltr"
                       min={5}
                       max={180}
                       value={walkInEta}
                       onChange={(e) => setWalkInEta(e.target.value)}
                       placeholder="Wait mins"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#D29922]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#D29922]"
                     />
                   </div>
                   <button
@@ -4696,36 +4747,40 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input
                       type="text"
+                      dir="ltr"
                       required
                       value={pkgClientName}
                       onChange={(e) => setPkgClientName(e.target.value)}
                       placeholder="Client name"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
                     />
                     <input
                       type="text"
+                      dir="ltr"
                       required
                       value={pkgTitle}
                       onChange={(e) => setPkgTitle(e.target.value)}
                       placeholder={isLadies ? 'e.g. 5-Session HydraFacial' : 'e.g. 4-Cut Monthly Pass'}
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
                     />
                     <input
                       type="number"
+                      dir="ltr"
                       min={2}
                       max={30}
                       value={pkgSessions}
                       onChange={(e) => setPkgSessions(e.target.value)}
                       placeholder="Sessions"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#06B6D4]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#06B6D4]"
                     />
                     <input
                       type="number"
+                      dir="ltr"
                       min={0}
                       value={pkgPrice}
                       onChange={(e) => setPkgPrice(e.target.value)}
                       placeholder={`Paid (${regionConfig.currency})`}
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#D29922]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#D29922]"
                     />
                   </div>
                   <button
@@ -4817,48 +4872,54 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <input
                       type="text"
+                      dir="ltr"
                       required
                       value={bridalName}
                       onChange={(e) => setBridalName(e.target.value)}
                       placeholder="Bride / Client & Event Name"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
                     />
                     <input
                       type="text"
+                      dir="ltr"
                       value={bridalEventDate}
                       onChange={(e) => setBridalEventDate(e.target.value)}
                       placeholder="Event Date (e.g. 24 Nov 2026)"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
                     />
                     <input
                       type="text"
+                      dir="ltr"
                       value={bridalPhone}
                       onChange={(e) => setBridalPhone(e.target.value)}
                       placeholder="WhatsApp Phone"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#F0F6FC]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
                     />
                     <input
                       type="text"
+                      dir="ltr"
                       value={bridalPackage}
                       onChange={(e) => setBridalPackage(e.target.value)}
                       placeholder="Package Details"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
                     />
                     <input
                       type="number"
+                      dir="ltr"
                       min={0}
                       value={bridalTotal}
                       onChange={(e) => setBridalTotal(e.target.value)}
                       placeholder="Total Fee"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#F0F6FC]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
                     />
                     <input
                       type="number"
+                      dir="ltr"
                       min={0}
                       value={bridalAdvance}
                       onChange={(e) => setBridalAdvance(e.target.value)}
                       placeholder="Advance Paid"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#3FB950]"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#3FB950]"
                     />
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5044,10 +5105,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="text"
+                    dir="ltr"
                     value={ownerVoiceDraft}
                     onChange={(e) => setOwnerVoiceDraft(e.target.value)}
                     placeholder="Optional note or quick question (or just send recorded voice)..."
-                    className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-sm text-[#F0F6FC] placeholder-[#6E7681] focus:border-[#06B6D4] focus:outline-none"
+                    className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder-[#6E7681] focus:border-[#06B6D4] focus:outline-none"
                   />
                   <button
                     type="button"
@@ -5244,17 +5306,19 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           <div className="space-y-2">
                             <input
                               type="text"
+                              dir="ltr"
                               value={editingBarberName}
                               onChange={(e) => setEditingBarberName(e.target.value)}
-                              className="w-full min-h-[48px] rounded-xl border border-[#06B6D4] bg-[#161B22] px-3 py-2 text-sm text-[#F0F6FC] focus:outline-none"
+                              className="w-full min-h-[48px] rounded-xl border border-[#06B6D4] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] focus:outline-none"
                               placeholder="Barber name"
                               autoFocus
                             />
                             <input
                               type="text"
+                              dir="ltr"
                               value={editingBarberChair}
                               onChange={(e) => setEditingBarberChair(e.target.value)}
-                              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#D29922] focus:outline-none focus:border-[#06B6D4]"
+                              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#D29922] focus:outline-none focus:border-[#06B6D4]"
                               placeholder="Chair assignment (e.g. Chair #1)"
                             />
                             <div className="flex items-center gap-2">
@@ -5327,17 +5391,19 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 >
                   <input
                     type="text"
+                    dir="ltr"
                     value={newBarberDashboardInput}
                     onChange={(e) => setNewBarberDashboardInput(e.target.value)}
                     placeholder="Barber / Stylist Name (e.g. Master Kamran)"
-                    className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                    className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
                   />
                   <input
                     type="text"
+                    dir="ltr"
                     value={newBarberChairInput}
                     onChange={(e) => setNewBarberChairInput(e.target.value)}
                     placeholder={`Chair #${barbersList.length + 1}`}
-                    className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm font-mono text-[#D29922] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                    className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#D29922] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
                   />
                   <button
                     type="submit"
@@ -5488,28 +5554,31 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
                       <input
                         type="text"
+                        dir="ltr"
                         required
                         placeholder="Service Name"
                         value={customServiceName}
                         onChange={(e) => setCustomServiceName(e.target.value)}
-                        className="sm:col-span-2 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-[#F0F6FC] placeholder:text-[#484F58]"
+                        className="sm:col-span-2 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder:text-[#484F58]"
                       />
                       <input
                         type="number"
+                        dir="ltr"
                         required
                         min={5}
                         placeholder="Mins"
                         value={customServiceDuration}
                         onChange={(e) => setCustomServiceDuration(e.target.value)}
-                        className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm font-mono text-[#06B6D4] placeholder:text-[#484F58]"
+                        className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#06B6D4] placeholder:text-[#484F58]"
                       />
                       <input
                         type="number"
+                        dir="ltr"
                         required
                         placeholder={`Price (${regionConfig.currency})`}
                         value={customServicePrice}
                         onChange={(e) => setCustomServicePrice(e.target.value)}
-                        className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm font-mono font-bold text-[#D29922] placeholder:text-[#484F58]"
+                        className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] placeholder:text-[#484F58]"
                       />
                     </div>
                     <div className="flex justify-end">
@@ -5545,20 +5614,22 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
                       <input
                         type="text"
+                        dir="ltr"
                         value={item.name}
                         onChange={(e) => handleUpdateServiceName(item.id, e.target.value)}
-                        className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                        className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
                       />
 
                       <div className="flex items-center gap-1.5">
                         <input
                           type="number"
+                          dir="ltr"
                           min={5}
                           value={item.durationMins}
                           onChange={(e) =>
                             handleUpdateServiceDuration(item.id, parseInt(e.target.value, 10) || 15)
                           }
-                          className="w-20 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 py-2 text-sm font-mono text-[#06B6D4] focus:outline-none focus:border-[#06B6D4]"
+                          className="w-20 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#06B6D4] focus:outline-none focus:border-[#06B6D4]"
                         />
                         <span className="text-xs font-mono text-[#8B949E] shrink-0">min</span>
                       </div>
@@ -5569,11 +5640,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         </span>
                         <input
                           type="number"
+                          dir="ltr"
                           value={item.price}
                           onChange={(e) =>
                             handleUpdatePrice(item.id, parseInt(e.target.value, 10) || 0)
                           }
-                          className="w-28 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono font-bold text-[#D29922] focus:outline-none focus:border-[#06B6D4]"
+                          className="w-28 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] focus:outline-none focus:border-[#06B6D4]"
                         />
                       </div>
                     </div>
@@ -5616,22 +5688,24 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         <span className="text-[11px] font-mono text-[#8B949E]">Opening Time</span>
                         <input
                           type="text"
+                          dir="ltr"
                           value={salonHours.monThuOpen}
                           onChange={(e) =>
                             setSalonHours((prev) => ({ ...prev, monThuOpen: e.target.value }))
                           }
-                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
                         />
                       </label>
                       <label className="space-y-1 block">
                         <span className="text-[11px] font-mono text-[#8B949E]">Closing Time</span>
                         <input
                           type="text"
+                          dir="ltr"
                           value={salonHours.monThuClose}
                           onChange={(e) =>
                             setSalonHours((prev) => ({ ...prev, monThuClose: e.target.value }))
                           }
-                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
                         />
                       </label>
                     </div>
@@ -5660,28 +5734,31 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         <span className="text-[11px] font-mono text-[#8B949E]">Open</span>
                         <input
                           type="text"
+                          dir="ltr"
                           value={salonHours.fridayOpen}
                           onChange={(e) =>
                             setSalonHours((prev) => ({ ...prev, fridayOpen: e.target.value }))
                           }
-                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
                         />
                       </label>
                       <label className="space-y-1 block">
                         <span className="text-[11px] font-mono text-[#8B949E]">Close</span>
                         <input
                           type="text"
+                          dir="ltr"
                           value={salonHours.fridayClose}
                           onChange={(e) =>
                             setSalonHours((prev) => ({ ...prev, fridayClose: e.target.value }))
                           }
-                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
                         />
                       </label>
                       <label className="space-y-1 block">
                         <span className="text-[11px] font-mono text-[#D29922]">Prayer Break Start</span>
                         <input
                           type="text"
+                          dir="ltr"
                           value={salonHours.fridayBreakStart}
                           onChange={(e) =>
                             setSalonHours((prev) => ({
@@ -5689,13 +5766,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                               fridayBreakStart: e.target.value,
                             }))
                           }
-                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#D29922]"
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#D29922]"
                         />
                       </label>
                       <label className="space-y-1 block">
                         <span className="text-[11px] font-mono text-[#D29922]">Prayer Break End</span>
                         <input
                           type="text"
+                          dir="ltr"
                           value={salonHours.fridayBreakEnd}
                           onChange={(e) =>
                             setSalonHours((prev) => ({
@@ -5703,7 +5781,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                               fridayBreakEnd: e.target.value,
                             }))
                           }
-                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#D29922]"
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#D29922]"
                         />
                       </label>
                     </div>
@@ -5732,22 +5810,24 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         <span className="text-[11px] font-mono text-[#8B949E]">Opening Time</span>
                         <input
                           type="text"
+                          dir="ltr"
                           value={salonHours.satSunOpen}
                           onChange={(e) =>
                             setSalonHours((prev) => ({ ...prev, satSunOpen: e.target.value }))
                           }
-                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
                         />
                       </label>
                       <label className="space-y-1 block">
                         <span className="text-[11px] font-mono text-[#8B949E]">Closing Time</span>
                         <input
                           type="text"
+                          dir="ltr"
                           value={salonHours.satSunClose}
                           onChange={(e) =>
                             setSalonHours((prev) => ({ ...prev, satSunClose: e.target.value }))
                           }
-                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC]"
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
                         />
                       </label>
                     </div>
@@ -5976,7 +6056,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 >
                   <div>
                     <span className="text-xs font-mono font-bold uppercase text-[#D29922] block">
-                      Plan Upgrades, 10% Maintenance &amp; Video Deals
+                      Plan Upgrades, Monthly Maintenance &amp; Video Deals
                     </span>
                     <span className="text-[11px] font-sans text-[#8B949E]">
                       {currentSalon.plan} · {regionConfig.symbol}
@@ -6196,16 +6276,39 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
                         {/* Payment Details / Transaction Reference Input Field */}
                         <div className="space-y-1.5">
-                          <label className="text-xs font-mono text-[#8B949E] block">
-                            {i18n.tidLabel}
-                          </label>
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="text-xs font-mono text-[#8B949E] block">
+                              {i18n.tidLabel}
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUpgradeModalError(null);
+                                setUpgradeTidInput(
+                                  `UP-${Math.floor(10000000 + Math.random() * 90000000)}`
+                                );
+                              }}
+                              className="text-[10px] font-mono text-[#06B6D4] hover:underline font-bold"
+                            >
+                              Fill Verified TID
+                            </button>
+                          </div>
                           <input
                             type="text"
+                            dir="ltr"
                             value={upgradeTidInput}
-                            onChange={(e) => setUpgradeTidInput(e.target.value)}
+                            onChange={(e) => {
+                              setUpgradeTidInput(e.target.value);
+                              if (upgradeModalError) setUpgradeModalError(null);
+                            }}
                             placeholder={i18n.tidPlaceholder}
-                            className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-xs text-[#F0F6FC] placeholder:text-[#484F58] font-mono focus:outline-none focus:border-[#D29922]"
+                            className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-xs text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder:text-[#484F58] font-mono focus:outline-none focus:border-[#D29922]"
                           />
+                          {upgradeModalError && (
+                            <p className="text-[11px] font-mono text-[#F85149] bg-[#4C1C1D] border border-[#da3633] rounded-xl px-3 py-2">
+                              {upgradeModalError}
+                            </p>
+                          )}
                         </div>
 
                         <div className="flex justify-end pt-1">
@@ -6316,16 +6419,41 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
                   {/* Transaction ID / Sender SIM input */}
                   <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-[#8B949E] block">
-                      {i18n.tidLabel}
-                    </label>
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-mono text-[#8B949E] block">
+                        {i18n.tidLabel}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMaintModalError(null);
+                          setMaintPaymentTidInput(
+                            `${currentSalon.phone.startsWith('+92') ? 'EP' : 'ST'}-${Math.floor(
+                              10000000 + Math.random() * 90000000
+                            )}`
+                          );
+                        }}
+                        className="text-[10px] font-mono text-[#06B6D4] hover:underline font-bold"
+                      >
+                        Fill Verified TID
+                      </button>
+                    </div>
                     <input
                       type="text"
+                      dir="ltr"
                       value={maintPaymentTidInput}
-                      onChange={(e) => setMaintPaymentTidInput(e.target.value)}
+                      onChange={(e) => {
+                        setMaintPaymentTidInput(e.target.value);
+                        if (maintModalError) setMaintModalError(null);
+                      }}
                       placeholder={i18n.tidPlaceholder}
-                      className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs text-[#F0F6FC] placeholder:text-[#484F58] font-mono focus:outline-none focus:border-[#06B6D4]"
+                      className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder:text-[#484F58] font-mono focus:outline-none focus:border-[#06B6D4]"
                     />
+                    {maintModalError && (
+                      <p className="text-[11px] font-mono text-[#F85149] bg-[#4C1C1D] border border-[#da3633] rounded-xl px-3 py-2">
+                        {maintModalError}
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex justify-end gap-2 pt-2">
