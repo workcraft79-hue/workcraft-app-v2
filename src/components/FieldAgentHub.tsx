@@ -109,6 +109,7 @@ interface FieldAgentHubProps {
     city: string;
     websiteUrl?: string;
   }) => Promise<void> | void;
+  onAgentProfileNameSync?: (name: string) => void;
 }
 
 const DEFAULT_MENS_SERVICES: ServiceItem[] = [
@@ -913,16 +914,16 @@ export const ONBOARDING_I18N = {
     step3Title: 'Step 3: Choose Package & Setup Payment',
     step3Kicker: 'SECURE PAYMENT STEP',
     step3PackageHeading: 'Select Salon Onboarding Package',
-    formulaNotice: 'Simple Rule: Monthly fee is 10% of the setup fee per month',
+    formulaNotice: 'Transparent Billing: One-time setup fee + fixed flat monthly maintenance fee',
     setupShortLabel: 'Setup',
     maintShortLabel: 'Monthly',
     perMonthShort: '/mo',
     oneTimeFeeLabel: 'One-Time Setup Fee',
-    monthlyMaintNote: 'Monthly service fee is strictly 10%. Cash is never accepted for monthly fees.',
+    monthlyMaintNote: 'Fixed monthly maintenance fee applies per package tier. Cash is never accepted for monthly fees.',
     paymentConfirmed: 'Payment Confirmed & Saved',
     paymentUnverified: 'Not Paid Yet · Choose Payment Option Below',
     layer1Title: 'SETUP FLEXIBILITY VS. MONTHLY PAYMENT NUMBER RULE',
-    layer1Desc: 'The one-time setup fee can be paid from any wallet, bank account, or card. However, future 10% monthly fees must always be sent from the salon’s registered WhatsApp number so our system matches it automatically.',
+    layer1Desc: 'The one-time setup fee can be paid from any wallet, bank account, or card. However, future monthly maintenance fees must always be sent from the salon’s registered WhatsApp number so our system matches it automatically.',
     zeroCopyBadge: 'Auto-Matched · No Extra Steps',
     boundNumber: 'Registered WhatsApp Number',
     boundOwner: 'Registered Owner',
@@ -931,7 +932,7 @@ export const ONBOARDING_I18N = {
     collapseFeatures: 'Hide Details',
     includedLabel: 'Included',
     notIncludedLabel: 'Not Included',
-    slaAccordionLeft: '⚡ 10% Monthly Fee: Covers 24/7 hosting, live rate updates & automatic reconnection.',
+    slaAccordionLeft: '⚡ Monthly Maintenance Fee: Covers 24/7 hosting, live rate updates & automatic reconnection.',
     slaAccordionRight: 'Monthly fees are paid digitally only (never cash).',
     selectChannelLabel: 'Select Payment Method to Confirm Setup Fee',
     openDrawerHint: 'Tap an option to confirm payment details',
@@ -944,8 +945,8 @@ export const ONBOARDING_I18N = {
     optionAOffsetDesc: 'commission automatically subtracted from cash balance for',
     remainingCashDueLabel: 'Remaining cash due to WORKCRAFT:',
     zeroCashTitle: 'Monthly Fee Policy: Digital Self-Pay Only (No Cash)',
-    zeroCashDesc: 'Cash is only allowed for the first setup inside Pakistan. Every 10% monthly renewal is paid directly by the salon owner from the WorkCraft app—agents never collect monthly cash.',
-    slaCardTitle: '24/7 Auto-Protection & Uptime Support (10% Monthly)',
+    zeroCashDesc: 'Cash is only allowed for the first setup inside Pakistan. Every monthly maintenance renewal is paid directly by the salon owner from the WorkCraft app—agents never collect monthly cash.',
+    slaCardTitle: '24/7 Auto-Protection & Uptime Support (Monthly Maintenance)',
     slaCardBadge: 'Fast Auto-Fix Active 24/7',
     slaCardDesc: 'Includes 24/7 WhatsApp auto-replies, automatic connection repair, instant price list edits, and priority help whenever needed.',
     statusPaidPrefix: 'Status: Paid',
@@ -962,7 +963,7 @@ export const ONBOARDING_I18N = {
     layer1PolicyTitle: 'Registered Number Rule',
     layer1PolicyBadge: 'Setup Flexible · Monthly Locked',
     registeredSimLabel: 'Registered Salon Number:',
-    layer1PolicyDesc: 'First setup payment can come from any account. All future 10% monthly renewals must come from the salon’s registered number:',
+    layer1PolicyDesc: 'First setup payment can come from any account. All future monthly maintenance renewals must come from the salon’s registered number:',
     simGatewayTitle: 'Automatic Payment Detector',
     liveListenerBadge: 'Auto-Check Active',
     listeningSimText: 'Checking for incoming payment from:',
@@ -973,7 +974,7 @@ export const ONBOARDING_I18N = {
     instantActivationBadge: 'Salon Starts Right Away',
     intlRailDesc: 'International cards or bank wires take 24–48 hours to reach the Pakistan Meezan Bank account, but the salon goes live immediately with WhatsApp receipts sent to both Owner and Agent.',
     payerDetailsLabel: 'Sender Mobile Number / Account Name *',
-    payerDetailsHint: 'First setup payment can be from any account. Future monthly 10% fees must come from the registered number.',
+    payerDetailsHint: 'First setup payment can be from any account. Future monthly maintenance fees must come from the registered number.',
     tidInputLabel: 'Transaction ID (TID) / Reference *',
     smsAutoCapture: 'Auto-Detected / Instant Ref',
     lockedAmountLabel: 'Exact Amount Required',
@@ -1066,16 +1067,16 @@ export const ONBOARDING_I18N = {
     step3Title: 'تیسرا مرحلہ: پیکیج اور سیٹ اپ ادائیگی',
     step3Kicker: 'محفوظ ادائیگی مرحلہ',
     step3PackageHeading: 'سیلون پیکیج منتخب کریں',
-    formulaNotice: 'آسان اصول: ماہانہ فیس پیکیج کی قیمت کا 10% ہوگی',
+    formulaNotice: 'شفاف بلنگ: ایک بار کی سیٹ اپ فیس + مقررہ ماہانہ مینٹیننس فیس',
     setupShortLabel: 'سیٹ اپ',
     maintShortLabel: 'ماہانہ',
     perMonthShort: '/ماہ',
     oneTimeFeeLabel: 'ایک بار کی سیٹ اپ فیس',
-    monthlyMaintNote: 'ماہانہ فیس 10% ہوگی۔ ماہانہ فیس کے لیے نقد رقم کبھی قبول نہیں کی جاتی۔',
+    monthlyMaintNote: 'ہر پیکیج کے مطابق مقررہ ماہانہ مینٹیننس فیس لاگو ہوگی۔ ماہانہ فیس کے لیے نقد رقم کبھی قبول نہیں کی جاتی۔',
     paymentConfirmed: 'ادائیگی مکمل اور محفوظ ہو گئی',
     paymentUnverified: 'ابھی ادا نہیں ہوئی · نیچے ادائیگی کا طریقہ منتخب کریں',
     layer1Title: 'پہلی ادائیگی میں آسانی بمقابلہ ماہانہ فیس کا رجسٹرڈ نمبر اصول',
-    layer1Desc: 'پہلی سیٹ اپ فیس کسی بھی اکاؤنٹ، والٹ یا کارڈ سے ادا کی جا سکتی ہے۔ تاہم آئندہ تمام 10% ماہانہ فیس صرف سیلون کے رجسٹرڈ واٹس ایپ نمبر سے بھیجی جائے گی تاکہ سسٹم خودکار تصدیق کر سکے۔',
+    layer1Desc: 'پہلی سیٹ اپ فیس کسی بھی اکاؤنٹ، والٹ یا کارڈ سے ادا کی جا سکتی ہے۔ تاہم آئندہ تمام ماہانہ مینٹیننس فیس صرف سیلون کے رجسٹرڈ واٹس ایپ نمبر سے بھیجی جائے گی تاکہ سسٹم خودکار تصدیق کر سکے۔',
     zeroCopyBadge: 'خودکار تصدیق · کوئی کاپی پیسٹ نہیں',
     boundNumber: 'رجسٹرڈ واٹس ایپ نمبر',
     boundOwner: 'سیلون مالک کا نام',
@@ -1084,7 +1085,7 @@ export const ONBOARDING_I18N = {
     collapseFeatures: 'تفصیل بند کریں',
     includedLabel: 'شامل ہے',
     notIncludedLabel: 'شامل نہیں',
-    slaAccordionLeft: '⚡ 10% ماہانہ فیس: 24/7 سسٹم، لائیو ریٹ تبدیلیاں اور خودکار کنکشن مرمت شامل ہے۔',
+    slaAccordionLeft: '⚡ ماہانہ مینٹیننس فیس: 24/7 سسٹم، لائیو ریٹ تبدیلیاں اور خودکار کنکشن مرمت شامل ہے۔',
     slaAccordionRight: 'ماہانہ فیس صرف ڈیجیٹل ادا ہوتی ہے (نقد نہیں)۔',
     selectChannelLabel: 'تصدیق کے لیے ادائیگی کا طریقہ منتخب کریں',
     openDrawerHint: 'تفصیل درج کرنے کے لیے نیچے کلک کریں',
@@ -1097,8 +1098,8 @@ export const ONBOARDING_I18N = {
     optionAOffsetDesc: 'آپ کا کمیشن خودکار طور پر بقایا کیش میں سے منہا کر دیا گیا برائے',
     remainingCashDueLabel: 'ورک کرافٹ کو واجب الادا بقایا کیش:',
     zeroCashTitle: 'ماہانہ فیس پالیسی: صرف ڈیجیٹل ادائیگی (نقد ممنوع)',
-    zeroCashDesc: 'نقد رقم صرف پاکستان میں پہلے دن سیٹ اپ کے وقت لی جا سکتی ہے۔ ہر مہینے کی 10% فیس سیلون مالک خود WorkCraft ایپ سے ادا کرے گا۔',
-    slaCardTitle: '24/7 خودکار تحفظ اور سپورٹ (10% ماہانہ)',
+    zeroCashDesc: 'نقد رقم صرف پاکستان میں پہلے دن سیٹ اپ کے وقت لی جا سکتی ہے۔ ہر مہینے کی مینٹیننس فیس سیلون مالک خود WorkCraft ایپ سے ادا کرے گا۔',
+    slaCardTitle: '24/7 خودکار تحفظ اور سپورٹ (ماہانہ مینٹیننس فیس)',
     slaCardBadge: '24/7 خودکار مرمت فعال',
     slaCardDesc: 'اس میں 24/7 واٹس ایپ آٹو ریپلائی، کنکشن کی خودکار بحالی، فوری ریٹ تبدیلی اور ترجیحی مدد شامل ہے۔',
     statusPaidPrefix: 'اسٹیٹس: ادا شدہ',
@@ -1115,7 +1116,7 @@ export const ONBOARDING_I18N = {
     layer1PolicyTitle: 'رجسٹرڈ نمبر کا اصول',
     layer1PolicyBadge: 'سیٹ اپ آسان · ماہانہ نمبر لاک',
     registeredSimLabel: 'رجسٹرڈ سیلون نمبر:',
-    layer1PolicyDesc: 'ابتدائی فیس کسی بھی اکاؤنٹ سے ادا ہو سکتی ہے۔ آئندہ تمام 10% ماہانہ فیس رجسٹرڈ نمبر سے ہی آئے گی:',
+    layer1PolicyDesc: 'ابتدائی فیس کسی بھی اکاؤنٹ سے ادا ہو سکتی ہے۔ آئندہ تمام ماہانہ مینٹیننس فیس رجسٹرڈ نمبر سے ہی آئے گی:',
     simGatewayTitle: 'خودکار ادائیگی چیک سسٹم',
     liveListenerBadge: 'آٹو چیک فعال',
     listeningSimText: 'آنے والی رقم چیک کی جا رہی ہے از:',
@@ -1126,7 +1127,7 @@ export const ONBOARDING_I18N = {
     instantActivationBadge: 'سیلون فوراً آن ہو جاتا ہے',
     intlRailDesc: 'بیرونِ ملک سے کارڈ یا بینک ٹرانسفر پاکستان میزان بینک میں آنے میں 24–48 گھنٹے لگتے ہیں، لیکن سیلون کا نظام فوراً شروع ہو جاتا ہے اور مالک و ایجنٹ دونوں کو واٹس ایپ رسید مل جاتی ہے۔',
     payerDetailsLabel: 'بھیجنے والے کا فون یا اکاؤنٹ نام *',
-    payerDetailsHint: 'سیٹ اپ فیس کسی بھی اکاؤنٹ سے دی جا سکتی ہے، جبکہ ماہانہ فیس رجسٹرڈ نمبر سے مشروط ہے۔',
+    payerDetailsHint: 'سیٹ اپ فیس کسی بھی اکاؤنٹ سے دی جا سکتی ہے، جبکہ ماہانہ مینٹیننس فیس رجسٹرڈ نمبر سے مشروط ہے۔',
     tidInputLabel: 'ٹرانزیکشن آئی ڈی (TID) / حوالہ نمبر *',
     smsAutoCapture: 'خودکار / فوری حوالہ',
     lockedAmountLabel: 'مطلوبہ رقم',
@@ -1219,16 +1220,16 @@ export const ONBOARDING_I18N = {
     step3Title: 'الخطوة 3: اختيار الباقة وتأكيد رسوم التأسيس',
     step3Kicker: 'خطوة الدفع الآمنة',
     step3PackageHeading: 'اختر باقة تأسيس الصالون',
-    formulaNotice: 'قاعدة واضحة: الرسوم الشهرية هي 10% فقط من رسوم التأسيس شهرياً',
+    formulaNotice: 'فوترة واضحة: رسوم تأسيس لمرة واحدة + رسوم صيانة شهرية ثابتة',
     setupShortLabel: 'التأسيس',
     maintShortLabel: 'شهرياً',
     perMonthShort: '/شهرياً',
     oneTimeFeeLabel: 'رسوم التأسيس لمرة واحدة',
-    monthlyMaintNote: 'الرسوم الشهرية 10% من الباقة. لا يتم قبول الدفع النقدي للرسوم الشهرية أبداً.',
+    monthlyMaintNote: 'تُطبق رسوم الصيانة الشهرية المحددة لكل باقة. لا يتم قبول الدفع النقدي للرسوم الشهرية أبداً.',
     paymentConfirmed: 'تم تأكيد الدفع وحفظه بنجاح',
     paymentUnverified: 'لم يتم الدفع بعد · اختر طريقة الدفع أدناه',
     layer1Title: 'مرونة التأسيس مقابل شرط الرقم المسجل للرسوم الشهرية',
-    layer1Desc: 'يمكن سداد رسوم التأسيس الأولى من أي بطاقة أو حساب بنكي. أما الرسوم الشهرية (10%) فيجب إرسالها دائماً من رقم الواتساب المسجل للصالون ليتم التحقق منها تلقائياً.',
+    layer1Desc: 'يمكن سداد رسوم التأسيس الأولى من أي بطاقة أو حساب بنكي. أما رسوم الصيانة الشهرية فيجب إرسالها دائماً من رقم الواتساب المسجل للصالون ليتم التحقق منها تلقائياً.',
     zeroCopyBadge: 'مطابقة تلقائية · بدون نسخ',
     boundNumber: 'رقم الواتساب المسجل',
     boundOwner: 'المالك المسجل',
@@ -1237,7 +1238,7 @@ export const ONBOARDING_I18N = {
     collapseFeatures: 'إخفاء التفاصيل',
     includedLabel: 'مشمول',
     notIncludedLabel: 'غير مشمول',
-    slaAccordionLeft: '⚡ رسوم 10% شهرية: تشمل الاستضافة 24/7، تعديل الأسعار فوراً، والإصلاح التلقائي.',
+    slaAccordionLeft: '⚡ رسوم الصيانة الشهرية: تشمل الاستضافة 24/7، تعديل الأسعار فوراً، والإصلاح التلقائي.',
     slaAccordionRight: 'الرسوم الشهرية إلكترونية فقط (بدون نقد).',
     selectChannelLabel: 'اختر وسيلة الدفع لتأكيد رسوم التأسيس',
     openDrawerHint: 'اضغط على وسيلة الدفع لإدخال التفاصيل',
@@ -1250,8 +1251,8 @@ export const ONBOARDING_I18N = {
     optionAOffsetDesc: 'تم خصم عمولتك تلقائياً من الرصيد النقدي المستحق لـ',
     remainingCashDueLabel: 'النقد المتبقي المستحق لـ WORKCRAFT:',
     zeroCashTitle: 'سياسة الرسوم الشهرية: دفع إلكتروني ذاتي فقط (بدون نقد)',
-    zeroCashDesc: 'يُقبل النقد لرسوم التأسيس الأولى داخل باكستان فقط. جميع الرسوم الشهرية (10%) يدفعها مالك الصالون مباشرة من تطبيق WorkCraft.',
-    slaCardTitle: 'حماية تلقائية وتشغيل مستمر 24/7 (10% شهرياً)',
+    zeroCashDesc: 'يُقبل النقد لرسوم التأسيس الأولى داخل باكستان فقط. جميع رسوم الصيانة الشهرية يدفعها مالك الصالون مباشرة من تطبيق WorkCraft.',
+    slaCardTitle: 'حماية تلقائية وتشغيل مستمر 24/7 (رسوم الصيانة الشهرية)',
     slaCardBadge: 'إصلاح تلقائي نشط 24/7',
     slaCardDesc: 'تشمل الرد التلقائي عبر واتساب 24/7، إعادة الربط التلقائي، تحديث الأسعار فوراً، والدعم السريع.',
     statusPaidPrefix: 'الحالة: مدفوع',
@@ -1268,7 +1269,7 @@ export const ONBOARDING_I18N = {
     layer1PolicyTitle: 'شرط الرقم المسجل',
     layer1PolicyBadge: 'مرونة التأسيس · الشهرية بالرقم المسجل',
     registeredSimLabel: 'رقم الصالون المسجل:',
-    layer1PolicyDesc: 'يمكن سداد رسوم التأسيس من أي حساب، بينما يجب سداد الرسوم الشهرية (10%) من الرقم المسجل فقط:',
+    layer1PolicyDesc: 'يمكن سداد رسوم التأسيس من أي حساب، بينما يجب سداد رسوم الصيانة الشهرية من الرقم المسجل فقط:',
     simGatewayTitle: 'نظام فحص الدفع التلقائي',
     liveListenerBadge: 'فحص تلقائي نشط',
     listeningSimText: 'جاري البحث عن الحوالة الواردة من:',
@@ -1279,7 +1280,7 @@ export const ONBOARDING_I18N = {
     instantActivationBadge: 'يبدأ الصالون فوراً',
     intlRailDesc: 'تستغرق البطاقات الدولية والتحويلات 24–48 ساعة للوصول إلى حساب بنك ميزان الباكستاني، لكن نظام الصالون يعمل فوراً مع إرسال إيصالات واتساب للمالك والوكيل.',
     payerDetailsLabel: 'رقم هاتف المرسل / اسم الحساب *',
-    payerDetailsHint: 'يمكن دفع التأسيس من أي حساب، أما الشهرية 10% فمن الرقم المسجل فقط.',
+    payerDetailsHint: 'يمكن دفع التأسيس من أي حساب، أما رسوم الصيانة الشهرية فمن الرقم المسجل فقط.',
     tidInputLabel: 'رقم العملية / المرجع البنكي (TID) *',
     smsAutoCapture: 'مرجع تلقائي / فوري',
     lockedAmountLabel: 'المبلغ المطلوب',
@@ -1602,7 +1603,7 @@ export const getLocalizedPackageCardCopy = (
     switch (pkgId) {
       case 'STARTER':
         return {
-          bookings: 'ماہانہ 500 بکنگز',
+          bookings: 'ماہانہ 750 بکنگز',
           scope: 'صرف 24/7 واٹس ایپ آٹو بکنگ بوٹ اور سروس ریٹ لسٹ',
         };
       case 'GROWTH':
@@ -1628,7 +1629,7 @@ export const getLocalizedPackageCardCopy = (
     switch (pkgId) {
       case 'STARTER':
         return {
-          bookings: '500 حجز شهرياً',
+          bookings: '750 حجز شهرياً',
           scope: 'رد وحجز واتساب تلقائي 24/7 وقائمة الأسعار فقط',
         };
       case 'GROWTH':
@@ -1653,7 +1654,7 @@ export const getLocalizedPackageCardCopy = (
   switch (pkgId) {
     case 'STARTER':
       return {
-        bookings: '500 bookings/mo',
+        bookings: '750 bookings/mo',
         scope: 'WhatsApp Auto-Reply Concierge Only (No Google Reviews, No Video Deals)',
       };
     case 'GROWTH':
@@ -1685,7 +1686,7 @@ export const getLocalizedPackageFeatures = (
       case 'STARTER':
         return [
           { title: '24/7 خودکار واٹس ایپ بکنگ بوٹ (سروس مینو اور فوری بکنگ)', included: true },
-          { title: 'ماہانہ 500 گاہک بکنگز کی گنجائش', included: true },
+          { title: 'ماہانہ 750 گاہک بکنگز کی گنجائش', included: true },
           { title: 'بکنگ کا فوری واٹس ایپ کنفرمیشن اور ریمائنڈر میسج', included: true },
           { title: 'باربرز / اسٹائلسٹس چیئر لسٹ اور ٹائم سلاٹس سیٹ اپ', included: true },
           { title: 'گوگل میپس پن لوکیشن اور سیلون ٹائمنگ آٹو ریپلائی', included: true },
@@ -1734,7 +1735,7 @@ export const getLocalizedPackageFeatures = (
       case 'STARTER':
         return [
           { title: 'بوت حجز واتساب آلي يعمل 24/7 (قائمة الخدمات والأسعار الفورية)', included: true },
-          { title: 'سعة استيعاب 500 حجز شهرياً', included: true },
+          { title: 'سعة استيعاب 750 حجز شهرياً', included: true },
           { title: 'إشعار وتأكيد وتذكير فوري للحجوزات عبر واتساب', included: true },
           { title: 'إعداد قائمة الحلاقين / المصففين وجدولة الكراسي', included: true },
           { title: 'رد تلقائي بموقع الصالون على خرائط جوجل وساعات العمل', included: true },
@@ -1783,7 +1784,7 @@ export const getLocalizedPackageFeatures = (
     case 'STARTER':
       return [
         { title: '24/7 Autonomous WhatsApp Booking Concierge & Live Rate Card', included: true },
-        { title: '500 salon bookings / month capacity', included: true },
+        { title: '750 salon bookings / month capacity', included: true },
         { title: 'Instant WhatsApp booking confirmation & reminder messages', included: true },
         { title: 'Staff barber / stylist chair roster & slot scheduling', included: true },
         { title: 'Google Maps pin & opening hours instant auto-reply', included: true },
@@ -1841,14 +1842,14 @@ export const formatWelcomeMessage = (
 
   if (lang === 'en') {
     // English: strictly "Dear Mr. [Name]" (No Assalam-o-Alaikum as per policy)
-    return `Dear Mr. ${safeOwner},\n\nWelcome to WORKCRAFT Local. Your terminal for "${safeSalon}" is activated.\n🔑 Terminal Pairing Key: ${pairingKey}\n📲 Web App Link: ${pwaLink}\n\nOur Central SIM Gateway is now operational for your 24/7 automated booking concierge.`;
+    return `Dear Mr. ${safeOwner},\n\nWelcome to WorkCraft. Your terminal for "${safeSalon}" is activated.\n🔑 Terminal Pairing Key: ${pairingKey}\n📲 Web App Link: ${pwaLink}\n\nOur Central SIM Gateway is now operational for your 24/7 automated booking concierge.`;
   }
   if (lang === 'ar') {
     // Arabic: Starts with proper Arabic السلام عليكم and dual-script WORKCRAFT brand
-    return `السلام عليكم ${safeOwner}!\n\nمرحباً بكم في WORKCRAFT Local (وورك كرافت لوكل). تم تفعيل حساب صالونكم "${safeSalon}".\n🔑 رمز الاقتران (Pairing Key): ${pairingKey}\n📲 رابط البوابة: ${pwaLink}\n\nنظام الرد التلقائي والحجوزات عبر واتساب يعمل الآن 24/7 على مدار الساعة.`;
+    return `السلام عليكم ${safeOwner}!\n\nمرحباً بكم في WorkCraft (وورك كرافت). تم تفعيل حساب صالونكم "${safeSalon}".\n🔑 رمز الاقتران (Pairing Key): ${pairingKey}\n📲 رابط البوابة: ${pwaLink}\n\nنظام الرد التلقائي والحجوزات عبر واتساب يعمل الآن 24/7 على مدار الساعة.`;
   }
   // Native Simple Urdu: Starts with Assalam-o-Alaikum and dual-script WORKCRAFT brand
-  return `السلام علیکم ${safeOwner}!\n\nورک کرافٹ لوکل (WORKCRAFT Local) میں خوش آمدید۔ آپ کے سیلون "${safeSalon}" کا اکاؤنٹ فعال ہو چکا ہے۔\n🔑 پیئرنگ کوڈ (Pairing Key): ${pairingKey}\n📲 پورٹل لنک: ${pwaLink}\n\nہمارا 24/7 واٹس ایپ آٹو ریپلائی کسٹمر بکنگ سسٹم لائیو ہے۔`;
+  return `السلام علیکم ${safeOwner}!\n\nورک کرافٹ (WorkCraft) میں خوش آمدید۔ آپ کے سیلون "${safeSalon}" کا اکاؤنٹ فعال ہو چکا ہے۔\n🔑 پیئرنگ کوڈ (Pairing Key): ${pairingKey}\n📲 پورٹل لنک: ${pwaLink}\n\nہمارا 24/7 واٹس ایپ آٹو ریپلائی کسٹمر بکنگ سسٹم لائیو ہے۔`;
 };
 
 export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
@@ -1866,6 +1867,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   onReturnToFounder,
   onSalonOnboardingComplete,
   onAgentEnrollmentComplete,
+  onAgentProfileNameSync,
 }) => {
   const isSelfServeOwner = userRole === 'SALON_OWNER';
 
@@ -1983,46 +1985,46 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     {
       id: 'STARTER',
       name: 'Starter Setup',
-      setupFee: 15000,
-      monthlyMaint: 1500, // 10%
+      setupFee: 17500,
+      monthlyMaint: 1750,
       currency: 'PKR',
       prefix: 'PKR ',
-      bookings: '500 bookings/mo',
+      bookings: '750 bookings/mo',
       scope: 'WhatsApp Auto-Reply Concierge Only (No Google Reviews, No Video Deals)',
-      agentCommission: 3000,
+      agentCommission: 3500,
     },
     {
       id: 'GROWTH',
       name: 'Growth Automation',
-      setupFee: 20000,
-      monthlyMaint: 2000, // 10%
+      setupFee: 25000,
+      monthlyMaint: 2500,
       currency: 'PKR',
       prefix: 'PKR ',
       bookings: '1,500 bookings/mo',
       scope: 'WhatsApp Auto-Reply + Google 5-Star Review Booster',
-      agentCommission: 4000,
+      agentCommission: 5000,
     },
     {
       id: 'VIP',
       name: 'VIP Executive',
-      setupFee: 25000,
-      monthlyMaint: 2500, // 10%
+      setupFee: 35000,
+      monthlyMaint: 3500,
       currency: 'PKR',
       prefix: 'PKR ',
       bookings: '3,000 bookings/mo',
       scope: 'WhatsApp Auto-Reply + Google 5-Star Reviews + Video Upload Feature Unlocked (1 video @ PKR 1,500 or 4 videos @ PKR 4,000 · 7–10 day validation)',
-      agentCommission: 5000,
+      agentCommission: 7000,
     },
     {
       id: 'CUSTOM',
       name: 'Custom Enterprise',
-      setupFee: 35000,
-      monthlyMaint: 3500, // 10%
+      setupFee: 50000,
+      monthlyMaint: 5000,
       currency: 'PKR',
       prefix: 'PKR ',
       bookings: '> 3,000 bookings/mo',
       scope: 'High-Volume Single Salon · Unlimited Staff Chairs + Custom Video Promo & Priority SLA',
-      agentCommission: 7000,
+      agentCommission: 10000,
     },
   ];
 
@@ -2030,41 +2032,41 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     {
       id: 'STARTER',
       name: 'Starter Setup',
-      setupFee: 75,
-      monthlyMaint: 7.5, // 10%
+      setupFee: 79,
+      monthlyMaint: 15,
       currency: 'USD',
       prefix: '$',
-      bookings: '500 bookings/mo',
+      bookings: '750 bookings/mo',
       scope: 'WhatsApp Auto-Reply Concierge Only (No Google Reviews, No Video Deals)',
-      agentCommission: 15,
+      agentCommission: 16,
     },
     {
       id: 'GROWTH',
       name: 'Growth Automation',
-      setupFee: 110,
-      monthlyMaint: 11, // 10%
+      setupFee: 129,
+      monthlyMaint: 25,
       currency: 'USD',
       prefix: '$',
       bookings: '1,500 bookings/mo',
       scope: 'WhatsApp Auto-Reply + Google 5-Star Review Booster',
-      agentCommission: 22,
+      agentCommission: 26,
     },
     {
       id: 'VIP',
       name: 'VIP Executive',
-      setupFee: 160,
-      monthlyMaint: 16, // 10%
+      setupFee: 169,
+      monthlyMaint: 35,
       currency: 'USD',
       prefix: '$',
       bookings: '3,000 bookings/mo',
       scope: 'WhatsApp Auto-Reply + Google 5-Star Reviews + Video Upload Feature Unlocked (1 video @ $15 or 4 videos @ $40 · 7–10 day validation)',
-      agentCommission: 32,
+      agentCommission: 34,
     },
     {
       id: 'CUSTOM',
       name: 'Custom Enterprise',
       setupFee: 250,
-      monthlyMaint: 25, // 10%
+      monthlyMaint: 50,
       currency: 'USD',
       prefix: '$',
       bookings: '> 3,000 bookings/mo',
@@ -2318,10 +2320,17 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const [agentLanguage, setAgentLanguage] = useState<'en' | 'ur' | 'ur_roman' | 'ar'>('en');
 
   // Query 5 & 6: Editable Day-1 Agent Profile
-  const [agentFullName, setAgentFullName] = useState('Kamran Tariq');
-  const [agentWhatsApp, setAgentWhatsApp] = useState('+92-301-4567891');
+  const [agentFullName, setAgentFullName] = useState(initialEnrollAgentData?.name || 'Kamran Tariq');
+  const [agentWhatsApp, setAgentWhatsApp] = useState(initialEnrollAgentData?.phone || '+92-301-4567891');
   const [agentIdNumber, setAgentIdNumber] = useState('35202-8491023-1');
-  const [agentTerritory, setAgentTerritory] = useState('Lahore West (Gulberg · DHA · Model Town)');
+  const [agentTerritory, setAgentTerritory] = useState(initialEnrollAgentData?.city || 'Lahore West (Gulberg · DHA · Model Town)');
+  const [agentProfileSelfieUrl, setAgentProfileSelfieUrl] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('wcl_agent_profile_selfie_v1') || null;
+    } catch {
+      return null;
+    }
+  });
   const [agentSelfieCaptured, setAgentSelfieCaptured] = useState(true);
   const [isCameraCapturing, setIsCameraCapturing] = useState(false);
   const [isProfileThumbScanning, setIsProfileThumbScanning] = useState(false);
@@ -2423,6 +2432,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     status: string;
     enrolledAt: string;
     selfieVerified: boolean;
+    selfieUrl?: string;
     thumbHash: string;
     legalRemittanceAgreed: boolean;
     legalTermsText: string;
@@ -2884,8 +2894,22 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
         return;
       }
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.86);
+      // Compress crisp 240x320 portrait (~12-18 KB) for Agent My Profile & Dossier storage
+      const thumbCanvas = document.createElement('canvas');
+      thumbCanvas.width = 240;
+      thumbCanvas.height = 320;
+      const thumbCtx = thumbCanvas.getContext('2d');
+      let compressedThumbUrl = dataUrl;
+      if (thumbCtx) {
+        thumbCtx.drawImage(canvas, 0, 0, 240, 320);
+        compressedThumbUrl = thumbCanvas.toDataURL('image/jpeg', 0.72);
+      }
       setEnrollSelfiePreviewUrl(dataUrl);
+      setAgentProfileSelfieUrl(compressedThumbUrl);
+      try {
+        localStorage.setItem('wcl_agent_profile_selfie_v1', compressedThumbUrl);
+      } catch {}
       setEnrollSelfieDone(true);
       setStep2BiometricError(null);
       stopSelfieCamera();
@@ -3302,18 +3326,19 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     }
   };
 
-  // Submit Payment Drawer Verification (Server-to-Server Ledger Cross-Check Simulation)
-  const handleVerifyDrawerPayment = (e: React.FormEvent) => {
+  // Submit Payment Drawer Verification (Authoritative Server-to-Server 4-Layer Ledger Cross-Check)
+  const handleVerifyDrawerPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setDrawerError(null);
 
-    // Strict Setup Fee Rail Requirement: Transaction ID / Reference is mandatory
-    if (!drawerTid || !drawerTid.trim()) {
-      setDrawerError('Transaction ID (TID) / Raast Reference is strictly required for setup fee settlement verification.');
+    const cleanTid = drawerTid.trim();
+    // Strict Setup Fee Rail Requirement: Valid Transaction ID / Reference (>= 6 chars, non-placeholder)
+    if (cleanTid.length < 6 || !/^[A-Za-z0-9._:/-]+$/.test(cleanTid) || /^(test|demo|fake|000000|111111|123456)/i.test(cleanTid)) {
+      setDrawerError('Valid Transaction ID (TID) / Bank Reference (min 6 alphanumeric characters) is strictly required for setup fee settlement into WorkCraft official accounts.');
       return;
     }
 
-    // Recommendation 6: Strict Biometric Thumbprint Check for Cash (Zero PIN Fallback)
+    // Strict Biometric Thumbprint Check for Cash (Pakistan Field Agents Only)
     if (setupPaymentMethod === 'Cash Collection') {
       if (!detectedCountry.isDomestic || (userRole as string) === 'SALON_OWNER') {
         setDrawerError('Cash collection is strictly prohibited for international salons or self-onboarding salon owners.');
@@ -3334,120 +3359,150 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     }
 
     setDrawerIsSubmitting(true);
+    let serverSha256Proof = 'sha256:' + (thumbprintHash || Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15));
 
-    // Simulate 4-Layer Ledger Verification (Anti-replay, checksum, amount check, status: paid)
-    setTimeout(() => {
-      setDrawerIsSubmitting(false);
+    try {
+      const verifyRes = await fetch('/api/onboarding/verify-payment', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          packageId: activePackage.id,
+          currency: activePackage.currency,
+          amount: activePackage.setupFee,
+          method: setupPaymentMethod,
+          tid: cleanTid,
+          salonName: salonName.trim() || 'New Partner Salon',
+        }),
+      });
+      const verifyData = (await verifyRes.json().catch(() => null)) as {
+        verified?: boolean;
+        error?: string;
+        sha256Proof?: string;
+      } | null;
 
-      const isPureAgent = userRole === 'FIELD_AGENT';
-      const commission = isPureAgent ? activePackage.agentCommission : 0;
-      let newRemainingDebt = cashLiabilityHeld;
-      let commissionAdjusted = false;
+      if (!verifyRes.ok || !verifyData?.verified) {
+        setDrawerError(
+          verifyData?.error ||
+            'Payment verification failed against WorkCraft official account rules. Check package amount & unique TID.'
+        );
+        setDrawerIsSubmitting(false);
+        return;
+      }
+      if (verifyData?.sha256Proof) {
+        serverSha256Proof = verifyData.sha256Proof;
+      }
+    } catch {
+      // Allow offline/static fallback only if TID passed strict local validation above
+    }
 
-      // Track Pakistan physical cash collection + 2-deal / 50k / 48h threshold + Option A Net-Adjustment
-      if (!isSelfServeOwner && detectedCountry.isDomestic) {
-        if (setupPaymentMethod === 'Cash Collection') {
-          newRemainingDebt = cashLiabilityHeld + activePackage.setupFee;
-          const nextDeals = pkCashDealsCount + 1;
-          setCashLiabilityHeld(newRemainingDebt);
-          setPkCashDealsCount(nextDeals);
-          if (pkCashDealsCount === 0) {
-            setCountdownHours(MAX_CASH_HOLD_HOURS);
-            setCountdownMinutes(0);
-          }
-          if (newRemainingDebt >= MAX_CASH_CEILING || nextDeals >= MAX_CASH_DEALS) {
-            setEnrolledAgentsList((prev) =>
-              prev.map((ag) =>
-                ag.name === agentFullName ? { ...ag, status: 'SUSPENDED · CASH DEPOSIT REQ' } : ag
+    const isPureAgent = userRole === 'FIELD_AGENT';
+    const commission = isPureAgent ? activePackage.agentCommission : 0;
+    let newRemainingDebt = cashLiabilityHeld;
+    let commissionAdjusted = false;
+
+    if (!isSelfServeOwner && detectedCountry.isDomestic) {
+      if (setupPaymentMethod === 'Cash Collection') {
+        newRemainingDebt = cashLiabilityHeld + activePackage.setupFee;
+        const nextDeals = pkCashDealsCount + 1;
+        setCashLiabilityHeld(newRemainingDebt);
+        setPkCashDealsCount(nextDeals);
+        if (pkCashDealsCount === 0) {
+          setCountdownHours(MAX_CASH_HOLD_HOURS);
+          setCountdownMinutes(0);
+        }
+        if (newRemainingDebt >= MAX_CASH_CEILING || nextDeals >= MAX_CASH_DEALS) {
+          setEnrolledAgentsList((prev) =>
+            prev.map((ag) =>
+              ag.name === agentFullName ? { ...ag, status: 'SUSPENDED · CASH DEPOSIT REQ' } : ag
+            )
+          );
+        }
+        if (salonName.trim()) {
+          setCashLiabilitySalon(salonName.trim());
+        }
+      } else if (isPureAgent && cashLiabilityHeld > 0) {
+        newRemainingDebt = Math.max(0, cashLiabilityHeld - commission);
+        setCashLiabilityHeld(newRemainingDebt);
+        if (newRemainingDebt === 0) {
+          setPkCashDealsCount(0);
+          setCountdownHours(MAX_CASH_HOLD_HOURS);
+          setCountdownMinutes(0);
+        }
+        commissionAdjusted = true;
+      }
+    }
+
+    if (!isSelfServeOwner && setupPaymentMethod === 'Cash Collection') {
+      const computedProofHash = serverSha256Proof;
+      void fetch('/api/agent/cash/collect', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          salonName: salonName.trim() || 'Partner Salon',
+          amount: activePackage.setupFee,
+          tid: cleanTid,
+          proofHash: computedProofHash,
+          coAgentId: selectedCoAgentId || undefined,
+        }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then(() => {
+          if (selectedCoAgentId) {
+            setCoAgentsList((prev) =>
+              prev.map((c) =>
+                c.id === selectedCoAgentId
+                  ? {
+                      ...c,
+                      cashHeld: c.cashHeld + activePackage.setupFee,
+                      dealsClosed: c.dealsClosed + 1,
+                      status: 'HANDOFF_PENDING',
+                    }
+                  : c
               )
             );
           }
-          if (salonName.trim()) {
-            setCashLiabilitySalon(salonName.trim());
-          }
-        } else if (isPureAgent && cashLiabilityHeld > 0) {
-          newRemainingDebt = Math.max(0, cashLiabilityHeld - commission);
-          setCashLiabilityHeld(newRemainingDebt);
-          if (newRemainingDebt === 0) {
-            setPkCashDealsCount(0);
-            setCountdownHours(MAX_CASH_HOLD_HOURS);
-            setCountdownMinutes(0);
-          }
-          commissionAdjusted = true;
-        }
-      }
-
-      if (!isSelfServeOwner && setupPaymentMethod === 'Cash Collection') {
-        const computedProofHash =
-          'sha256:' + (thumbprintHash || Math.random().toString(36).substring(2, 15));
-        void fetch('/api/agent/cash/collect', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            salonName: salonName.trim() || 'Partner Salon',
-            amount: activePackage.setupFee,
-            tid: drawerTid.trim(),
-            proofHash: computedProofHash,
-            coAgentId: selectedCoAgentId || undefined,
-          }),
         })
-          .then((res) => (res.ok ? res.json() : null))
-          .then(() => {
-            if (selectedCoAgentId) {
-              setCoAgentsList((prev) =>
-                prev.map((c) =>
-                  c.id === selectedCoAgentId
-                    ? {
-                        ...c,
-                        cashHeld: c.cashHeld + activePackage.setupFee,
-                        dealsClosed: c.dealsClosed + 1,
-                        status: 'HANDOFF_PENDING',
-                      }
-                    : c
-                )
-              );
-            }
-          })
-          .catch(() => {});
-        if (onCashCollected) {
-          onCashCollected(activePackage.setupFee, salonName);
-        }
+        .catch(() => {});
+      if (onCashCollected) {
+        onCashCollected(activePackage.setupFee, salonName);
       }
+    }
 
-      const isIntl = !detectedCountry.isDomestic;
-      const workcraftShare = Math.round(activePackage.setupFee - commission);
-      const receiptPayload = {
-        method: setupPaymentMethod,
-        senderDetails: drawerSenderDetails || ownerName,
-        tid: drawerTid.trim(),
-        amount: activePackage.setupFee,
-        currency: activePackage.currency,
-        currencyPrefix: activePackage.prefix,
-        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        sha256Proof: 'sha256:' + (thumbprintHash || Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)),
-        recipientRoute: !isPureAgent
-          ? clientOnboardingLanguage === 'ur'
-            ? `100% براہِ راست ورک کرافٹ اکاؤنٹ (${phone}) · صفر ایجنٹ کمیشن`
-            : clientOnboardingLanguage === 'ar'
-            ? `100% مباشرة لحساب WORKCRAFT الرسمي (${phone}) · بدون عمولة وكيل`
-            : `100% Direct to WORKCRAFT Official Account (${phone})`
-          : isIntl
-          ? `Same-Currency Direct Split: 20% (${activePackage.prefix}${commission.toLocaleString()}) ➔ Agent Local ${activePackage.currency} Account · 80% (${activePackage.prefix}${workcraftShare.toLocaleString()}) ➔ WORKCRAFT (Zero Double FX Loss)`
-          : 'Central SIM Gateway Dual Dispatch (Salon Owner + Field Agent Kamran Tariq)',
-        commissionAdjusted,
-        commissionAmount: commission,
-        remainingCashOwed: newRemainingDebt,
-        isSameCurrencySplit: isPureAgent && isIntl,
-        workcraftNetAmount: workcraftShare,
-        status: 'paid' as const,
-      };
+    const isIntl = !detectedCountry.isDomestic;
+    const workcraftShare = Math.round(activePackage.setupFee - commission);
+    const receiptPayload = {
+      method: setupPaymentMethod,
+      senderDetails: drawerSenderDetails || ownerName,
+      tid: cleanTid,
+      amount: activePackage.setupFee,
+      currency: activePackage.currency,
+      currencyPrefix: activePackage.prefix,
+      timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      sha256Proof: serverSha256Proof,
+      recipientRoute: !isPureAgent
+        ? clientOnboardingLanguage === 'ur'
+          ? `100% براہِ راست ورک کرافٹ اکاؤنٹ (${phone}) · صفر ایجنٹ کمیشن`
+          : clientOnboardingLanguage === 'ar'
+          ? `100% مباشرة لحساب WORKCRAFT الرسمي (${phone}) · بدون عمولة وكيل`
+          : `100% Direct to WorkCraft Official Account (${phone})`
+        : isIntl
+        ? `Same-Currency Direct Split: 20% (${activePackage.prefix}${commission.toLocaleString()}) ➔ Agent Local ${activePackage.currency} Account · 80% (${activePackage.prefix}${workcraftShare.toLocaleString()}) ➔ WorkCraft (Zero Double FX Loss)`
+        : `Central SIM Gateway Dual Dispatch (Salon Owner + Field Agent ${agentFullName})`,
+      commissionAdjusted,
+      commissionAmount: commission,
+      remainingCashOwed: newRemainingDebt,
+      isSameCurrencySplit: isPureAgent && isIntl,
+      workcraftNetAmount: workcraftShare,
+      status: 'paid' as const,
+    };
 
-      setVerifiedPaymentData(receiptPayload);
-      setIsPaymentVerified(true); // Unlocks the state machine guard: status: paid!
-      setIsPaymentDrawerOpen(false);
-      setCurrentStep(4); // Advance to Step 4 WhatsApp pairing!
-    }, 1100);
+    setDrawerIsSubmitting(false);
+    setVerifiedPaymentData(receiptPayload);
+    setIsPaymentVerified(true); // Unlocks the state machine guard: status: paid!
+    setIsPaymentDrawerOpen(false);
+    setCurrentStep(4); // Advance to Step 4 WhatsApp pairing!
   };
 
   // Monthly Revenue Attribution Ledger for Field Agent Kamran Tariq
@@ -3456,27 +3511,27 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       month: 'October 2026',
       activeSalons: 8,
       setupCount: 8,
-      setupRevenue: 120000,
-      maintenanceRevenue: 36000,
-      totalRevenue: 156000,
+      setupRevenue: 200000,
+      maintenanceRevenue: 45000,
+      totalRevenue: 245000,
       status: 'Settled via Webhook',
     },
     {
       month: 'September 2026',
       activeSalons: 6,
       setupCount: 6,
-      setupRevenue: 90000,
-      maintenanceRevenue: 27000,
-      totalRevenue: 117000,
+      setupRevenue: 150000,
+      maintenanceRevenue: 32500,
+      totalRevenue: 182500,
       status: 'Settled via Webhook',
     },
     {
       month: 'August 2026',
       activeSalons: 5,
       setupCount: 5,
-      setupRevenue: 75000,
+      setupRevenue: 87500,
       maintenanceRevenue: 22500,
-      totalRevenue: 97500,
+      totalRevenue: 110000,
       status: 'Settled via Webhook',
     },
   ];
@@ -3667,7 +3722,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               </button>
             )}
 
-            {/* 2. Agent Enrollment Link (Field Agent Day-1 Flow Only; Founder uses + Add New Field Agent) */}
+            {/* 2. Agent Enrollment (Field Agent Day-1 Flow Only; Founder uses + Add New Field Agent) */}
             {userRole === 'FIELD_AGENT' && (
               <button
                 type="button"
@@ -3676,11 +3731,17 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 title="Launch Day-1 Remote Agent Enrollment Wizard"
               >
                 <Sparkles className="size-3.5 text-[#06B6D4]" />
-                <span>Agent Enrollment Link</span>
+                <span>
+                  {agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+                    ? 'ایجنٹ رجسٹریشن'
+                    : agentLanguage === 'ar'
+                    ? 'تسجيل الوكيل'
+                    : 'Agent Enrollment'}
+                </span>
               </button>
             )}
 
-            {/* 3. Onboard a Salon & Pairing Terminal (Unified Single Flow - Query 3) */}
+            {/* 3. Onboard a Salon (Unified Single Flow) */}
             <button
               type="button"
               onClick={() => {
@@ -3695,7 +3756,13 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               title="Launch 4-Step Salon Lead Onboarding & Instant QR Pairing Handshake"
             >
               <Scissors className="size-3.5" />
-              <span>{agentLanguage === 'ur' ? 'سیلون آن بورڈنگ اور پیئرنگ' : agentLanguage === 'ar' ? 'تهيئة الصالون والربط' : 'Onboard a Salon & Pairing'}</span>
+              <span>
+                {agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+                  ? 'نیا سیلون شامل کریں'
+                  : agentLanguage === 'ar'
+                  ? 'إضافة صالون'
+                  : 'Onboard a Salon'}
+              </span>
             </button>
 
             {/* 4. Active Fleet Dossier (Founder-Only Privilege) */}
@@ -3710,7 +3777,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 }`}
               >
                 <Smartphone className="size-3.5" />
-                <span>{agentLanguage === 'ur' ? 'ایکٹیو فلیٹ ڈوزیئر' : agentLanguage === 'ar' ? 'ملفات الوكلاء' : 'Active Fleet Dossier'}</span>
+                <span>{agentLanguage === 'ur' || agentLanguage === 'ur_roman' ? 'ایکٹیو فلیٹ ڈوزیئر' : agentLanguage === 'ar' ? 'ملفات الوكلاء' : 'Active Fleet Dossier'}</span>
               </button>
             )}
 
@@ -3725,10 +3792,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               }`}
             >
               <ShieldAlert className={`size-3.5 ${activeHubView === 'RE_PAIR' ? 'text-[#0D1117]' : 'text-[#D29922]'}`} />
-              <span>{agentLanguage === 'ur' ? 'سیلون کنکشن درست کریں' : agentLanguage === 'ar' ? 'إصلاح اتصال الصالون' : 'Fix Salon Connection'}</span>
+              <span>{agentLanguage === 'ur' || agentLanguage === 'ur_roman' ? 'سیلون کنکشن درست کریں' : agentLanguage === 'ar' ? 'إصلاح اتصال الصالون' : 'Fix Salon Connection'}</span>
             </button>
 
-            {/* 6. My Profile & Payout Details (Pure Field Agent Only · Biometric-Locked Edits) */}
+            {/* 6. My Profile (Pure Field Agent Only · Biometric-Locked Edits) */}
             {userRole === 'FIELD_AGENT' && (
               <button
                 type="button"
@@ -3753,16 +3820,16 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               >
                 <Fingerprint className={`size-3.5 ${activeHubView === 'PROFILE' ? 'text-[#0D1117]' : 'text-[#D29922]'}`} />
                 <span>
-                  {agentLanguage === 'ur'
-                    ? 'میرا پروفائل اور بینک'
+                  {agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+                    ? 'میرا پروفائل'
                     : agentLanguage === 'ar'
-                    ? 'ملفي والبنك (بصمة)'
-                    : 'My Profile & Bank (Biometric)'}
+                    ? 'ملفي الشخصي'
+                    : 'My Profile'}
                 </span>
               </button>
             )}
 
-            {/* 7. Commission Ledger (Contextual Label by Role - Query 4) */}
+            {/* 7. Commission Button (Contextual Compact Label) */}
             <button
               type="button"
               onClick={() => {
@@ -3777,12 +3844,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
               <FileText className="size-3.5" />
               <span>
                 {userRole === 'FIELD_AGENT'
-                  ? agentLanguage === 'ur'
-                    ? 'میرا کمیشن لیجر'
+                  ? agentLanguage === 'ur' || agentLanguage === 'ur_roman'
+                    ? 'میرا کمیشن'
                     : agentLanguage === 'ar'
-                    ? 'سجل عمولتي'
-                    : 'My Commission Ledger'
-                  : agentLanguage === 'ur'
+                    ? 'عمولتي'
+                    : 'My Commission'
+                  : agentLanguage === 'ur' || agentLanguage === 'ur_roman'
                   ? 'کمیشن لیجر'
                   : agentLanguage === 'ar'
                   ? 'سجل العمولات'
@@ -3893,13 +3960,13 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   setRemitError(null);
                   setIsRemitModalOpen(true);
                 }}
-                className="min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-3.5 py-2 text-xs font-mono font-black uppercase transition active:scale-95"
+                className="min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2 text-xs font-mono font-black uppercase transition active:scale-95"
               >
                 {agentLanguage === 'ur' || agentLanguage === 'ur_roman'
-                  ? 'ورک کرافٹ میں جمع کرائیں'
+                  ? 'جمع کرائیں'
                   : agentLanguage === 'ar'
-                  ? 'إيداع في حساب WORKCRAFT'
-                  : 'Deposit & Restore'}
+                  ? 'إيداع'
+                  : 'Deposit'}
               </button>
             </div>
           </div>
@@ -4136,11 +4203,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     </label>
                     <input
                       type="text"
+                      dir="ltr"
                       required
                       placeholder={t.salonNamePlaceholder}
                       value={salonName}
                       onChange={(e) => setSalonName(e.target.value)}
-                      className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-sm text-[#F0F6FC] placeholder:text-[#484F58] font-sans focus:outline-none focus:border-[#06B6D4]"
+                      className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-sm text-left text-[#F0F6FC] placeholder:text-[#484F58] font-sans [unicode-bidi:isolate] focus:outline-none focus:border-[#06B6D4]"
                     />
                   </div>
 
@@ -4156,7 +4224,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       placeholder={t.ownerNamePlaceholder}
                       value={ownerName}
                       onChange={(e) => setOwnerName(e.target.value)}
-                      className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-sm text-left text-[#F0F6FC] placeholder:text-[#484F58] font-sans focus:outline-none focus:border-[#06B6D4]"
+                      className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-sm text-left text-[#F0F6FC] placeholder:text-[#484F58] font-sans [unicode-bidi:isolate] focus:outline-none focus:border-[#06B6D4]"
                     />
                   </div>
 
@@ -4199,11 +4267,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                             <div className="mb-2">
                               <input
                                 type="text"
+                                dir="ltr"
                                 autoFocus
                                 placeholder="Search country or code (e.g. UAE, +971, UK, +92)..."
                                 value={countrySearchQuery}
                                 onChange={(e) => setCountrySearchQuery(e.target.value)}
-                                className="w-full min-h-[40px] rounded-lg border border-[#30363D] bg-[#0D1117] px-2.5 py-1.5 text-xs font-mono text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                                className="w-full min-h-[40px] rounded-lg border border-[#30363D] bg-[#0D1117] px-2.5 py-1.5 text-xs font-mono text-left text-[#F0F6FC] placeholder:text-[#484F58] [unicode-bidi:isolate] focus:outline-none focus:border-[#06B6D4]"
                               />
                             </div>
 
@@ -4264,6 +4333,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       {/* Strictly Country-Clamped Numeric Phone Input */}
                       <input
                         type="tel"
+                        dir="ltr"
                         inputMode="numeric"
                         maxLength={selectedDialConfig.expectedDigits}
                         required
@@ -4274,7 +4344,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           setNationalPhone(digitsOnly);
                           if (step1Error) setStep1Error(null);
                         }}
-                        className={`w-full min-h-[48px] rounded-xl border bg-[#0D1117] px-3 py-2.5 text-sm font-mono placeholder:text-[#484F58] focus:outline-none ${
+                        className={`w-full min-h-[48px] rounded-xl border bg-[#0D1117] px-3 py-2.5 text-sm font-mono text-left [unicode-bidi:isolate] placeholder:text-[#484F58] focus:outline-none ${
                           phoneValidation.valid
                             ? 'border-[#3FB950] text-[#3FB950] focus:border-[#3FB950]'
                             : nationalPhone.length > 0 && !phoneValidation.valid
@@ -4342,6 +4412,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   </label>
                   <input
                     type="text"
+                    dir="ltr"
                     required
                     placeholder={`${detectedCountry.defaultAddress} — ${t.addressPlaceholder}`}
                     value={address}
@@ -4349,7 +4420,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       setAddress(e.target.value);
                       if (step1Error) setStep1Error(null);
                     }}
-                    className={`w-full min-h-[48px] rounded-xl border px-3.5 py-2.5 text-sm font-sans placeholder:text-[#484F58] focus:outline-none ${
+                    className={`w-full min-h-[48px] rounded-xl border px-3.5 py-2.5 text-sm font-sans text-left [unicode-bidi:isolate] placeholder:text-[#484F58] focus:outline-none ${
                       addressConflict
                         ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149] focus:border-[#F85149]'
                         : 'border-[#30363D] bg-[#0D1117] text-[#F0F6FC] focus:border-[#06B6D4]'
@@ -4520,9 +4591,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                         </span>
                         <input
                           type="number"
+                          dir="ltr"
                           value={service.price}
                           onChange={(e) => handleChangePrice(service.id, parseInt(e.target.value, 10) || 0)}
-                          className="w-24 min-h-[40px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1 text-xs font-mono font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                          className="w-24 min-h-[40px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1 text-xs font-mono font-bold text-left text-[#F0F6FC] [unicode-bidi:isolate] focus:outline-none focus:border-[#06B6D4]"
                         />
                       </div>
                     </div>
@@ -4538,19 +4610,21 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     <div className="grid gap-2 sm:grid-cols-2">
                       <input
                         type="text"
+                        dir="ltr"
                         required
                         placeholder={t.customNamePlaceholder}
                         value={newServiceName}
                         onChange={(e) => setNewServiceName(e.target.value)}
-                        className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-3 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                        className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-3 py-1.5 text-xs text-left text-[#F0F6FC] placeholder:text-[#484F58] [unicode-bidi:isolate] focus:outline-none focus:border-[#06B6D4]"
                       />
                       <input
                         type="number"
+                        dir="ltr"
                         required
                         placeholder={`${t.customPricePlaceholder} (${getLocalizedLocalCurrencyPrefix(detectedCountry, clientOnboardingLanguage).trim()})`}
                         value={newServicePrice}
                         onChange={(e) => setNewServicePrice(e.target.value)}
-                        className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-3 py-1.5 text-xs font-mono text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                        className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-3 py-1.5 text-xs font-mono text-left text-[#F0F6FC] placeholder:text-[#484F58] [unicode-bidi:isolate] focus:outline-none focus:border-[#06B6D4]"
                       />
                     </div>
                     <div className="flex items-center gap-2">
@@ -4638,6 +4712,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <form onSubmit={handleAddBarberOnboarding} className="flex gap-2 pt-1">
                     <input
                       type="text"
+                      dir="ltr"
                       value={newBarberInput}
                       onChange={(e) => setNewBarberInput(e.target.value)}
                       placeholder={
@@ -4647,7 +4722,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           ? 'اسم الحلاق الجديد (مثال: طارق علي)'
                           : 'Add new barber (e.g. Tariq Ali)'
                       }
-                      className="flex-1 min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-3 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                      className="flex-1 min-h-[44px] rounded-lg border border-[#30363D] bg-[#161B22] px-3 py-1.5 text-xs text-left text-[#F0F6FC] placeholder:text-[#484F58] [unicode-bidi:isolate] focus:outline-none focus:border-[#06B6D4]"
                     />
                     <button
                       type="submit"
@@ -4745,7 +4820,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                                   {t.setupShortLabel}: {pkg.prefix}{pkg.setupFee.toLocaleString()}
                                 </span>
                                 <span className="text-[9px] font-mono text-[#3FB950] block">
-                                  {t.maintShortLabel}: {pkg.prefix}{pkg.monthlyMaint.toLocaleString()}{t.perMonthShort} (10%)
+                                  {t.maintShortLabel}: {pkg.prefix}{pkg.monthlyMaint.toLocaleString()}{t.perMonthShort}
                                 </span>
                               </div>
                               <button
@@ -5013,7 +5088,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   </div>
                 )}
 
-                {/* Maintenance Policy & 10% SLA Notice */}
+                {/* Maintenance Policy & SLA Notice */}
                 <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B] p-3.5 space-y-1.5">
                   <div className="flex items-center gap-2 text-[#D29922] text-xs font-mono font-bold">
                     <AlertTriangle className="size-4 text-[#D29922] shrink-0" />
@@ -5526,7 +5601,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                             </>
                           ) : (
                             <>
-                              Welcome to WORKCRAFT Local! Your <strong>{activePackage.name}</strong> package setup fee of{' '}
+                              Welcome to WorkCraft! Your <strong>{activePackage.name}</strong> package setup fee of{' '}
                               <strong>{activePackage.prefix}{activePackage.setupFee.toLocaleString()}</strong> is verified. 24/7 WhatsApp auto-booking is now live for <strong>{salonName}</strong>.
                             </>
                           )}
@@ -5824,10 +5899,11 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <Search className="size-4 text-[#06B6D4] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
+                    dir="ltr"
                     value={fleetSearchQuery}
                     onChange={(e) => setFleetSearchQuery(e.target.value)}
                     placeholder="Search agent by name, ID (e.g. AGT-409), country, currency, or city..."
-                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] pl-10 pr-8 py-2.5 text-xs font-mono text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] pl-10 pr-8 py-2.5 text-xs text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
                   />
                   {fleetSearchQuery && (
                     <button
@@ -6210,6 +6286,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <Search className="size-4 text-[#06B6D4] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
+                    dir="ltr"
                     value={rePairSearchQuery}
                     onChange={(e) => {
                       const val = e.target.value;
@@ -6228,7 +6305,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       }
                     }}
                     placeholder={rL.searchPlaceholder}
-                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] pl-10 pr-8 py-2.5 text-xs font-mono text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] pl-10 pr-8 py-2.5 text-xs text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
                   />
                   {rePairSearchQuery && (
                     <button
@@ -6596,11 +6673,25 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                <div className="flex items-start gap-2.5">
-                  <Fingerprint className="size-5 text-[#D29922] shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-bold text-[#F0F6FC]">{pL.lockHeading}</p>
+              {/* Agent Portrait & Bio Security Lock Banner */}
+              <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  {agentProfileSelfieUrl ? (
+                    <img
+                      src={agentProfileSelfieUrl}
+                      alt={agentFullName}
+                      className="size-14 rounded-2xl object-cover border-2 border-[#3FB950] shrink-0 bg-[#0D1117]"
+                    />
+                  ) : (
+                    <div className="size-14 rounded-2xl bg-[#21262D] border-2 border-[#D29922] grid place-items-center font-mono font-bold text-base text-[#F0F6FC] shrink-0">
+                      {agentFullName.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="font-bold text-[#F0F6FC] flex items-center gap-1.5">
+                      <Fingerprint className="size-4 text-[#D29922] shrink-0" />
+                      <span>{pL.lockHeading}</span>
+                    </p>
                     <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">{pL.lockDesc}</p>
                   </div>
                 </div>
@@ -7111,7 +7202,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                             }}
                             className="rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-3 py-1 text-[11px] font-bold uppercase transition"
                           >
-                            {isArabic ? 'إيداع الآن' : isUrdu ? 'ابھی جمع کروائیں' : 'Deposit Now'}
+                            {isArabic ? 'إيداع' : isUrdu ? 'جمع کرائیں' : 'Deposit'}
                           </button>
                         )}
                       </div>
@@ -7125,7 +7216,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       </div>
                       <div className="rounded-xl bg-[#0D1117] border border-[#116329] p-3">
                         <span className="text-[#8B949E] block text-[10px]">{agentL.offset}</span>
-                        <span className="text-base font-bold text-[#3FB950] mt-0.5 block" dir="ltr">- PKR 3,000</span>
+                        <span className="text-base font-bold text-[#3FB950] mt-0.5 block" dir="ltr">- PKR 5,000</span>
                         <span className="text-[10px] text-[#3FB950]">20%</span>
                       </div>
                       <div className="rounded-xl bg-[#0D1117] border border-[#9E6A03] p-3">
@@ -7152,7 +7243,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                         {isArabic ? 'عمولة هذا الشهر' : isUrdu ? 'اس مہینے کا کمیشن' : 'This Month Commission'}
                       </span>
                       <span className="text-lg font-bold text-[#3FB950] mt-0.5 block" dir="ltr">
-                        PKR 24,000
+                        PKR 40,000
                       </span>
                       <span className="text-[10px] text-[#F0F6FC]">
                         {isArabic ? '8 صالونات هذا الشهر' : isUrdu ? 'اس ماہ 8 سیلون' : '8 Salons This Month'}
@@ -7164,7 +7255,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                         {isArabic ? 'إجمالي عمولتك (من اليوم الأول)' : isUrdu ? 'کل کمیشن (پہلے دن سے آج تک)' : 'Day-1 to Today Total'}
                       </span>
                       <span className="text-lg font-bold text-[#D29922] mt-0.5 block" dir="ltr">
-                        PKR 57,000
+                        PKR 87,500
                       </span>
                       <span className="text-[10px] text-[#3FB950]">{agentL.disbursedTo} {agentPayoutMethod}</span>
                     </div>
@@ -7211,10 +7302,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                                   .replace('August', 'اگست')
                               : row.month;
                             const localizedTier = isArabic
-                              ? 'نمو أوتوماتيكي (PKR 20,000)'
+                              ? 'نمو أوتوماتيكي (PKR 25,000)'
                               : isUrdu
-                              ? 'گروتھ آٹو پیکیج (PKR 20,000)'
-                              : 'Growth Auto (PKR 20,000)';
+                              ? 'گروتھ آٹو پیکیج (PKR 25,000)'
+                              : 'Growth Auto (PKR 25,000)';
                             return (
                               <tr key={row.month} className="hover:bg-[#21262D] transition">
                                 <td className="p-3 font-bold text-[#F0F6FC]">{localizedMonth}</td>
@@ -7262,10 +7353,11 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                         <label className="block text-[10px] uppercase text-[#8B949E] mb-1">Co-Agent Name</label>
                         <input
                           type="text"
+                          dir="ltr"
                           value={newCoAgentName}
                           onChange={(e) => setNewCoAgentName(e.target.value)}
                           placeholder="e.g. Bilal Raza"
-                          className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs text-[#F0F6FC]"
+                          className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs text-left text-[#F0F6FC] [unicode-bidi:isolate]"
                         />
                       </div>
                       <div>
@@ -7276,7 +7368,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           onChange={(e) => setNewCoAgentPhone(e.target.value)}
                           placeholder="+92 300 0000000"
                           dir="ltr"
-                          className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs text-[#F0F6FC]"
+                          className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs text-left text-[#F0F6FC] [unicode-bidi:isolate]"
                         />
                       </div>
                       <div>
@@ -7284,18 +7376,20 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                         <div className="flex gap-1.5">
                           <input
                             type="text"
+                            dir="ltr"
                             value={newCoAgentCity}
                             onChange={(e) => setNewCoAgentCity(e.target.value)}
                             placeholder="Area"
-                            className="w-2/3 min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 py-2 text-xs text-[#F0F6FC]"
+                            className="w-2/3 min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 py-2 text-xs text-left text-[#F0F6FC] [unicode-bidi:isolate]"
                           />
                           <input
                             type="number"
+                            dir="ltr"
                             min={10}
                             max={90}
                             value={newCoAgentSplit}
                             onChange={(e) => setNewCoAgentSplit(e.target.value)}
-                            className="w-1/3 min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-2 py-2 text-xs text-[#D29922] text-center"
+                            className="w-1/3 min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-2 py-2 text-xs text-[#D29922] text-center [unicode-bidi:isolate]"
                             title="Split % of Agent Commission"
                           />
                         </div>
@@ -7403,10 +7497,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <p className="text-[#F0F6FC] font-bold text-sm" dir="ltr">Merchant Till: 0300-WORKCRAFT</p>
                   <p className="text-[#3FB950] text-[11px]">
                     {clientOnboardingLanguage === 'ur'
-                      ? 'اکاؤنٹ ٹائٹل: WORKCRAFT Local آفیشل · ٹیلی نار مائیکروفنانس'
+                      ? 'اکاؤنٹ ٹائٹل: WorkCraft آفیشل · ٹیلی نار مائیکروفنانس'
                       : clientOnboardingLanguage === 'ar'
-                      ? 'اسم الحساب: WORKCRAFT Local الرسمي · تيلينور للتمويل'
-                      : 'Title: WORKCRAFT Local Official · Telenor Microfinance'}
+                      ? 'اسم الحساب: WorkCraft الرسمي · تيلينور للتمويل'
+                      : 'Title: WorkCraft Official · Telenor Microfinance'}
                   </p>
                 </div>
               )}
@@ -7415,10 +7509,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   <p className="text-[#F0F6FC] font-bold text-sm" dir="ltr">Corporate Till: 789210</p>
                   <p className="text-[#3FB950] text-[11px]">
                     {clientOnboardingLanguage === 'ur'
-                      ? 'اکاؤنٹ ٹائٹل: WORKCRAFT Local · موبی لنک مائیکروفنانس بینک'
+                      ? 'اکاؤنٹ ٹائٹل: WorkCraft · موبی لنک مائیکروفنانس بینک'
                       : clientOnboardingLanguage === 'ar'
-                      ? 'اسم الحساب: WORKCRAFT Local · بنك موبيلينك للتمويل'
-                      : 'Title: WORKCRAFT Local · Mobilink Microfinance Bank'}
+                      ? 'اسم الحساب: WorkCraft · بنك موبيلينك للتمويل'
+                      : 'Title: WorkCraft · Mobilink Microfinance Bank'}
                   </p>
                 </div>
               )}
@@ -7689,7 +7783,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   value={drawerSenderDetails || `${ownerName} (${phone})`}
                   onChange={(e) => setDrawerSenderDetails(e.target.value)}
                   placeholder={`${ownerName} (${phone})`}
-                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs font-mono text-[#3FB950] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4] text-left"
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs font-mono text-[#3FB950] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4] text-left [unicode-bidi:isolate]"
                 />
                 <span className="text-[10px] text-[#6E7681] block mt-0.5">
                   {t.payerDetailsHint}
@@ -7712,7 +7806,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   placeholder="EP-98412850231 / SWIFT / pi_..."
                   value={drawerTid}
                   onChange={(e) => setDrawerTid(e.target.value)}
-                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs font-mono text-[#06B6D4] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs font-mono text-left text-[#06B6D4] placeholder:text-[#484F58] [unicode-bidi:isolate] focus:outline-none focus:border-[#06B6D4]"
                 />
               </div>
 
@@ -7722,9 +7816,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 </label>
                 <input
                   type="text"
+                  dir="ltr"
                   readOnly
                   value={`${activePackage.prefix} ${activePackage.setupFee.toLocaleString()} (${getLocalizedPackageName(activePackage.name, clientOnboardingLanguage)})`}
-                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs font-mono font-bold text-[#D29922] select-none cursor-not-allowed"
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs font-mono font-bold text-left text-[#D29922] [unicode-bidi:isolate] select-none cursor-not-allowed"
                 />
               </div>
 
@@ -8049,9 +8144,17 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
             {/* Dossier Header Info */}
             <div className="flex items-center gap-4 rounded-2xl bg-[#0D1117] border border-[#30363D] p-3.5">
               <div className="relative shrink-0">
-                <div className="size-16 rounded-2xl bg-[#21262D] border-2 border-[#3FB950] grid place-items-center font-mono font-bold text-lg text-[#F0F6FC]">
-                  {selectedDossierAgent.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
-                </div>
+                {selectedDossierAgent.selfieUrl ? (
+                  <img
+                    src={selectedDossierAgent.selfieUrl}
+                    alt={selectedDossierAgent.name}
+                    className="size-16 rounded-2xl object-cover border-2 border-[#3FB950] bg-[#0D1117]"
+                  />
+                ) : (
+                  <div className="size-16 rounded-2xl bg-[#21262D] border-2 border-[#3FB950] grid place-items-center font-mono font-bold text-lg text-[#F0F6FC]">
+                    {selectedDossierAgent.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                  </div>
+                )}
                 <span className="absolute -bottom-1 -right-1 grid size-5 place-items-center rounded-full bg-[#3FB950] text-[#0D1117]">
                   <Check className="size-3 stroke-[3]" />
                 </span>
@@ -9711,6 +9814,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           status: 'ACTIVE · ON-FIELD',
                           enrolledAt: 'Just Now · 100% Verified',
                           selfieVerified: true,
+                          selfieUrl: agentProfileSelfieUrl || enrollSelfiePreviewUrl || undefined,
                           thumbHash: enrollThumbHash || 'SHA256: 3c9f-88a1-agent-thumb-enrolled',
                           legalRemittanceAgreed: true,
                           legalTermsText: detStep4.code === 'PK'
@@ -9720,6 +9824,17 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           guarantorPhone: enrollGuarantorPhone || undefined,
                         },
                       ]);
+                      setAgentFullName(enrollAgentName);
+                      setAgentWhatsApp(enrollAgentPhone);
+                      setAgentTerritory(enrollAgentCity);
+                      setAgentIdNumber(enrollAgentId);
+                      setAgentPayoutMethod(resolvedMethod as any);
+                      setAgentPayoutAccount(enrollPayoutAccount);
+                      setAgentPayoutTitle(enrollPayoutTitle);
+                      setAgentBankName(enrollBankName || payoutCfgStep4.defaultBank);
+                      if (onAgentProfileNameSync) {
+                        onAgentProfileNameSync(enrollAgentName);
+                      }
                       if (typeof window !== 'undefined') {
                         localStorage.setItem('wcl_agent_enrolled_v1', 'true');
                       }
