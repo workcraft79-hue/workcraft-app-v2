@@ -118,45 +118,45 @@ function getVideoBillingConfig(phone: string) {
   }
   if (clean.startsWith('+971')) {
     return {
-      countryLabel: 'UAE (+971)',
-      currency: 'AED',
-      symbol: 'AED ',
-      singlePrice: 55,
-      monthly4Price: 145,
+      countryLabel: 'UAE (+971 · USD Billing)',
+      currency: 'USD',
+      symbol: '$',
+      singlePrice: 15,
+      monthly4Price: 40,
       channels: [
-        { id: 'Stripe', label: 'Stripe / Apple Pay / Card', detail: 'Instant MENA Card (AED)' },
-        { id: 'Wire', label: 'UAE IBAN Wire', detail: 'AE070331234567890123456' },
+        { id: 'Stripe', label: 'Stripe / Apple Pay / Card', detail: 'Instant MENA Card ($ USD)' },
+        { id: 'Wire', label: 'UAE IBAN Wire', detail: 'AE070331234567890123456 (USD Equiv)' },
       ],
     };
   }
   if (clean.startsWith('+966')) {
     return {
-      countryLabel: 'Saudi Arabia (+966)',
-      currency: 'SAR',
-      symbol: 'SAR ',
-      singlePrice: 56,
-      monthly4Price: 150,
+      countryLabel: 'Saudi Arabia (+966 · USD Billing)',
+      currency: 'USD',
+      symbol: '$',
+      singlePrice: 15,
+      monthly4Price: 40,
       channels: [
-        { id: 'Stripe', label: 'Stripe / Mada / Card', detail: 'Instant KSA Card (SAR)' },
-        { id: 'Wire', label: 'Saudi IBAN Wire', detail: 'SA0380000000608010167519' },
+        { id: 'Stripe', label: 'Stripe / Mada / Card', detail: 'Instant KSA Card ($ USD)' },
+        { id: 'Wire', label: 'Saudi IBAN Wire', detail: 'SA0380000000608010167519 (USD Equiv)' },
       ],
     };
   }
   if (clean.startsWith('+44')) {
     return {
-      countryLabel: 'United Kingdom (+44)',
-      currency: 'GBP',
-      symbol: '£',
-      singlePrice: 12,
-      monthly4Price: 32,
+      countryLabel: 'United Kingdom (+44 · USD Billing)',
+      currency: 'USD',
+      symbol: '$',
+      singlePrice: 15,
+      monthly4Price: 40,
       channels: [
-        { id: 'Stripe', label: 'Stripe / Apple Pay / Card', detail: 'Instant UK Card (GBP)' },
-        { id: 'Wire', label: 'UK Faster Payments', detail: 'GB29NWBK60161331926819' },
+        { id: 'Stripe', label: 'Stripe / Apple Pay / Card', detail: 'Instant UK Card ($ USD)' },
+        { id: 'Wire', label: 'UK / SWIFT Transfer', detail: 'GB29NWBK60161331926819 ($ USD)' },
       ],
     };
   }
   return {
-    countryLabel: 'International (Global)',
+    countryLabel: 'International (Global · USD)',
     currency: 'USD',
     symbol: '$',
     singlePrice: 15,
@@ -166,6 +166,77 @@ function getVideoBillingConfig(phone: string) {
       { id: 'Wire', label: 'SWIFT Wire', detail: 'WORKCRAFT-GLOBAL-SWIFT' },
     ],
   };
+}
+
+interface ParsedPhonebookCandidate {
+  id: string;
+  name: string;
+  phone: string;
+  isHelplineOrPersonal: boolean;
+  reasonTag?: string;
+}
+
+const HELPLINE_KEYWORDS_REGEX =
+  /\b(helpline|help|support|care|service|emergency|police|rescue|1122|15|115|edhi|chhipa|ambulance|hospital|clinic|doctor|bank|ubl|hbl|meezan|mcb|alfalah|easypaisa|jazzcash|sadapay|nayapay|ptcl|jazz|zong|telenor|ufone|du|etisalat|stc|mobily|lesco|wapda|sui|gas|family|home|mom|dad|mama|papa|bhai|sister|wife|husband|home|landline|office|boss|staff|barber|stylist|accountant|courier|tcs|leopards|rider|uber|careem|indrive|foodpanda)\b/i;
+
+function parseVcfOrCsvContacts(content: string, ownSalonPhone: string): ParsedPhonebookCandidate[] {
+  const results: ParsedPhonebookCandidate[] = [];
+  const seenPhones = new Set<string>();
+  const cleanOwnPhone = ownSalonPhone.replace(/[^0-9]/g, '').slice(-10);
+
+  const pushCandidate = (nameRaw: string, phoneRaw: string, idx: number) => {
+    const cleanPhone = phoneRaw.replace(/[^0-9+]/g, '');
+    const digitsOnly = cleanPhone.replace(/[^0-9]/g, '');
+    if (digitsOnly.length < 7) return;
+    const tail = digitsOnly.slice(-10);
+    if (seenPhones.has(tail)) return;
+    seenPhones.add(tail);
+
+    const name = nameRaw.trim() || `Contact #${idx + 1}`;
+    const isShortCode = digitsOnly.length <= 6 || /^(111|0800|0900|800|900|1122|15|115)/.test(digitsOnly);
+    const isLandline = /^(021|042|051|041|061|091|04|02|06)\d{6,}$/.test(digitsOnly) || /^\+(971|966)[2-4679]/.test(cleanPhone);
+    const isSelf = cleanOwnPhone.length >= 8 && tail === cleanOwnPhone;
+    const keywordMatch = name.match(HELPLINE_KEYWORDS_REGEX);
+
+    let reasonTag: string | undefined;
+    if (isSelf) reasonTag = 'Salon Own Line';
+    else if (isShortCode) reasonTag = 'Helpline / Short Code';
+    else if (keywordMatch) reasonTag = `Matched "${keywordMatch[0]}"`;
+    else if (isLandline) reasonTag = 'Landline / Office';
+
+    results.push({
+      id: `pbc-${idx}-${tail}`,
+      name,
+      phone: cleanPhone.startsWith('+') ? cleanPhone : `+${cleanPhone}`,
+      isHelplineOrPersonal: Boolean(reasonTag),
+      reasonTag,
+    });
+  };
+
+  if (/BEGIN:VCARD/i.test(content)) {
+    const cards = content.split(/END:VCARD/i);
+    cards.forEach((card, cIdx) => {
+      const fnMatch = card.match(/^FN[^:]*:(.+)$/im) || card.match(/^N[^:]*:([^;\r\n]+)/im);
+      const telMatches = card.match(/^TEL[^:]*:(.+)$/gim) || [];
+      const parsedName = fnMatch ? fnMatch[1].replace(/;/g, ' ').trim() : '';
+      telMatches.forEach((telLine, tIdx) => {
+        const phonePart = telLine.split(':').slice(1).join(':').trim();
+        pushCandidate(parsedName, phonePart, cIdx * 10 + tIdx);
+      });
+    });
+  } else {
+    const lines = content.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    lines.forEach((line, idx) => {
+      const cells = line.split(/[,;\t]+/).map((c) => c.replace(/^["']|["']$/g, '').trim());
+      const phoneCell = cells.find((c) => c.replace(/[^0-9]/g, '').length >= 7);
+      if (!phoneCell) return;
+      const nameCell = cells.find((c) => c !== phoneCell && /[a-zA-Z\u0600-\u06FF]/.test(c)) || '';
+      if (idx === 0 && /^(name|full_name|contact|first_name)$/i.test(nameCell)) return;
+      pushCandidate(nameCell, phoneCell, idx);
+    });
+  }
+
+  return results.slice(0, 200);
 }
 
 function autoDetectHeadlineFromFilename(filename: string, salonName: string): Record<RegionalLang, string> {
@@ -251,6 +322,9 @@ export const BroadcastTab: React.FC<BroadcastTabProps> = ({
   const [showPasteBox, setShowPasteBox] = useState(false);
   const [pasteInput, setPasteInput] = useState('');
   const [importStatusMsg, setImportStatusMsg] = useState<string | null>(null);
+  const [phonebookReviewList, setPhonebookReviewList] = useState<ParsedPhonebookCandidate[] | null>(null);
+  const [phonebookReviewTab, setPhonebookReviewTab] = useState<'CLIENTS' | 'HELPLINE'>('CLIENTS');
+  const [phonebookSearchQuery, setPhonebookSearchQuery] = useState('');
   const vcfInputRef = useRef<HTMLInputElement>(null);
 
   const activeContacts = importedContacts.filter((c) => !c.optOut);
@@ -484,29 +558,54 @@ export const BroadcastTab: React.FC<BroadcastTabProps> = ({
     const reader = new FileReader();
     reader.onload = () => {
       const content = String(reader.result || '');
-      const phoneMatches = content.match(/\+?\d[\d\s-]{8,15}\d/g) || [];
-      const uniquePhones = Array.from(new Set(phoneMatches.map((p) => p.trim()))).slice(0, 50);
-      if (uniquePhones.length === 0) {
-        setImportStatusMsg('No valid phone numbers found in file. Try CSV or paste numbers directly.');
+      const parsed = parseVcfOrCsvContacts(content, salon.phone);
+      if (parsed.length === 0) {
+        setImportStatusMsg('No valid phone numbers found in file. Try CSV, VCF, or paste numbers directly.');
         return;
       }
-      const newContacts: Contact[] = uniquePhones.map((phone, idx) => ({
-        id: `vcf-${Date.now()}-${idx}`,
-        name: `Imported Client ${idx + 1}`,
-        phone,
-        city: salon.city,
-        country: phone.startsWith('+971') || phone.startsWith('+966') ? 'AE' : 'PK',
-        language: phone.startsWith('+971') || phone.startsWith('+966') ? 'ar' : phone.startsWith('+92') ? 'ur' : 'en',
-        tags: ['Phonebook Import'],
-        optOut: false,
-        lastVisit: 'Day-1 Import',
-        totalVisits: 1,
-      }));
-      setImportedContacts((prev) => [...newContacts, ...prev]);
-      setImportStatusMsg(`✓ Imported ${newContacts.length} phonebook contacts from ${file.name}!`);
-      setTimeout(() => setImportStatusMsg(null), 5000);
+      setPhonebookSearchQuery('');
+      setPhonebookReviewTab('CLIENTS');
+      setPhonebookReviewList(parsed);
+      e.target.value = '';
     };
     reader.readAsText(file);
+  };
+
+  const handleConfirmFilteredPhonebookImport = () => {
+    if (!phonebookReviewList) return;
+    const selectedClients = phonebookReviewList.filter((c) => !c.isHelplineOrPersonal);
+    const excludedCount = phonebookReviewList.length - selectedClients.length;
+    if (selectedClients.length === 0) {
+      setImportStatusMsg('Move at least 1 contact out of Helpline / Excluded before importing.');
+      return;
+    }
+    const newContacts: Contact[] = selectedClients.map((item, idx) => ({
+      id: `vcf-${Date.now()}-${idx}`,
+      name: item.name,
+      phone: item.phone,
+      city: salon.city,
+      country: item.phone.startsWith('+971') || item.phone.startsWith('+966') ? 'AE' : 'PK',
+      language:
+        item.phone.startsWith('+971') || item.phone.startsWith('+966')
+          ? 'ar'
+          : item.phone.startsWith('+92')
+          ? 'ur'
+          : 'en',
+      tags: ['Phonebook Import'],
+      optOut: false,
+      lastVisit: 'Day-1 Import',
+      totalVisits: 1,
+    }));
+    setImportedContacts((prev) => {
+      const existingPhones = new Set(prev.map((c) => c.phone.replace(/\s+/g, '')));
+      const fresh = newContacts.filter((s) => !existingPhones.has(s.phone.replace(/\s+/g, '')));
+      return [...fresh, ...prev];
+    });
+    setPhonebookReviewList(null);
+    setImportStatusMsg(
+      `✓ Imported ${newContacts.length} salon client(s) · Automatically excluded ${excludedCount} helpline/personal number(s)!`
+    );
+    setTimeout(() => setImportStatusMsg(null), 6000);
   };
 
   const handleBulkPasteImport = () => {
@@ -744,6 +843,136 @@ export const BroadcastTab: React.FC<BroadcastTabProps> = ({
             </div>
           </div>
         )}
+
+        {phonebookReviewList && (() => {
+          const clientCandidates = phonebookReviewList.filter((c) => !c.isHelplineOrPersonal);
+          const helplineCandidates = phonebookReviewList.filter((c) => c.isHelplineOrPersonal);
+          const q = phonebookSearchQuery.trim().toLowerCase();
+          const displayed = (phonebookReviewTab === 'CLIENTS' ? clientCandidates : helplineCandidates).filter(
+            (c) => !q || c.name.toLowerCase().includes(q) || c.phone.toLowerCase().includes(q)
+          );
+
+          return (
+            <div className="rounded-2xl border border-[#06B6D4]/50 bg-[#0D1117] p-3.5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#21262D] pb-2.5">
+                <div>
+                  <span className="text-xs font-mono font-bold text-[#06B6D4] uppercase block">
+                    Separate Helpline &amp; Personal Contacts Before Import
+                  </span>
+                  <p className="text-[11px] text-[#8B949E] font-sans">
+                    Helplines, banks, emergency numbers, staff, and family entries are auto-quarantined so promo videos never go to wrong numbers.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPhonebookReviewList(null)}
+                  className="text-xs font-mono text-[#8B949E] hover:text-[#F0F6FC]"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPhonebookReviewTab('CLIENTS')}
+                    className={`min-h-[38px] rounded-xl border px-3 py-1 text-xs font-mono font-bold transition ${
+                      phonebookReviewTab === 'CLIENTS'
+                        ? 'border-[#3FB950] bg-[#0D3822] text-[#3FB950]'
+                        : 'border-[#30363D] bg-[#161B22] text-[#8B949E]'
+                    }`}
+                  >
+                    Broadcast Clients ({clientCandidates.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPhonebookReviewTab('HELPLINE')}
+                    className={`min-h-[38px] rounded-xl border px-3 py-1 text-xs font-mono font-bold transition ${
+                      phonebookReviewTab === 'HELPLINE'
+                        ? 'border-[#D29922] bg-[#3B2E0B] text-[#D29922]'
+                        : 'border-[#30363D] bg-[#161B22] text-[#8B949E]'
+                    }`}
+                  >
+                    Helpline / Excluded ({helplineCandidates.length})
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={phonebookSearchQuery}
+                  onChange={(e) => setPhonebookSearchQuery(e.target.value)}
+                  placeholder="Search name or phone..."
+                  className="min-h-[38px] w-full sm:w-56 rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-1 text-xs text-left [unicode-bidi:isolate] text-[#F0F6FC]"
+                />
+              </div>
+
+              <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
+                {displayed.length === 0 ? (
+                  <p className="text-xs text-[#8B949E] font-sans py-3 text-center">
+                    No contacts in this list matching your filter.
+                  </p>
+                ) : (
+                  displayed.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-bold text-[#F0F6FC] truncate">{item.name}</span>
+                          {item.reasonTag && (
+                            <span className="rounded bg-[#3B2E0B] border border-[#9E6A03] px-1.5 py-0.5 text-[9px] font-mono text-[#D29922]">
+                              {item.reasonTag}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] font-mono text-[#8B949E]" dir="ltr">
+                          {item.phone}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPhonebookReviewList((prev) =>
+                            prev
+                              ? prev.map((c) =>
+                                  c.id === item.id
+                                    ? {
+                                        ...c,
+                                        isHelplineOrPersonal: !c.isHelplineOrPersonal,
+                                        reasonTag: !c.isHelplineOrPersonal ? 'Marked Excluded' : undefined,
+                                      }
+                                    : c
+                                )
+                              : prev
+                          )
+                        }
+                        className={`min-h-[34px] rounded-lg border px-2.5 py-1 text-[10px] font-mono font-bold shrink-0 ${
+                          item.isHelplineOrPersonal
+                            ? 'border-[#3FB950]/50 bg-[#0D3822]/40 text-[#3FB950]'
+                            : 'border-[#9E6A03] bg-[#3B2E0B]/40 text-[#D29922]'
+                        }`}
+                      >
+                        {item.isHelplineOrPersonal ? 'Move to Clients +' : 'Move to Helpline ✕'}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={handleConfirmFilteredPhonebookImport}
+                  className="min-h-[44px] rounded-xl bg-[#3FB950] hover:bg-[#4ec961] text-[#0D1117] px-4 py-2 text-xs font-mono font-black uppercase transition"
+                >
+                  Import {clientCandidates.length} Clients Only ✓
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {importStatusMsg && (
           <div className="rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-2 text-[11px] font-mono text-[#3FB950]">
