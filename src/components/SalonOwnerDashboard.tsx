@@ -1580,6 +1580,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           data.appointments.forEach((a) => seenApptIdsRef.current.add(a.id));
           hasHydratedConciergeRef.current = true;
           setConciergeState(data);
+          if (data.settings?.salonCategory) {
+            setPersistedCategory(data.settings.salonCategory);
+          }
           if (data.settings?.salonId) {
             setSalonsState((prev) =>
               prev.map((s) => {
@@ -1610,6 +1613,217 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       cancelled = true;
     };
   }, [currentSalon.id, currentSalon.name, currentSalon.owner, currentSalon.onboardingLanguage, currentSalon.phone]);
+
+  const [persistedCategory, setPersistedCategory] = useState<'MENS' | 'LADIES' | null>(null);
+  const [showWalkInForm, setShowWalkInForm] = useState(false);
+  const [walkInName, setWalkInName] = useState('');
+  const [walkInPhone, setWalkInPhone] = useState('');
+  const [walkInService, setWalkInService] = useState('');
+  const [walkInEta, setWalkInEta] = useState('15');
+
+  const [showBridalForm, setShowBridalForm] = useState(false);
+  const [bridalName, setBridalName] = useState('');
+  const [bridalPhone, setBridalPhone] = useState('');
+  const [bridalPackage, setBridalPackage] = useState('Signature Bridal Makeup & Styling');
+  const [bridalEventDate, setBridalEventDate] = useState('');
+  const [bridalTotal, setBridalTotal] = useState('35000');
+  const [bridalAdvance, setBridalAdvance] = useState('15000');
+  const [bridalHomeService, setBridalHomeService] = useState(false);
+
+  const [showPackageForm, setShowPackageForm] = useState(false);
+  const [pkgClientName, setPkgClientName] = useState('');
+  const [pkgTitle, setPkgTitle] = useState('');
+  const [pkgSessions, setPkgSessions] = useState('5');
+  const [pkgPrice, setPkgPrice] = useState('10000');
+  const [isSavingOpsCard, setIsSavingOpsCard] = useState(false);
+
+  const handleUpdateSalonCategory = async (nextCategory: 'MENS' | 'LADIES') => {
+    setPersistedCategory(nextCategory);
+    try {
+      localStorage.setItem('wcl_salon_category', nextCategory);
+    } catch {}
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/retention-settings`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ salonCategory: nextCategory }),
+        }
+      );
+      if (res.ok) {
+        const nextState = (await res.json()) as SalonConciergeStateResponse;
+        setConciergeState(nextState);
+      }
+      setMaintToast(
+        nextCategory === 'LADIES'
+          ? '✓ Switched to Ladies Beauty Parlor Mode (Female-Only Privacy & Bridal Tracker active).'
+          : '✓ Switched to Men’s Salon & Barbershop Mode.'
+      );
+      setTimeout(() => setMaintToast(null), 4000);
+    } catch {
+      setMaintToast('Updated category locally.');
+    }
+  };
+
+  const handleAddWalkIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!walkInName.trim() || isSavingOpsCard) return;
+    setIsSavingOpsCard(true);
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/walkin-queue`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientName: walkInName.trim(),
+            phone: walkInPhone.trim(),
+            service: walkInService.trim() || services[0]?.name || 'Haircut & Styling',
+            assignedStaff: barbersList[0] || 'Next Available',
+            etaMinutes: parseInt(walkInEta, 10) || 15,
+          }),
+        }
+      );
+      if (res.ok) {
+        const nextState = (await res.json()) as SalonConciergeStateResponse;
+        setConciergeState(nextState);
+        setWalkInName('');
+        setWalkInPhone('');
+        setWalkInService('');
+        setShowWalkInForm(false);
+        setMaintToast('✓ Walk-in guest added to live queue.');
+        setTimeout(() => setMaintToast(null), 3500);
+      }
+    } finally {
+      setIsSavingOpsCard(false);
+    }
+  };
+
+  const handleUpdateWalkInStatus = async (
+    itemId: string,
+    status: 'WAITING' | 'NOTIFIED' | 'SEATED'
+  ) => {
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/walkin-queue/${encodeURIComponent(itemId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        }
+      );
+      if (res.ok) {
+        const nextState = (await res.json()) as SalonConciergeStateResponse;
+        setConciergeState(nextState);
+        setMaintToast(
+          status === 'NOTIFIED'
+            ? '📲 Turn notification logged for guest.'
+            : '✓ Walk-in guest seated.'
+        );
+        setTimeout(() => setMaintToast(null), 3000);
+      }
+    } catch {}
+  };
+
+  const handleAddBridalBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bridalName.trim() || isSavingOpsCard) return;
+    setIsSavingOpsCard(true);
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/bridal-bookings`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            brideOrEventName: bridalName.trim(),
+            phone: bridalPhone.trim() || currentSalon.phone,
+            packageName: bridalPackage.trim() || 'Bridal Suite',
+            eventDate: bridalEventDate.trim() || 'Upcoming Event',
+            totalAmount: parseInt(bridalTotal, 10) || 35000,
+            advancePaid: parseInt(bridalAdvance, 10) || 0,
+            assignedStylist: barbersList[0] || 'Lead Stylist',
+            homeService: bridalHomeService,
+          }),
+        }
+      );
+      if (res.ok) {
+        const nextState = (await res.json()) as SalonConciergeStateResponse;
+        setConciergeState(nextState);
+        setBridalName('');
+        setBridalPhone('');
+        setBridalEventDate('');
+        setShowBridalForm(false);
+        setMaintToast('✓ Bridal / Event booking advance locked.');
+        setTimeout(() => setMaintToast(null), 3500);
+      }
+    } finally {
+      setIsSavingOpsCard(false);
+    }
+  };
+
+  const handleSettleBridalBooking = async (bookingId: string) => {
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/bridal-bookings/${encodeURIComponent(bookingId)}/settle`,
+        { method: 'POST' }
+      );
+      if (res.ok) {
+        const nextState = (await res.json()) as SalonConciergeStateResponse;
+        setConciergeState(nextState);
+        setMaintToast('✓ Remaining bridal balance marked settled.');
+        setTimeout(() => setMaintToast(null), 3500);
+      }
+    } catch {}
+  };
+
+  const handleAddServicePackage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pkgClientName.trim() || !pkgTitle.trim() || isSavingOpsCard) return;
+    setIsSavingOpsCard(true);
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/packages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientName: pkgClientName.trim(),
+            packageTitle: pkgTitle.trim(),
+            totalSessions: parseInt(pkgSessions, 10) || 5,
+            pricePaid: parseInt(pkgPrice, 10) || 5000,
+          }),
+        }
+      );
+      if (res.ok) {
+        const nextState = (await res.json()) as SalonConciergeStateResponse;
+        setConciergeState(nextState);
+        setPkgClientName('');
+        setPkgTitle('');
+        setShowPackageForm(false);
+        setMaintToast('✓ Prepaid session pass issued.');
+        setTimeout(() => setMaintToast(null), 3500);
+      }
+    } finally {
+      setIsSavingOpsCard(false);
+    }
+  };
+
+  const handleConsumePackageSession = async (pkgId: string) => {
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/packages/${encodeURIComponent(pkgId)}/use-session`,
+        { method: 'POST' }
+      );
+      if (res.ok) {
+        const nextState = (await res.json()) as SalonConciergeStateResponse;
+        setConciergeState(nextState);
+        setMaintToast('✓ 1 prepaid session checked off.');
+        setTimeout(() => setMaintToast(null), 3000);
+      }
+    } catch {}
+  };
 
   const handleResolveOwnerAlert = async (alertId: string) => {
     try {
@@ -2152,13 +2366,19 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     ];
   });
 
-  const isLadies =
-    onboardedData?.salonCategory === 'LADIES' ||
-    salonCategory === 'LADIES' ||
-    currentSalon.name.toLowerCase().includes('parlor') ||
-    currentSalon.name.toLowerCase().includes('ladies') ||
-    currentSalon.name.toLowerCase().includes('beauty') ||
-    (typeof window !== 'undefined' && localStorage.getItem('wcl_salon_category') === 'LADIES');
+  const resolvedCategory: 'MENS' | 'LADIES' =
+    conciergeState?.settings?.salonCategory ||
+    persistedCategory ||
+    onboardedData?.salonCategory ||
+    salonCategory ||
+    (typeof window !== 'undefined' && localStorage.getItem('wcl_salon_category') === 'LADIES'
+      ? 'LADIES'
+      : currentSalon.name.toLowerCase().includes('parlor') ||
+        currentSalon.name.toLowerCase().includes('ladies') ||
+        currentSalon.name.toLowerCase().includes('beauty')
+      ? 'LADIES'
+      : 'MENS');
+  const isLadies = resolvedCategory === 'LADIES';
 
   // Rate Card State strictly locked to the onboarded category (Men's Salon vs Ladies Parlor)
   const [services, setServices] = useState<
@@ -2367,6 +2587,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       | 'REMINDER_REPLY_CONFIRMED'
       | 'REMINDER_REPLY_LATE'
       | 'REMINDER_REPLY_RESCHEDULE'
+      | 'RESCHEDULE_CONFIRMED'
+      | 'PRICE_MENU_SENT'
       | 'BARBER_BUSY_REROUTED'
       | 'URGENT_BRIDAL_GROOM';
     clientName: string;
@@ -2390,6 +2612,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           ? `Urgent Bridal or Groom alert! ${clientName} booked ${servicesText} with ${barberName} at ${timeSlot}.`
           : eventType === 'BARBER_BUSY_REROUTED'
           ? `Busy reroute sent! ${clientName} asked for ${barberName} at ${timeSlot}, and WhatsApp bot offered free alternative barbers.`
+          : eventType === 'PRICE_MENU_SENT'
+          ? `Price list sent on WhatsApp to ${clientName}.`
+          : eventType === 'RESCHEDULE_CONFIRMED'
+          ? `Reschedule confirmed! ${clientName} picked ${timeSlot} with ${barberName}.`
           : eventType === 'APPOINTMENT_CONFIRMED'
           ? `Attention! Appointment confirmed. ${clientName} wants barber ${barberName}. Services: ${servicesText}, for ${timeSlot}.`
           : eventType === 'REMINDER_REPLY_CONFIRMED'
@@ -2402,6 +2628,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           ? `اہم برائیڈل یا گروم الرٹ! ${clientName} نے ${barberName} کے ساتھ ${timeSlot} پر ${servicesText} کی بکنگ کی ہے۔`
           : eventType === 'BARBER_BUSY_REROUTED'
           ? `خودکار ری راؤٹ! ${clientName} نے ${timeSlot} پر ${barberName} مانگا، بوٹ نے متبادل خالی باربرز بھیج دیے ہیں۔`
+          : eventType === 'PRICE_MENU_SENT'
+          ? `${clientName} کو واٹس ایپ پر ریٹ لسٹ اور سروس مینو بھیج دیا گیا ہے۔`
+          : eventType === 'RESCHEDULE_CONFIRMED'
+          ? `نیا وقت کنفرم! ${clientName} نے ${barberName} کے ساتھ ${timeSlot} کا نیا سلاٹ منتخب کر لیا ہے۔`
           : eventType === 'APPOINTMENT_CONFIRMED'
           ? `توجہ فرمائیں! ${clientName} کی اپائنٹمنٹ باربر ${barberName} کے ساتھ ${timeSlot} پر کنفرم ہو گئی ہے۔ سروسز: ${servicesText}۔`
           : eventType === 'REMINDER_REPLY_CONFIRMED'
@@ -2414,6 +2644,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           ? `تنبيه حجز زفاف عاجل! حجز ${clientName} باقة ${servicesText} مع الحلاق ${barberName} الساعة ${timeSlot}.`
           : eventType === 'BARBER_BUSY_REROUTED'
           ? `تحويل تلقائي! طلب ${clientName} الحلاق ${barberName} الساعة ${timeSlot} وتم إرسال الحلاقين المتاحين.`
+          : eventType === 'PRICE_MENU_SENT'
+          ? `تم إرسال قائمة الأسعار تلقائياً عبر واتساب إلى ${clientName}.`
+          : eventType === 'RESCHEDULE_CONFIRMED'
+          ? `تم تأكيد إعادة الجدولة! اختار ${clientName} الموعد الجديد ${timeSlot} مع ${barberName}.`
           : eventType === 'APPOINTMENT_CONFIRMED'
           ? `تنبيه! تم تأكيد موعد جديد. ${clientName} يريد الحلاق ${barberName}. الخدمات: ${servicesText} الساعة ${timeSlot}.`
           : eventType === 'REMINDER_REPLY_CONFIRMED'
@@ -2425,15 +2659,27 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
     const spokenText = speechByLang[ownerLang];
     const logType: VoiceEventLog['type'] =
-      eventType === 'APPOINTMENT_CONFIRMED' || eventType === 'BARBER_BUSY_REROUTED'
+      eventType === 'APPOINTMENT_CONFIRMED' ||
+      eventType === 'RESCHEDULE_CONFIRMED' ||
+      eventType === 'BARBER_BUSY_REROUTED'
         ? 'BOOKING'
         : isUrgent
         ? 'REPLY_URGENT'
         : 'REPLY_CONFIRMED';
 
     const summaryLabel =
-      eventType === 'APPOINTMENT_CONFIRMED' || eventType === 'URGENT_BRIDAL_GROOM'
-        ? `${eventType === 'URGENT_BRIDAL_GROOM' ? 'URGENT Bridal/Groom' : 'Confirmed'} ${timeSlot} · Barber: ${barberName} · ${servicesText}`
+      eventType === 'APPOINTMENT_CONFIRMED' ||
+      eventType === 'RESCHEDULE_CONFIRMED' ||
+      eventType === 'URGENT_BRIDAL_GROOM'
+        ? `${
+            eventType === 'URGENT_BRIDAL_GROOM'
+              ? 'URGENT Bridal/Groom'
+              : eventType === 'RESCHEDULE_CONFIRMED'
+              ? 'Rescheduled'
+              : 'Confirmed'
+          } ${timeSlot} · Barber: ${barberName} · ${servicesText}`
+        : eventType === 'PRICE_MENU_SENT'
+        ? `WhatsApp Auto-Sent Rate Menu to ${clientName}`
         : eventType === 'BARBER_BUSY_REROUTED'
         ? `Bot Auto-Rerouted ${timeSlot} · Requested ${barberName} (Busy)`
         : `Reminder Reply (${timeSlot}) · ${clientName}: "${rawBody}"`;
@@ -2453,7 +2699,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       ...prev,
     ]);
 
-    if (eventType === 'APPOINTMENT_CONFIRMED' || eventType === 'URGENT_BRIDAL_GROOM') {
+    if (
+      eventType === 'APPOINTMENT_CONFIRMED' ||
+      eventType === 'RESCHEDULE_CONFIRMED' ||
+      eventType === 'URGENT_BRIDAL_GROOM'
+    ) {
       const hash = `SHA256:${Math.random().toString(36).substring(2, 6).toUpperCase()}...${Math.random()
         .toString(36)
         .substring(2, 6)
@@ -4262,6 +4512,393 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             </div>
           </section>
 
+          {/* 3B. WALK-IN WAITLIST QUEUE ETA + PREPAID MULTI-SESSION PACKAGES + BRIDAL ADVANCE TRACKER */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Live Walk-In Waitlist Queue ETA */}
+            <section
+              aria-label="Live Walk-In Waitlist Queue"
+              className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Clock className="size-4 text-[#06B6D4] shrink-0" />
+                  <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
+                    Live Walk-In Queue &amp; ETA
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowWalkInForm((v) => !v)}
+                  className="min-h-[40px] inline-flex items-center gap-1 rounded-xl border border-[#06B6D4] bg-[#0D1117] px-3 py-1 text-[11px] font-mono font-bold text-[#06B6D4] transition"
+                >
+                  <Plus className="size-3.5" />
+                  <span>{showWalkInForm ? 'Close' : 'Add Walk-In'}</span>
+                </button>
+              </div>
+
+              {showWalkInForm && (
+                <form
+                  onSubmit={handleAddWalkIn}
+                  className="rounded-xl border border-[#06B6D4]/50 bg-[#0D1117] p-3 space-y-2.5"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={walkInName}
+                      onChange={(e) => setWalkInName(e.target.value)}
+                      placeholder="Guest name"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                    />
+                    <input
+                      type="text"
+                      value={walkInService}
+                      onChange={(e) => setWalkInService(e.target.value)}
+                      placeholder={isLadies ? 'Service (e.g. Party Makeup)' : 'Service (e.g. Skin Fade)'}
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                    />
+                    <input
+                      type="text"
+                      value={walkInPhone}
+                      onChange={(e) => setWalkInPhone(e.target.value)}
+                      placeholder="WhatsApp (optional)"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#F0F6FC]"
+                    />
+                    <input
+                      type="number"
+                      min={5}
+                      max={180}
+                      value={walkInEta}
+                      onChange={(e) => setWalkInEta(e.target.value)}
+                      placeholder="Wait mins"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#D29922]"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSavingOpsCard}
+                    className="w-full min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-black uppercase transition"
+                  >
+                    Queue Guest ✓
+                  </button>
+                </form>
+              )}
+
+              <div className="space-y-2">
+                {(conciergeState?.walkInQueue || []).filter((w) => w.status !== 'SEATED').length === 0 ? (
+                  <p className="text-xs text-[#8B949E] font-sans rounded-xl border border-[#30363D] bg-[#0D1117] p-3">
+                    No waiting walk-in guests right now. Tap <strong className="text-[#06B6D4]">+ Add Walk-In</strong> during rush hour to track ETAs automatically.
+                  </p>
+                ) : (
+                  (conciergeState?.walkInQueue || [])
+                    .filter((w) => w.status !== 'SEATED')
+                    .map((guest) => (
+                      <div
+                        key={guest.id}
+                        className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-bold text-[#F0F6FC]">{guest.clientName}</span>
+                            <span className="rounded bg-[#3B2E0B] border border-[#9E6A03] px-2 py-0.5 text-[10px] font-mono font-bold text-[#D29922]">
+                              ~{guest.etaMinutes} min wait
+                            </span>
+                          </div>
+                          <p className="text-xs text-[#8B949E] font-sans truncate">
+                            {guest.service} · {isLadies ? 'Stylist' : 'Barber'}: {guest.assignedStaff}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {guest.status === 'WAITING' && (
+                            <button
+                              type="button"
+                              onClick={() => void handleUpdateWalkInStatus(guest.id, 'NOTIFIED')}
+                              className="min-h-[40px] rounded-xl border border-[#06B6D4] bg-[#161B22] px-3 py-1.5 text-[11px] font-mono font-bold text-[#06B6D4]"
+                            >
+                              Call Next
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => void handleUpdateWalkInStatus(guest.id, 'SEATED')}
+                            className="min-h-[40px] rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-1.5 text-[11px] font-mono font-bold text-[#3FB950]"
+                          >
+                            Seat ✓
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                )}
+              </div>
+            </section>
+
+            {/* Prepaid Multi-Session Packages & Membership Passes */}
+            <section
+              aria-label="Prepaid Multi-Session Packages"
+              className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Award className="size-4 text-[#D29922] shrink-0" />
+                  <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
+                    Prepaid Session Packages &amp; Passes
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPackageForm((v) => !v)}
+                  className="min-h-[40px] inline-flex items-center gap-1 rounded-xl border border-[#D29922] bg-[#0D1117] px-3 py-1 text-[11px] font-mono font-bold text-[#D29922] transition"
+                >
+                  <Plus className="size-3.5" />
+                  <span>{showPackageForm ? 'Close' : 'Issue Pass'}</span>
+                </button>
+              </div>
+
+              {showPackageForm && (
+                <form
+                  onSubmit={handleAddServicePackage}
+                  className="rounded-xl border border-[#9E6A03] bg-[#0D1117] p-3 space-y-2.5"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={pkgClientName}
+                      onChange={(e) => setPkgClientName(e.target.value)}
+                      placeholder="Client name"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                    />
+                    <input
+                      type="text"
+                      required
+                      value={pkgTitle}
+                      onChange={(e) => setPkgTitle(e.target.value)}
+                      placeholder={isLadies ? 'e.g. 5-Session HydraFacial' : 'e.g. 4-Cut Monthly Pass'}
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                    />
+                    <input
+                      type="number"
+                      min={2}
+                      max={30}
+                      value={pkgSessions}
+                      onChange={(e) => setPkgSessions(e.target.value)}
+                      placeholder="Sessions"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#06B6D4]"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={pkgPrice}
+                      onChange={(e) => setPkgPrice(e.target.value)}
+                      placeholder={`Paid (${regionConfig.currency})`}
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#D29922]"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSavingOpsCard}
+                    className="w-full min-h-[44px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] text-xs font-mono font-black uppercase transition"
+                  >
+                    Create Prepaid Pass ✓
+                  </button>
+                </form>
+              )}
+
+              <div className="space-y-2">
+                {(conciergeState?.servicePackages || []).length === 0 ? (
+                  <p className="text-xs text-[#8B949E] font-sans rounded-xl border border-[#30363D] bg-[#0D1117] p-3">
+                    No prepaid session bundles yet. Offer 4-visit or 5-session packages to lock repeat upfront cashflow.
+                  </p>
+                ) : (
+                  (conciergeState?.servicePackages || []).map((pass) => {
+                    const remaining = Math.max(0, pass.totalSessions - pass.usedSessions);
+                    return (
+                      <div
+                        key={pass.id}
+                        className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-bold text-[#F0F6FC]">{pass.clientName}</span>
+                            <span className="rounded bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
+                              {remaining} of {pass.totalSessions} Left
+                            </span>
+                          </div>
+                          <p className="text-xs text-[#8B949E] font-sans truncate">
+                            {pass.packageTitle} · Paid {regionConfig.symbol}
+                            {pass.pricePaid.toLocaleString()}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={remaining <= 0}
+                          onClick={() => void handleConsumePackageSession(pass.id)}
+                          className="min-h-[40px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] disabled:opacity-40 px-3 py-1.5 text-[11px] font-mono font-bold text-[#06B6D4] shrink-0"
+                        >
+                          {remaining > 0 ? 'Use 1 Session' : 'Completed ✓'}
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          </div>
+
+          {/* 3C. BRIDAL & EVENT ADVANCE DEPOSIT TRACKER (Prominent for Ladies Parlors & Event Salons) */}
+          {(isLadies || (conciergeState?.bridalBookings || []).length > 0 || showBridalForm) && (
+            <section
+              aria-label="Bridal and Event Advance Tracker"
+              className="rounded-2xl border border-[#9E6A03] bg-[#161B22] p-4 sm:p-5 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="size-4 text-[#D29922] shrink-0" />
+                    <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
+                      {isLadies ? 'Bridal Suite &amp; Female-Only Event Advance Tracker' : 'Bridal / Groom Event Advance Tracker'}
+                    </h2>
+                  </div>
+                  {isLadies && (
+                    <p className="text-[11px] font-mono text-[#3FB950]">
+                      ✓ Female-Only Private Cabin Policy Active across WhatsApp Rate Menu &amp; Bookings
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBridalForm((v) => !v)}
+                  className="min-h-[40px] inline-flex items-center gap-1 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-3 py-1.5 text-[11px] font-mono font-black uppercase transition"
+                >
+                  <Plus className="size-3.5" />
+                  <span>{showBridalForm ? 'Close' : 'Add Bridal / Event'}</span>
+                </button>
+              </div>
+
+              {showBridalForm && (
+                <form
+                  onSubmit={handleAddBridalBooking}
+                  className="rounded-xl border border-[#9E6A03] bg-[#0D1117] p-3.5 space-y-2.5"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={bridalName}
+                      onChange={(e) => setBridalName(e.target.value)}
+                      placeholder="Bride / Client & Event Name"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                    />
+                    <input
+                      type="text"
+                      value={bridalEventDate}
+                      onChange={(e) => setBridalEventDate(e.target.value)}
+                      placeholder="Event Date (e.g. 24 Nov 2026)"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                    />
+                    <input
+                      type="text"
+                      value={bridalPhone}
+                      onChange={(e) => setBridalPhone(e.target.value)}
+                      placeholder="WhatsApp Phone"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#F0F6FC]"
+                    />
+                    <input
+                      type="text"
+                      value={bridalPackage}
+                      onChange={(e) => setBridalPackage(e.target.value)}
+                      placeholder="Package Details"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC]"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={bridalTotal}
+                      onChange={(e) => setBridalTotal(e.target.value)}
+                      placeholder="Total Fee"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#F0F6FC]"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={bridalAdvance}
+                      onChange={(e) => setBridalAdvance(e.target.value)}
+                      placeholder="Advance Paid"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#3FB950]"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="inline-flex items-center gap-2 text-xs font-mono text-[#8B949E] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={bridalHomeService}
+                        onChange={(e) => setBridalHomeService(e.target.checked)}
+                        className="size-4 accent-[#D29922]"
+                      />
+                      <span>Home / Venue Visit Requested</span>
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={isSavingOpsCard}
+                      className="min-h-[44px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 py-2 text-xs font-mono font-black uppercase"
+                    >
+                      Save Bridal Advance ✓
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              <div className="space-y-2">
+                {(conciergeState?.bridalBookings || []).map((ev) => {
+                  const balanceDue = Math.max(0, ev.totalAmount - ev.advancePaid);
+                  return (
+                    <div
+                      key={ev.id}
+                      className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-[#F0F6FC]">{ev.brideOrEventName}</span>
+                          <span className="rounded bg-[#3B2E0B] border border-[#9E6A03] px-2 py-0.5 text-[10px] font-mono font-bold text-[#D29922]">
+                            {ev.eventDate}
+                          </span>
+                          {ev.homeService && (
+                            <span className="rounded bg-[#0D2138] border border-[#1F6FEB] px-2 py-0.5 text-[10px] font-mono font-bold text-[#58A6FF]">
+                              Home / Venue Service
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#8B949E] font-sans">
+                          {ev.packageName} · Lead {isLadies ? 'Stylist' : 'Barber'}: {ev.assignedStylist}
+                        </p>
+                        <p className="text-xs font-mono text-[#06B6D4] tabular-nums">
+                          Paid: {regionConfig.symbol}{ev.advancePaid.toLocaleString()} / Total:{' '}
+                          {regionConfig.symbol}{ev.totalAmount.toLocaleString()} · Balance Due:{' '}
+                          <strong className={balanceDue > 0 ? 'text-[#D29922]' : 'text-[#3FB950]'}>
+                            {regionConfig.symbol}{balanceDue.toLocaleString()}
+                          </strong>
+                        </p>
+                      </div>
+                      {ev.status !== 'SETTLED' && balanceDue > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleSettleBridalBooking(ev.id)}
+                          className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/60 px-4 py-2 text-xs font-mono font-bold text-[#3FB950] shrink-0"
+                        >
+                          Mark Settled ✓
+                        </button>
+                      ) : (
+                        <span className="rounded-xl border border-[#116329] bg-[#0D3822]/40 px-3 py-2 text-xs font-mono font-bold text-[#3FB950] shrink-0">
+                          Full Settled ✓
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {/* 4. TOP BOOKED SERVICES + STYLIST / BARBER BREAKDOWN & 24H/2H REMINDERS */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <section
@@ -4476,7 +5113,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           {/* Sub-Section Switcher Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1.5 rounded-2xl border border-[#30363D] bg-[#161B22]">
             {[
-              { id: 'STAFF' as const, label: 'Staff & Barbers', icon: Scissors },
+              { id: 'STAFF' as const, label: isLadies ? 'Staff & Stylists' : 'Staff & Barbers', icon: Scissors },
               { id: 'SERVICES' as const, label: 'Services & Rates', icon: Receipt },
               { id: 'HOURS' as const, label: 'Salon Hours', icon: Clock },
               { id: 'AUTOMATION' as const, label: 'Automation & Rewards', icon: Settings2 },
@@ -4502,12 +5139,48 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             })}
           </div>
 
-          {/* 1. STAFF & BARBERS (Add/Edit Barbers, Chair Assignments & Barber Stats) */}
+          {/* 1. STAFF & BARBERS / STYLISTS + SHOP CATEGORY MODE SELECTOR */}
           {manageSubSection === 'STAFF' && (
             <div className="space-y-4">
+              <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-mono font-bold uppercase text-[#06B6D4]">
+                    Salon Category Profile (Persisted on WhatsApp &amp; Posters)
+                  </p>
+                  <p className="text-xs text-[#8B949E] font-sans mt-0.5">
+                    {isLadies
+                      ? 'Ladies Beauty Parlor Mode active: Bridal Advance Tracker & Female-Only privacy badge enabled.'
+                      : 'Men’s Salon & Barbershop Mode active: Barber chairs, beard combos & express walk-in ETA enabled.'}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => void handleUpdateSalonCategory('MENS')}
+                    className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-xs font-mono font-bold transition ${
+                      !isLadies
+                        ? 'border-[#06B6D4] bg-[#06B6D4] text-[#0D1117]'
+                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
+                    }`}
+                  >
+                    Men&apos;s Salon
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleUpdateSalonCategory('LADIES')}
+                    className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-xs font-mono font-bold transition ${
+                      isLadies
+                        ? 'border-[#D29922] bg-[#D29922] text-[#0D1117]'
+                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
+                    }`}
+                  >
+                    Ladies Parlor
+                  </button>
+                </div>
+              </div>
             <PortalCard
-              title="Staff & Barbers"
-              kicker="BARBER ROSTER & CHAIR ASSIGNMENTS"
+              title={isLadies ? 'Staff & Beauticians' : 'Staff & Barbers'}
+              kicker={isLadies ? 'STYLIST ROSTER & PRIVATE CABIN STATIONS' : 'BARBER ROSTER & CHAIR ASSIGNMENTS'}
             >
               <div className="space-y-4">
                 <p className="text-xs text-[#8B949E] font-sans">
@@ -5343,13 +6016,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             >
               <SalonWindowPosterPdf
                 salonName={currentSalon.name}
-                salonCategory={
-                  currentSalon.name.toLowerCase().includes('beauty') ||
-                  currentSalon.name.toLowerCase().includes('parlor') ||
-                  currentSalon.name.toLowerCase().includes('ladies')
-                    ? 'LADIES'
-                    : 'MENS'
-                }
+                salonCategory={isLadies ? 'LADIES' : 'MENS'}
                 whatsappNumber={currentSalon.phone}
                 location={currentSalon.location}
                 initialLanguage={ownerLang}
