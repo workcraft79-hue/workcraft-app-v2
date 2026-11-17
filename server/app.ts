@@ -3,8 +3,11 @@ import { GoogleGenAI, Type } from '@google/genai';
 import QRCode from 'qrcode';
 import {
   addChairLock,
+  addWalkInQueueItem,
   completeAppointmentAndRecordVisit,
+  consumeServicePackageSession,
   getSalonConciergeState,
+  hydrateConciergeStoreFromKv,
   listSalonsForAgent,
   processWhatsAppWebhook,
   removeChairLock,
@@ -14,9 +17,13 @@ import {
   runWinBackCron,
   setCounterSleepState,
   setSalonBillingStatus,
+  settleBridalBookingBalance,
   syncSalonBarbers,
   updateRetentionSettings,
+  updateWalkInQueueStatus,
+  upsertBridalBooking,
   upsertClientProfile,
+  upsertServicePackage,
 } from './conciergeEngine.js';
 import {
   AuthenticatedRequest,
@@ -27,6 +34,7 @@ import {
   createAgentInviteToken,
   extractAuthUserFromRequest,
   getFounderSessionUser,
+  hydrateSecurityStoreFromKv,
   inspectAgentInviteToken,
   recordFounderPinFailure,
   registerSalonAssignment,
@@ -46,6 +54,7 @@ import {
   appendVoiceMessage,
   getLiveUsageMeter,
   getWhatsAppHeartbeatStatus,
+  hydrateVoiceStoreFromKv,
   listVoiceThreads,
   markVoiceThreadRead,
   recordAiVoiceApiUsage,
@@ -56,18 +65,23 @@ import {
   createCoAgentRecord,
   getFinanceAndAgentSummary,
   getFounderSettings,
+  hydrateOpsStoreFromKv,
   issueFounderWebAuthnChallenge,
+  listIncidentReports,
   recordAgentCashCollection,
   recordAgentCashRemittance,
   recordCoAgentCashHandoff,
   recordFounderBroadcastDispatch,
+  recordIncidentReport,
   recordSalonFinancialPayment,
   registerFounderBiometricCredential,
+  resolveIncidentReport,
   revokeAllFounderBiometrics,
   rotateFounderPairingKey,
   updateFounderReportPhone,
   verifyFounderBiometricAssertion,
 } from './opsStore.js';
+import { isKvConfigured } from './kvBridge.js';
 
 const SALON_GLOSSARY: Array<[RegExp, string, string]> = [
   [/\bbeard oil treatment\b/i, 'داڑھی آئل ٹریٹمنٹ', 'علاج اللحية بالزيت'],
@@ -256,13 +270,46 @@ function detectInputLanguage(text: string): 'en' | 'ur' | 'ar' {
   return 'en';
 }
 
+let kvHydrationPromise: Promise<void> | null = null;
+function ensureKvHydrated(): Promise<void> {
+  if (!isKvConfigured()) return Promise.resolve();
+  if (!kvHydrationPromise) {
+    kvHydrationPromise = Promise.all([
+      hydrateSecurityStoreFromKv(),
+      hydrateOpsStoreFromKv(),
+      hydrateVoiceStoreFromKv(),
+      hydrateConciergeStoreFromKv(),
+    ])
+      .then(() => undefined)
+      .catch(() => undefined);
+  }
+  return kvHydrationPromise;
+}
+
+const telemetryRateBuckets = new Map<string, { count: number; resetAt: number }>();
+
 export function createApiApp(port = 3000): express.Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '4mb' }));
 
+  app.use('/api', async (_req, _res, next) => {
+    try {
+      await ensureKvHydrated();
+    } catch {
+      // Non-fatal fallback to local/tmp stores
+    }
+    next();
+  });
+
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, status: 'HEALTHY', port, runtime: process.env.VERCEL ? 'vercel-node' : 'node' });
+    res.json({
+      ok: true,
+      status: 'HEALTHY',
+      port,
+      runtime: process.env.VERCEL ? 'vercel-node' : 'node',
+      kvConfigured: isKvConfigured(),
+    });
   });
 
   // ===========================================================================
@@ -502,6 +549,12 @@ export function createApiApp(port = 3000): express.Express {
       const rawPlanId = sanitizePlainText(req.body?.planId, 20).toUpperCase();
       const packageTier: 'STARTER' | 'PRO' | 'PRO++' =
         rawPlanId === 'STARTER' ? 'STARTER' : rawPlanId === 'GROWTH' || rawPlanId === 'PRO' ? 'PRO' : 'PRO++';
+      const rawCategory = sanitizePlainText(req.body?.salonCategory, 16).toUpperCase();
+      const salonCategory: 'MENS' | 'LADIES' | undefined =
+        rawCategory === 'LADIES' ? 'LADIES' : rawCategory === 'MENS' ? 'MENS' : undefined;
+      const enabledServices = Array.isArray(req.body?.enabledServices)
+        ? req.body.enabledServices
+        : undefined;
       const barbers = Array.isArray(req.body?.barbers)
         ? req.body.barbers.map((b: unknown) => sanitizePlainText(b, 60)).filter(Boolean)
         : [];
@@ -533,12 +586,16 @@ export function createApiApp(port = 3000): express.Express {
         whatsappPhone,
         billingStatus: 'PENDING_ACTIVATION',
         packageTier,
+        salonCategory,
+        enabledServices,
       });
       updateRetentionSettings(newSalonId, {
         salonName,
         ownerName,
         whatsappPhone,
         packageTier,
+        salonCategory,
+        enabledServices,
       });
       if (barbers.length > 0) {
         syncSalonBarbers(newSalonId, barbers);
@@ -1426,6 +1483,203 @@ export function createApiApp(port = 3000): express.Express {
       } catch (err) {
         console.error('Package upgrade route error:', err);
         return res.status(500).json({ error: 'Failed to persist package upgrade.' });
+      }
+    }
+  );
+
+  // ===========================================================================
+  // LIVE WALK-IN QUEUE, BRIDAL ADVANCE TRACKER & PREPAID SERVICE PACKAGES
+  // ===========================================================================
+  app.post(
+    '/api/salons/:salonId/walkin-queue',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      const { salonId } = req.params;
+      const body = req.body || {};
+      const clientName = sanitizePlainText(body.clientName, 80);
+      if (!clientName) {
+        return res.status(400).json({ error: 'Walk-in client name is required.' });
+      }
+      const state = addWalkInQueueItem(salonId, {
+        clientName,
+        phone: typeof body.phone === 'string' ? body.phone : '',
+        service: typeof body.service === 'string' ? body.service : 'Express Service',
+        assignedStaff: typeof body.assignedStaff === 'string' ? body.assignedStaff : undefined,
+        etaMinutes: Number(body.etaMinutes || 15),
+      });
+      return res.status(201).json(state);
+    }
+  );
+
+  app.patch(
+    '/api/salons/:salonId/walkin-queue/:itemId',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      const { salonId, itemId } = req.params;
+      const rawStatus = sanitizePlainText(req.body?.status, 20).toUpperCase();
+      const status: 'WAITING' | 'NOTIFIED' | 'SEATED' =
+        rawStatus === 'SEATED' ? 'SEATED' : rawStatus === 'NOTIFIED' ? 'NOTIFIED' : 'WAITING';
+      const state = updateWalkInQueueStatus(salonId, sanitizePlainText(itemId, 60), status);
+      return res.json(state);
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/bridal-bookings',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      const { salonId } = req.params;
+      const body = req.body || {};
+      const brideOrEventName = sanitizePlainText(body.brideOrEventName, 100);
+      if (!brideOrEventName) {
+        return res.status(400).json({ error: 'Bride / Event name is required.' });
+      }
+      const state = upsertBridalBooking(salonId, {
+        brideOrEventName,
+        phone: typeof body.phone === 'string' ? body.phone : '',
+        packageName: typeof body.packageName === 'string' ? body.packageName : 'Bridal Suite',
+        eventDate: typeof body.eventDate === 'string' ? body.eventDate : 'Upcoming Event',
+        trialDate: typeof body.trialDate === 'string' ? body.trialDate : undefined,
+        totalAmount: Number(body.totalAmount || 25000),
+        advancePaid: Number(body.advancePaid || 0),
+        assignedStylist: typeof body.assignedStylist === 'string' ? body.assignedStylist : undefined,
+        homeService: Boolean(body.homeService),
+      });
+      return res.status(201).json(state);
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/bridal-bookings/:bookingId/settle',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      const { salonId, bookingId } = req.params;
+      const state = settleBridalBookingBalance(salonId, sanitizePlainText(bookingId, 60));
+      return res.json(state);
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/packages',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      const { salonId } = req.params;
+      const body = req.body || {};
+      const clientName = sanitizePlainText(body.clientName, 80);
+      const packageTitle = sanitizePlainText(body.packageTitle, 100);
+      if (!clientName || !packageTitle) {
+        return res.status(400).json({ error: 'Client name and package title are required.' });
+      }
+      const state = upsertServicePackage(salonId, {
+        clientName,
+        phone: typeof body.phone === 'string' ? body.phone : '',
+        packageTitle,
+        totalSessions: Number(body.totalSessions || 5),
+        pricePaid: Number(body.pricePaid || 5000),
+      });
+      return res.status(201).json(state);
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/packages/:pkgId/use-session',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      const { salonId, pkgId } = req.params;
+      const state = consumeServicePackageSession(salonId, sanitizePlainText(pkgId, 60));
+      return res.json(state);
+    }
+  );
+
+  // ===========================================================================
+  // $0.00 REAL-TIME ERROR TELEMETRY & FOUNDER INCIDENT FEED (ALL 4 ROLES)
+  // ===========================================================================
+  app.post('/api/telemetry/incident', (req, res) => {
+    try {
+      const clientKey = sanitizePlainText(
+        String(req.header('x-forwarded-for') || req.ip || 'anon').split(',')[0],
+        64
+      );
+      const now = Date.now();
+      const bucket = telemetryRateBuckets.get(clientKey);
+      if (!bucket || bucket.resetAt < now) {
+        telemetryRateBuckets.set(clientKey, { count: 1, resetAt: now + 60_000 });
+      } else {
+        bucket.count += 1;
+        if (bucket.count > 25) {
+          return res.status(429).json({ ok: false, error: 'Telemetry throttle limit reached.' });
+        }
+      }
+
+      const body = req.body || {};
+      const message = sanitizePlainText(body.message, 320);
+      if (!message) {
+        return res.status(400).json({ ok: false, error: 'Incident message is required.' });
+      }
+      const record = recordIncidentReport({
+        role: typeof body.role === 'string' ? body.role : undefined,
+        area: typeof body.area === 'string' ? body.area : undefined,
+        route: typeof body.route === 'string' ? body.route : undefined,
+        severity: typeof body.severity === 'string' ? body.severity : undefined,
+        message,
+        stackHint: typeof body.stackHint === 'string' ? body.stackHint : undefined,
+        resolutionStatus:
+          typeof body.resolutionStatus === 'string' ? body.resolutionStatus : undefined,
+        recoveryMs: Number(body.recoveryMs || 800),
+      });
+      return res.status(201).json({ ok: true, incident: record });
+    } catch {
+      return res.status(500).json({ ok: false, error: 'Failed to log incident.' });
+    }
+  });
+
+  app.get('/api/founder/incidents', requireAuth, requireRole('FOUNDER'), (req, res) => {
+    const limit = Math.max(1, Math.min(80, Number(req.query.limit || 40)));
+    return res.json(listIncidentReports(limit));
+  });
+
+  app.post(
+    '/api/founder/incidents/:incidentId/resolve',
+    requireAuth,
+    requireRole('FOUNDER'),
+    (req, res) => {
+      const incident = resolveIncidentReport(sanitizePlainText(req.params.incidentId, 60));
+      if (!incident) {
+        return res.status(404).json({ error: 'Incident not found.' });
+      }
+      return res.json({ ok: true, incident, ...listIncidentReports(40) });
+    }
+  );
+
+  // Global Express Error Boundary -> Captures any unhandled API exception cleanly
+  app.use(
+    (
+      err: unknown,
+      req: express.Request,
+      res: express.Response,
+      _next: express.NextFunction
+    ) => {
+      const msg = err instanceof Error ? err.message : String(err || 'Unhandled API exception');
+      const incident = recordIncidentReport({
+        role: 'SYSTEM',
+        area: 'Express API Route',
+        route: req.originalUrl || req.path || '/api',
+        severity: 'CRITICAL',
+        resolutionStatus: 'NEEDS_FOUNDER_ACTION',
+        message: msg,
+        recoveryMs: 45,
+      });
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: 'A temporary server glitch was logged and isolated.',
+          incidentId: incident.id,
+        });
       }
     }
   );
