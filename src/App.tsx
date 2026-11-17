@@ -453,6 +453,7 @@ export default function App() {
   const [detailSheet, setDetailSheet] = useState<string | null>(null);
 
   const [founderPreviewMode, setFounderPreviewMode] = useState<'NONE' | 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE'>('NONE');
+  const [salonOwnerUiLang, setSalonOwnerUiLang] = useState<'en' | 'ur' | 'ar'>('en');
 
   const refreshVoiceAndUsage = React.useCallback(async () => {
     try {
@@ -513,9 +514,15 @@ export default function App() {
     if (activeRole !== 'FOUNDER') return;
     const interval = window.setInterval(() => {
       void refreshVoiceAndUsage();
-    }, 30000);
+    }, 8000);
     return () => window.clearInterval(interval);
   }, [isCheckingSession, authUser, activeRole, refreshVoiceAndUsage]);
+
+  useEffect(() => {
+    if (!isCheckingSession && authUser && activeTab === 'Voice') {
+      void refreshVoiceAndUsage();
+    }
+  }, [isCheckingSession, authUser, activeTab, refreshVoiceAndUsage]);
 
   useEffect(() => {
     if (!isPairingModalOpen) return;
@@ -958,8 +965,26 @@ export default function App() {
             {activeRole === 'SALON_OWNER' && hasCompletedSalonOnboarding ? (
               <>
                 {[
-                  { id: 'LIVE' as const, label: 'Live Floor', Icon: Scissors },
-                  { id: 'MANAGE' as const, label: 'Manage', Icon: SlidersHorizontal },
+                  {
+                    id: 'LIVE' as const,
+                    label:
+                      salonOwnerUiLang === 'ur'
+                        ? 'لائیو فلور'
+                        : salonOwnerUiLang === 'ar'
+                        ? 'الصالة المباشرة'
+                        : 'Live Floor',
+                    Icon: Scissors,
+                  },
+                  {
+                    id: 'MANAGE' as const,
+                    label:
+                      salonOwnerUiLang === 'ur'
+                        ? 'مینج کریں'
+                        : salonOwnerUiLang === 'ar'
+                        ? 'الإدارة'
+                        : 'Manage',
+                    Icon: SlidersHorizontal,
+                  },
                 ].map(({ id, label, Icon }) => {
                   const isActive = salonOwnerSection === id;
                   return (
@@ -1471,6 +1496,7 @@ export default function App() {
                     onSectionModeChange={setSalonOwnerSection}
                     voiceThreads={voiceThreads}
                     onVoiceThreadsUpdated={setVoiceThreads}
+                    onOwnerLangChange={setSalonOwnerUiLang}
                     onClose={activeRole === 'FOUNDER' ? () => handleTabChange('Overview') : undefined}
                   />
                 )}
@@ -1495,6 +1521,7 @@ export default function App() {
                     threads={voiceThreads}
                     onThreadsUpdated={setVoiceThreads}
                     onUsageUpdated={setUsageMeter}
+                    onRefreshInbox={refreshVoiceAndUsage}
                     onClose={() => handleTabChange('Overview')}
                   />
                 ) : activeTab === 'Overview' ? (
@@ -1551,7 +1578,13 @@ export default function App() {
               }`}
             >
               <Scissors className="size-4" />
-              <span>Live Floor</span>
+              <span>
+                {salonOwnerUiLang === 'ur'
+                  ? 'لائیو فلور'
+                  : salonOwnerUiLang === 'ar'
+                  ? 'الصالة المباشرة'
+                  : 'Live Floor'}
+              </span>
             </button>
             <button
               type="button"
@@ -1566,7 +1599,13 @@ export default function App() {
               }`}
             >
               <SlidersHorizontal className="size-4" />
-              <span>Manage</span>
+              <span>
+                {salonOwnerUiLang === 'ur'
+                  ? 'مینج کریں'
+                  : salonOwnerUiLang === 'ar'
+                  ? 'الإدارة'
+                  : 'Manage'}
+              </span>
             </button>
           </>
         ) : (
