@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { dispatchFounderAlertWebhook, kvGetJson, kvSetJson } from './kvBridge.js';
 import { sanitizePlainText, sanitizePhone, signServerBlob, verifyServerBlob } from './security.js';
 
 const DATA_DIR = process.env.VERCEL
@@ -62,6 +63,21 @@ export interface BroadcastHistoryEntry {
   createdAt: string;
 }
 
+export interface IncidentRecord {
+  id: string;
+  role: 'FOUNDER' | 'AGENT' | 'SALON_OWNER' | 'END_USER' | 'SYSTEM';
+  area: string;
+  route: string;
+  severity: 'LOW' | 'MEDIUM' | 'CRITICAL';
+  message: string;
+  stackHint?: string;
+  resolutionStatus: 'AUTO_RESOLVED' | 'FALLBACK_ACTIVE' | 'NEEDS_FOUNDER_ACTION' | 'RESOLVED_BY_FOUNDER';
+  recoveryMs: number;
+  founderAlerted: boolean;
+  occurredAt: string;
+  resolvedAt: string | null;
+}
+
 interface PersistedOpsState {
   biometricRevokedBeforeMs: number;
   biometricDevices: BiometricDeviceRecord[];
@@ -72,6 +88,7 @@ interface PersistedOpsState {
   coAgents: CoAgentRecord[];
   ledgerEntries: FinancialLedgerEntry[];
   broadcasts: BroadcastHistoryEntry[];
+  incidents: IncidentRecord[];
 }
 
 const DEFAULT_OPS_STATE: PersistedOpsState = {
@@ -104,6 +121,7 @@ const DEFAULT_OPS_STATE: PersistedOpsState = {
   ],
   ledgerEntries: [],
   broadcasts: [],
+  incidents: [],
 };
 
 let opsState: PersistedOpsState = structuredClone(DEFAULT_OPS_STATE);
@@ -121,10 +139,26 @@ function loadOpsState() {
       ledgerEntries: Array.isArray(parsed.ledgerEntries) ? parsed.ledgerEntries : [],
       broadcasts: Array.isArray(parsed.broadcasts) ? parsed.broadcasts : [],
       biometricDevices: Array.isArray(parsed.biometricDevices) ? parsed.biometricDevices : [],
+      incidents: Array.isArray(parsed.incidents) ? parsed.incidents : [],
     };
   } catch {
     // boot cleanly from defaults
   }
+}
+
+export async function hydrateOpsStoreFromKv(): Promise<void> {
+  const remote = await kvGetJson<Partial<PersistedOpsState>>('wc:ops:v1');
+  if (!remote) return;
+  opsState = {
+    ...structuredClone(DEFAULT_OPS_STATE),
+    ...remote,
+    agentCashHeld: remote.agentCashHeld || opsState.agentCashHeld,
+    coAgents: Array.isArray(remote.coAgents) ? remote.coAgents : opsState.coAgents,
+    ledgerEntries: Array.isArray(remote.ledgerEntries) ? remote.ledgerEntries : opsState.ledgerEntries,
+    broadcasts: Array.isArray(remote.broadcasts) ? remote.broadcasts : opsState.broadcasts,
+    biometricDevices: Array.isArray(remote.biometricDevices) ? remote.biometricDevices : opsState.biometricDevices,
+    incidents: Array.isArray(remote.incidents) ? remote.incidents : opsState.incidents,
+  };
 }
 
 function saveOpsState() {
@@ -136,6 +170,7 @@ function saveOpsState() {
   } catch (err) {
     console.warn('Could not persist ops state:', err);
   }
+  void kvSetJson('wc:ops:v1', opsState);
 }
 
 loadOpsState();
@@ -618,4 +653,122 @@ export function recordFounderBroadcastDispatch(params: {
   opsState.broadcasts = opsState.broadcasts.slice(0, 20);
   saveOpsState();
   return entry;
+}
+
+export function recordIncidentReport(params: {
+  role?: string;
+  area?: string;
+  route?: string;
+  severity?: string;
+  message: string;
+  stackHint?: string;
+  resolutionStatus?: string;
+  recoveryMs?: number;
+}): IncidentRecord {
+  const normRole = sanitizePlainText(params.role || 'SYSTEM', 24).toUpperCase();
+  const role: IncidentRecord['role'] =
+    normRole === 'FOUNDER' ||
+    normRole === 'AGENT' ||
+    normRole === 'SALON_OWNER' ||
+    normRole === 'END_USER'
+      ? normRole
+      : 'SYSTEM';
+
+  const normSeverity = sanitizePlainText(params.severity || 'MEDIUM', 16).toUpperCase();
+  const severity: IncidentRecord['severity'] =
+    normSeverity === 'CRITICAL' ? 'CRITICAL' : normSeverity === 'LOW' ? 'LOW' : 'MEDIUM';
+
+  const normStatus = sanitizePlainText(params.resolutionStatus || 'AUTO_RESOLVED', 32).toUpperCase();
+  const resolutionStatus: IncidentRecord['resolutionStatus'] =
+    normStatus === 'NEEDS_FOUNDER_ACTION'
+      ? 'NEEDS_FOUNDER_ACTION'
+      : normStatus === 'FALLBACK_ACTIVE'
+      ? 'FALLBACK_ACTIVE'
+      : normStatus === 'RESOLVED_BY_FOUNDER'
+      ? 'RESOLVED_BY_FOUNDER'
+      : 'AUTO_RESOLVED';
+
+  const occurredAt = new Date().toISOString();
+  const shouldAlertFounder =
+    severity === 'CRITICAL' || resolutionStatus === 'NEEDS_FOUNDER_ACTION' || resolutionStatus === 'AUTO_RESOLVED';
+
+  const record: IncidentRecord = {
+    id: `inc-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+    role,
+    area: sanitizePlainText(params.area || 'Application UI', 80),
+    route: sanitizePlainText(params.route || '/', 140),
+    severity,
+    message: sanitizePlainText(params.message || 'Recovered runtime glitch', 320),
+    stackHint: params.stackHint ? sanitizePlainText(params.stackHint, 240) : undefined,
+    resolutionStatus,
+    recoveryMs: Math.max(10, Math.min(30000, Math.round(Number(params.recoveryMs || 800)))),
+    founderAlerted: shouldAlertFounder,
+    occurredAt,
+    resolvedAt: resolutionStatus === 'AUTO_RESOLVED' ? occurredAt : null,
+  };
+
+  opsState.incidents.unshift(record);
+  opsState.incidents = opsState.incidents.slice(0, 80);
+  saveOpsState();
+
+  if (severity === 'CRITICAL' || resolutionStatus === 'NEEDS_FOUNDER_ACTION') {
+    void dispatchFounderAlertWebhook({
+      id: record.id,
+      severity: record.severity,
+      role: record.role,
+      area: record.area,
+      route: record.route,
+      message: record.message,
+      resolutionStatus: record.resolutionStatus,
+      recoveryMs: record.recoveryMs,
+      occurredAt: record.occurredAt,
+    });
+  }
+
+  return record;
+}
+
+export function listIncidentReports(limit = 50): {
+  incidents: IncidentRecord[];
+  summary: {
+    totalRecorded: number;
+    autoResolvedCount: number;
+    openActionCount: number;
+    avgRecoveryMs: number;
+    founderPhone: string;
+  };
+} {
+  const list = opsState.incidents.slice(0, Math.max(1, Math.min(80, limit)));
+  const autoResolvedCount = opsState.incidents.filter(
+    (i) => i.resolutionStatus === 'AUTO_RESOLVED' || i.resolutionStatus === 'RESOLVED_BY_FOUNDER'
+  ).length;
+  const openActionCount = opsState.incidents.filter(
+    (i) => i.resolutionStatus === 'NEEDS_FOUNDER_ACTION'
+  ).length;
+  const avgRecoveryMs =
+    opsState.incidents.length > 0
+      ? Math.round(
+          opsState.incidents.reduce((sum, i) => sum + (i.recoveryMs || 0), 0) /
+            opsState.incidents.length
+        )
+      : 420;
+  return {
+    incidents: list,
+    summary: {
+      totalRecorded: opsState.incidents.length,
+      autoResolvedCount,
+      openActionCount,
+      avgRecoveryMs,
+      founderPhone: opsState.founderReportPhone,
+    },
+  };
+}
+
+export function resolveIncidentReport(incidentId: string): IncidentRecord | null {
+  const item = opsState.incidents.find((i) => i.id === incidentId);
+  if (!item) return null;
+  item.resolutionStatus = 'RESOLVED_BY_FOUNDER';
+  item.resolvedAt = new Date().toISOString();
+  saveOpsState();
+  return item;
 }
