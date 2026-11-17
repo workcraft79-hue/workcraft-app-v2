@@ -110,8 +110,11 @@ function formatGeminiError(err: unknown): string {
   if (/API_KEY_INVALID|PERMISSION_DENIED|401|403/i.test(raw)) {
     return 'Gemini API key is invalid or unauthorized. Please verify GEMINI_API_KEY in Settings > Secrets.';
   }
-  if (/RESOURCE_EXHAUSTED|429/i.test(raw)) {
-    return 'Gemini API quota limit reached. Please retry in a moment or check your billing quota in Settings > Secrets.';
+  if (/RESOURCE_EXHAUSTED|429|quota/i.test(raw)) {
+    return 'Gemini API rate/daily free-tier limit reached. Wait ~60 seconds or attach a pay-as-you-go GEMINI_API_KEY in Settings > Secrets.';
+  }
+  if (/timed out|timeout/i.test(raw)) {
+    return 'Voice translation took too long on the server. Please try a shorter clip (3–15s) or tap Retry.';
   }
   return raw ? `Voice translation upstream error: ${raw.slice(0, 180)}` : 'Voice translation upstream error.';
 }
@@ -161,7 +164,7 @@ async function synthesizeGeminiTts(
           },
         },
       }),
-      10000,
+      15000,
       'Gemini TTS'
     );
 
@@ -190,19 +193,19 @@ async function synthesizeGeminiTts(
   }
 }
 
-async function synthesizeEdgeTtsInMemory(
+export async function synthesizeEdgeTtsInMemory(
   text: string,
   targetLocale: SupportedVoiceLocale
 ): Promise<{ audioBase64: string | null; voiceName: string; ttsSource: 'msedge-tts' | 'unavailable'; ttsError?: string }> {
   const voiceName = LOCALE_TO_EDGE_VOICE[targetLocale];
-  const cleanText = text.trim().slice(0, 1200);
+  const cleanText = text.trim().slice(0, 1500);
   if (!cleanText) {
     return { audioBase64: null, voiceName, ttsSource: 'unavailable', ttsError: 'Empty speech text.' };
   }
 
   const tts = new MsEdgeTTS({
-    connectionTimeoutMs: 3500,
-    synthesisTimeoutMs: 5000,
+    connectionTimeoutMs: 5000,
+    synthesisTimeoutMs: 8000,
   });
 
   try {
@@ -217,7 +220,7 @@ async function synthesizeEdgeTtsInMemory(
           settled = true;
           reject(new Error('Edge TTS stream timed out.'));
         }
-      }, 5500);
+      }, 8500);
 
       audioStream.on('data', (chunk: Buffer | Uint8Array) => {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -268,6 +271,56 @@ async function synthesizeEdgeTtsInMemory(
   }
 }
 
+export async function transcribeChairIntentAudio(
+  audioBase64: string,
+  audioMimeType: string,
+  ownerLang: 'ur' | 'ar' | 'en'
+): Promise<{ transcript: string; error?: string }> {
+  const cleanAudioBase64 = (audioBase64 || '').replace(/^data:[^;]+;base64,/, '').trim();
+  const cleanAudioMime = (audioMimeType || 'audio/webm').split(';')[0].trim() || 'audio/webm';
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!cleanAudioBase64) {
+    return { transcript: '', error: 'No audio recording supplied.' };
+  }
+  if (!apiKey) {
+    return { transcript: '', error: 'GEMINI_API_KEY is not configured.' };
+  }
+
+  const ai = createGeminiClient(apiKey);
+  const hint =
+    ownerLang === 'ur'
+      ? 'Expected language: Urdu / English barber names & time durations.'
+      : ownerLang === 'ar'
+      ? 'Expected language: Arabic / English barber names & time durations.'
+      : 'Expected language: English barber names & time durations.';
+
+  try {
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: cleanAudioMime,
+                data: cleanAudioBase64,
+              },
+            },
+            {
+              text: `Transcribe this short salon chair lock voice command verbatim (e.g., "Aslam 30 minutes" or "Hamza 7 to 8 PM"). ${hint} Return ONLY the concise spoken phrase.`,
+            },
+          ],
+        },
+      }),
+      15000,
+      'Chair lock audio'
+    );
+    return { transcript: (response.text ?? '').trim() };
+  } catch (err) {
+    return { transcript: '', error: formatGeminiError(err) };
+  }
+}
+
 export async function translateAndSynthesizeVoice(
   req: VoiceTranslationRequest
 ): Promise<VoiceTranslationResult> {
@@ -293,9 +346,9 @@ export async function translateAndSynthesizeVoice(
       targetLocale,
       targetDialect,
       translatedText: '',
-      voiceName: `Gemini ${LOCALE_TO_GEMINI_VOICE[targetLocale]} (${targetLocale})`,
+      voiceName: LOCALE_TO_EDGE_VOICE[targetLocale],
       audioBase64: null,
-      audioMimeType: 'audio/wav',
+      audioMimeType: 'audio/mpeg',
       translationSource: 'error',
       translationError:
         'GEMINI_API_KEY is not set on the server. Add GEMINI_API_KEY in Settings > Secrets so live Arabic/Urdu/English voice transcription and translation can run.',
@@ -311,9 +364,9 @@ export async function translateAndSynthesizeVoice(
       targetLocale,
       targetDialect,
       translatedText: '',
-      voiceName: `Gemini ${LOCALE_TO_GEMINI_VOICE[targetLocale]} (${targetLocale})`,
+      voiceName: LOCALE_TO_EDGE_VOICE[targetLocale],
       audioBase64: null,
-      audioMimeType: 'audio/wav',
+      audioMimeType: 'audio/mpeg',
       translationSource: 'error',
       translationError: 'No voice recording or text message provided.',
       ttsSource: 'unavailable',
@@ -321,58 +374,23 @@ export async function translateAndSynthesizeVoice(
   }
 
   const ai = createGeminiClient(apiKey);
-  let verbatimTranscript = cleanText;
-  let lastErrorMsg = '';
-
-  // Step 1: Dedicated verbatim speech transcription via gemini-3.5-transcribe when audio is attached
-  if (cleanAudioBase64) {
-    try {
-      const transcribeResponse = await withTimeout(
-        ai.models.generateContent({
-          model: 'gemini-3.5-transcribe',
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: cleanAudioMime,
-                  data: cleanAudioBase64,
-                },
-              },
-              {
-                text: 'Transcribe this spoken voice note verbatim in its exact original spoken language (for example Arabic, Urdu, Punjabi, or English). Preserve exact words, names, and numbers. Return only the verbatim transcript without commentary.',
-              },
-            ],
-          },
-        }),
-        10000,
-        'Audio transcription'
-      );
-      const sttText = (transcribeResponse.text ?? '').trim();
-      if (sttText) {
-        verbatimTranscript = cleanText ? `${sttText}\n${cleanText}` : sttText;
-      }
-    } catch (sttErr) {
-      lastErrorMsg = formatGeminiError(sttErr);
-      console.warn('gemini-3.5-transcribe notice:', lastErrorMsg);
-    }
-  }
-
-  // Step 2: Exact translation into targetLocale via gemini-4-hydrogen (or multimodal fallback if STT returned empty)
-  let finalTranscript = verbatimTranscript;
+  let finalTranscript = cleanText;
   let finalTranslated = '';
   let detectedInputLanguage = finalTranscript ? detectTextLanguageLabel(finalTranscript) : 'Audio';
   let translationSucceeded = false;
+  let lastErrorMsg = '';
 
-  const translationModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+  // Single-pass multimodal transcription + translation (1 Gemini call instead of 3 -> 3x lower quota burn & much faster)
+  const translationModels = ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
   for (const modelName of translationModels) {
     try {
-      const useMultimodalAudio = Boolean(cleanAudioBase64 && !verbatimTranscript);
-      const prompt = useMultimodalAudio
-        ? `Listen carefully to the attached voice recording.
-1. Transcribe the exact spoken message verbatim in its original spoken language.
+      const hasAudio = Boolean(cleanAudioBase64);
+      const prompt = hasAudio
+        ? `Listen carefully to the attached voice recording${cleanText ? ` (with additional note: "${cleanText}")` : ''}.
+1. Transcribe the exact spoken message verbatim in its original spoken language (Arabic, Urdu, Punjabi, or English). Preserve names, times, and numbers.
 2. Detect the spoken input language accurately (e.g., Arabic, Urdu, English, Punjabi).
 3. Translate the exact meaning and wording faithfully into: ${localeInstruction}
-Do NOT replace the message with generic greetings or shorten away specific details.`
+Do NOT replace the message with generic greetings or omit any details.`
         : `You are translating a salon communication message verbatim.
 1. Return the exact original message as "transcript".
 2. Detect the input language accurately (e.g., Arabic, Urdu, English, Roman Urdu, Punjabi).
@@ -381,7 +399,7 @@ Do NOT add unrelated boilerplate or omit any numbers, times, or instructions.
 
 Original message: "${finalTranscript}"`;
 
-      const contents = useMultimodalAudio
+      const contents = hasAudio
         ? {
             parts: [
               {
@@ -424,7 +442,7 @@ Original message: "${finalTranscript}"`;
             },
           },
         }),
-        10000,
+        20000,
         'Voice translation'
       );
 
@@ -435,7 +453,7 @@ Original message: "${finalTranscript}"`;
       };
 
       if (parsed.translatedText && parsed.translatedText.trim()) {
-        finalTranscript = parsed.transcript?.trim() || finalTranscript;
+        finalTranscript = parsed.transcript?.trim() || finalTranscript || '(Recorded Voice Note)';
         finalTranslated = parsed.translatedText.trim();
         detectedInputLanguage = parsed.detectedSourceLanguage?.trim() || detectedInputLanguage;
         translationSucceeded = true;
@@ -445,6 +463,10 @@ Original message: "${finalTranscript}"`;
       const msg = err instanceof Error ? err.message : String(err);
       lastErrorMsg = formatGeminiError(err);
       console.warn(`Gemini voice translation (${modelName}) notice:`, msg);
+      // Do NOT retry on quota/429 or auth errors (avoids double-burning quota)
+      if (/RESOURCE_EXHAUSTED|429|quota|API_KEY_INVALID|PERMISSION_DENIED|401|403/i.test(msg)) {
+        break;
+      }
       if (!/not found|404|unsupported|invalid argument|503|unavailable|high demand|overloaded|timed out/i.test(msg)) {
         break;
       }
@@ -458,9 +480,9 @@ Original message: "${finalTranscript}"`;
       targetLocale,
       targetDialect,
       translatedText: '',
-      voiceName: `Gemini ${LOCALE_TO_GEMINI_VOICE[targetLocale]} (${targetLocale})`,
+      voiceName: LOCALE_TO_EDGE_VOICE[targetLocale],
       audioBase64: null,
-      audioMimeType: 'audio/wav',
+      audioMimeType: 'audio/mpeg',
       translationSource: 'error',
       translationError:
         lastErrorMsg || 'Could not transcribe or translate the voice recording. Please try speaking clearly or check your connection.',
@@ -468,23 +490,7 @@ Original message: "${finalTranscript}"`;
     };
   }
 
-  // Step 3: Neural Speech Synthesis — primary gemini-3.8-flash-lite-tts (WAV over HTTPS), secondary msedge-tts (MP3)
-  const geminiTts = await synthesizeGeminiTts(ai, finalTranslated, targetLocale);
-  if (geminiTts.audioBase64) {
-    return {
-      transcript: finalTranscript,
-      detectedInputLanguage,
-      targetLocale,
-      targetDialect,
-      translatedText: finalTranslated,
-      voiceName: geminiTts.voiceName,
-      audioBase64: geminiTts.audioBase64,
-      audioMimeType: 'audio/wav',
-      translationSource: cleanAudioBase64 ? 'gemini-audio' : 'gemini-text',
-      ttsSource: 'gemini-tts',
-    };
-  }
-
+  // Neural Human Speech Synthesis — primary msedge-tts (MP3, zero Gemini quota), secondary gemini-tts
   const edgeTts = await synthesizeEdgeTtsInMemory(finalTranslated, targetLocale);
   if (edgeTts.audioBase64) {
     return {
@@ -501,17 +507,33 @@ Original message: "${finalTranscript}"`;
     };
   }
 
+  const geminiTts = await synthesizeGeminiTts(ai, finalTranslated, targetLocale);
+  if (geminiTts.audioBase64) {
+    return {
+      transcript: finalTranscript,
+      detectedInputLanguage,
+      targetLocale,
+      targetDialect,
+      translatedText: finalTranslated,
+      voiceName: geminiTts.voiceName,
+      audioBase64: geminiTts.audioBase64,
+      audioMimeType: 'audio/wav',
+      translationSource: cleanAudioBase64 ? 'gemini-audio' : 'gemini-text',
+      ttsSource: 'gemini-tts',
+    };
+  }
+
   return {
     transcript: finalTranscript,
     detectedInputLanguage,
     targetLocale,
     targetDialect,
     translatedText: finalTranslated,
-    voiceName: geminiTts.voiceName,
+    voiceName: edgeTts.voiceName,
     audioBase64: null,
-    audioMimeType: 'audio/wav',
+    audioMimeType: 'audio/mpeg',
     translationSource: cleanAudioBase64 ? 'gemini-audio' : 'gemini-text',
     ttsSource: 'unavailable',
-    ttsError: geminiTts.ttsError || edgeTts.ttsError || 'Neural audio generation unavailable right now; translated text is ready.',
+    ttsError: edgeTts.ttsError || geminiTts.ttsError || 'Neural audio generation unavailable right now; translated text is ready.',
   };
 }
