@@ -118,7 +118,7 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
     ? `Mr. ${agentName || '[Agent Name]'}`
     : `Assalamu Alaikum ${agentName || '[Agent Name]'}`;
 
-  const whatsappMessage = `${greetingHeader}! Welcome to WORKCRAFT Local Field Force. You have been appointed for ${agentCity || '[City]'}, ${resolvedCountryName}. Your Agent ID is ${generatedId}. Open your single-use enrollment link (locks permanently once completed): ${previewEnrollUrl}`;
+  const whatsappMessage = `${greetingHeader}! Welcome to WorkCraft Field Force. You have been appointed for ${agentCity || '[City]'}, ${resolvedCountryName}. Your Agent ID is ${generatedId}. Open your single-use enrollment link (locks permanently once completed): ${previewEnrollUrl}`;
 
   const handleCopyInviteUrl = () => {
     try {
