@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type {
+  BridalBookingRecord,
   ChairLock,
   ClientPreferredLang,
   ConciergeAppointment,
@@ -9,11 +10,16 @@ import type {
   OwnerInterventionAlert,
   RetentionSettings,
   SalonBillingStatus,
+  SalonCategory,
   SalonConciergeStateResponse,
   SalonPackageTier,
   SalonRegionCode,
+  SalonServiceRate,
+  ServicePackagePass,
+  WalkInQueueItem,
   WhatsAppMessageLog,
 } from '../src/types/concierge.js';
+import { kvGetJson, kvSetJson } from './kvBridge.js';
 import {
   clampInteger,
   getSalonsAssignedToAgent,
@@ -32,6 +38,9 @@ interface ConciergeStoreData {
   chairLocks: ChairLock[];
   alerts: OwnerInterventionAlert[];
   logs: WhatsAppMessageLog[];
+  walkInQueue: WalkInQueueItem[];
+  bridalBookings: BridalBookingRecord[];
+  servicePackages: ServicePackagePass[];
 }
 
 const DEFAULT_SALON_BARBERS = ['Master Aslam', 'Tariq Mehmood', 'Ali Raza', 'Bilal Tariq'];
@@ -169,16 +178,50 @@ function getLocalClockForOffset(offsetHours: number, nowDate = new Date()) {
   };
 }
 
+export function getDefaultServicesForCategory(
+  category: SalonCategory,
+  currency: string
+): SalonServiceRate[] {
+  const isPkr = currency === 'PKR';
+  if (category === 'LADIES') {
+    return [
+      { id: 'l1', name: 'Signature Party Makeup & Styling', durationMins: 60, price: isPkr ? 4500 : 280, active: true },
+      { id: 'l2', name: 'Barat / Walima Bridal Package', durationMins: 150, price: isPkr ? 35000 : 1800, active: true },
+      { id: 'l3', name: 'Hydra-Facial & Skin Polish', durationMins: 50, price: isPkr ? 3500 : 220, active: true },
+      { id: 'l4', name: 'Keratin Hair Rebonding / Smoothing', durationMins: 120, price: isPkr ? 12000 : 650, active: true },
+      { id: 'l5', name: 'Mani-Pedi Classic Spa', durationMins: 45, price: isPkr ? 2000 : 140, active: true },
+    ];
+  }
+  return [
+    { id: 's1', name: 'Master Haircut & Skin Fade', durationMins: 40, price: isPkr ? 800 : 65, active: true },
+    { id: 's2', name: 'Classic Beard Trim & Sculpt', durationMins: 25, price: isPkr ? 400 : 35, active: true },
+    { id: 's3', name: 'Hot Towel Steam Shave', durationMins: 25, price: isPkr ? 500 : 40, active: true },
+    { id: 's4', name: 'Charcoal Deep Detox Facial', durationMins: 45, price: isPkr ? 2500 : 150, active: true },
+    { id: 's5', name: 'Groom Signature Package', durationMins: 120, price: isPkr ? 12000 : 550, active: true },
+  ];
+}
+
+function inferSalonCategory(salonName: string, salonId?: string, explicit?: SalonCategory): SalonCategory {
+  if (explicit === 'LADIES' || explicit === 'MENS') return explicit;
+  if (salonId === '5') return 'LADIES';
+  const low = (salonName || '').toLowerCase();
+  if (/parlor|parlour|ladies|beauty|bride|bridal|women/.test(low)) return 'LADIES';
+  return 'MENS';
+}
+
 function defaultSettingsForSalon(
   salonId: string,
   salonName: string,
   ownerName: string,
   phone: string,
   packageTier: SalonPackageTier = 'PRO++',
-  billingStatus: SalonBillingStatus = 'ACTIVE'
+  billingStatus: SalonBillingStatus = 'ACTIVE',
+  salonCategory?: SalonCategory,
+  enabledServices?: SalonServiceRate[]
 ): RetentionSettings {
   const regionMeta = detectRegionFromPhone(phone);
   const isPk = regionMeta.region === 'PK';
+  const resolvedCategory = inferSalonCategory(salonName, salonId, salonCategory);
   return {
     salonId,
     salonName,
@@ -188,19 +231,25 @@ function defaultSettingsForSalon(
     timezoneOffsetHours: regionMeta.timezoneOffsetHours,
     currency: regionMeta.currency,
     currencySymbol: regionMeta.currencySymbol,
+    salonCategory: resolvedCategory,
+    enabledServices:
+      Array.isArray(enabledServices) && enabledServices.length > 0
+        ? enabledServices
+        : getDefaultServicesForCategory(resolvedCategory, regionMeta.currency),
     packageTier,
     billingStatus,
     counterSleptAt: null,
     birthdayEnabled: true,
     birthdayDiscountPct: 20,
     birthdayFixedDiscount: isPk ? 500 : 25,
-    birthdayGiftService: 'Free Organic Hair Mask',
+    birthdayGiftService: resolvedCategory === 'LADIES' ? 'Free Express Hair Mask & Blowdry' : 'Free Organic Hair Mask',
     birthdayMessageTemplate:
       'Happy Birthday {client_name}! Celebrate your special day with {salon_name}. Enjoy {offer_summary} on your next visit today!',
     winbackEnabled: true,
     winbackDays: 30,
     winbackDiscountPct: 15,
-    winbackAddonService: 'Complimentary Express Hair Wash & Styling',
+    winbackAddonService:
+      resolvedCategory === 'LADIES' ? 'Complimentary Threading & Hair Spa Gloss' : 'Complimentary Express Hair Wash & Styling',
     winbackMessageTemplate:
       'Hi {client_name}, we missed you at {salon_name}! It has been {days} days since your last visit. Come back this week for {offer_summary}.',
     reviewBoosterEnabled: packageTier !== 'STARTER',
@@ -352,6 +401,63 @@ function createInitialSeedData(): ConciergeStoreData {
     },
   ];
 
+  const walkInQueue: WalkInQueueItem[] = [
+    {
+      id: 'wq-101',
+      salonId: '1',
+      clientName: 'Hassan Raza',
+      phone: '+92 301 9988776',
+      service: 'Master Haircut & Skin Fade',
+      assignedStaff: 'Master Aslam',
+      etaMinutes: 15,
+      status: 'WAITING',
+      createdAt: new Date(now - 10 * 60000).toISOString(),
+    },
+  ];
+
+  const bridalBookings: BridalBookingRecord[] = [
+    {
+      id: 'br-501',
+      salonId: '5',
+      brideOrEventName: 'Zainab & Family Walima Suite',
+      phone: '+92 332 8899110',
+      packageName: 'Signature Barat / Walima Bridal Package',
+      eventDate: 'Sat · 22 Nov 2026',
+      trialDate: 'Thu · 20 Nov 2026',
+      totalAmount: 35000,
+      advancePaid: 15000,
+      assignedStylist: 'Ayesha',
+      homeService: false,
+      status: 'ADVANCE_LOCKED',
+      createdAt: daysAgoIso(2),
+    },
+  ];
+
+  const servicePackages: ServicePackagePass[] = [
+    {
+      id: 'pkg-101',
+      salonId: '1',
+      clientName: 'Bilal Ahmed',
+      phone: '+92 300 1234567',
+      packageTitle: 'Monthly Hair & Beard VIP Pass (4 Visits)',
+      totalSessions: 4,
+      usedSessions: 1,
+      pricePaid: 3600,
+      updatedAt: daysAgoIso(5),
+    },
+    {
+      id: 'pkg-501',
+      salonId: '5',
+      clientName: 'Hira Mansoor',
+      phone: '+92 321 6677889',
+      packageTitle: '5-Session HydraFacial & Skin Polish Pack',
+      totalSessions: 5,
+      usedSessions: 2,
+      pricePaid: 14000,
+      updatedAt: daysAgoIso(4),
+    },
+  ];
+
   return {
     settingsBySalon,
     barbersBySalon,
@@ -360,33 +466,65 @@ function createInitialSeedData(): ConciergeStoreData {
     chairLocks: [],
     alerts: [],
     logs: [],
+    walkInQueue,
+    bridalBookings,
+    servicePackages,
   };
 }
 
 let cachedStore: ConciergeStoreData | null = null;
+
+function normalizeLoadedConciergeStore(parsed: Partial<ConciergeStoreData>): ConciergeStoreData {
+  const seed = createInitialSeedData();
+  const normalized: ConciergeStoreData = {
+    settingsBySalon: parsed.settingsBySalon || seed.settingsBySalon,
+    barbersBySalon: parsed.barbersBySalon || seed.barbersBySalon,
+    clients: Array.isArray(parsed.clients) ? parsed.clients : seed.clients,
+    appointments: Array.isArray(parsed.appointments) ? parsed.appointments : seed.appointments,
+    chairLocks: Array.isArray(parsed.chairLocks) ? parsed.chairLocks : [],
+    alerts: Array.isArray(parsed.alerts) ? parsed.alerts : [],
+    logs: Array.isArray(parsed.logs) ? parsed.logs : [],
+    walkInQueue: Array.isArray(parsed.walkInQueue) ? parsed.walkInQueue : seed.walkInQueue,
+    bridalBookings: Array.isArray(parsed.bridalBookings) ? parsed.bridalBookings : seed.bridalBookings,
+    servicePackages: Array.isArray(parsed.servicePackages) ? parsed.servicePackages : seed.servicePackages,
+  };
+  const defaultTiers: Record<string, SalonPackageTier> = {
+    '1': 'PRO++',
+    '2': 'STARTER',
+    '3': 'PRO++',
+    '4': 'STARTER',
+    '5': 'PRO',
+  };
+  for (const [sid, tier] of Object.entries(defaultTiers)) {
+    if (normalized.settingsBySalon[sid] && !normalized.settingsBySalon[sid].packageTier) {
+      normalized.settingsBySalon[sid].packageTier = tier;
+    }
+  }
+  for (const s of Object.values(normalized.settingsBySalon)) {
+    if (!s.salonCategory) {
+      s.salonCategory = inferSalonCategory(s.salonName, s.salonId);
+    }
+    if (!Array.isArray(s.enabledServices) || s.enabledServices.length === 0) {
+      s.enabledServices = getDefaultServicesForCategory(s.salonCategory, s.currency);
+    }
+  }
+  return normalized;
+}
+
+export async function hydrateConciergeStoreFromKv(): Promise<void> {
+  const remote = await kvGetJson<Partial<ConciergeStoreData>>('wc:concierge:v1');
+  if (!remote || !remote.settingsBySalon || !Array.isArray(remote.clients)) return;
+  cachedStore = normalizeLoadedConciergeStore(remote);
+}
 
 function ensureStoreLoaded(): ConciergeStoreData {
   if (cachedStore) return cachedStore;
   try {
     if (fs.existsSync(STORE_FILE)) {
       const raw = fs.readFileSync(STORE_FILE, 'utf-8');
-      const parsed = JSON.parse(raw) as ConciergeStoreData;
+      const parsed = JSON.parse(raw) as Partial<ConciergeStoreData>;
       if (parsed && parsed.settingsBySalon && Array.isArray(parsed.clients)) {
-        if (!parsed.chairLocks) parsed.chairLocks = [];
-        if (!parsed.barbersBySalon) parsed.barbersBySalon = {};
-        const defaultTiers: Record<string, SalonPackageTier> = {
-          '1': 'PRO++',
-          '2': 'STARTER',
-          '3': 'PRO++',
-          '4': 'STARTER',
-          '5': 'PRO',
-        };
-        for (const [sid, tier] of Object.entries(defaultTiers)) {
-          if (parsed.settingsBySalon[sid] && !parsed.settingsBySalon[sid].packageTier) {
-            parsed.settingsBySalon[sid].packageTier = tier;
-          }
-        }
-        cachedStore = parsed;
+        cachedStore = normalizeLoadedConciergeStore(parsed);
         return cachedStore;
       }
     }
@@ -408,6 +546,7 @@ function persistStore() {
   } catch (err) {
     console.warn('Could not persist concierge store:', err);
   }
+  void kvSetJson('wc:concierge:v1', cachedStore);
 }
 
 function ensureSalonExists(
@@ -418,6 +557,8 @@ function ensureSalonExists(
     whatsappPhone?: string;
     billingStatus?: SalonBillingStatus;
     packageTier?: SalonPackageTier;
+    salonCategory?: SalonCategory;
+    enabledServices?: SalonServiceRate[];
   }
 ): RetentionSettings {
   const store = ensureStoreLoaded();
@@ -428,7 +569,9 @@ function ensureSalonExists(
       meta?.ownerName || 'Salon Owner',
       meta?.whatsappPhone || '+92 300 0000000',
       meta?.packageTier || 'PRO++',
-      meta?.billingStatus || 'ACTIVE'
+      meta?.billingStatus || 'ACTIVE',
+      meta?.salonCategory,
+      meta?.enabledServices
     );
     persistStore();
   } else if (meta) {
@@ -440,6 +583,14 @@ function ensureSalonExists(
     }
     if (meta.ownerName && existing.ownerName !== meta.ownerName) {
       existing.ownerName = meta.ownerName;
+      changed = true;
+    }
+    if (meta.salonCategory && existing.salonCategory !== meta.salonCategory) {
+      existing.salonCategory = meta.salonCategory;
+      changed = true;
+    }
+    if (Array.isArray(meta.enabledServices) && meta.enabledServices.length > 0) {
+      existing.enabledServices = meta.enabledServices;
       changed = true;
     }
     if (meta.whatsappPhone && existing.whatsappPhone !== meta.whatsappPhone) {
@@ -777,12 +928,20 @@ export function getSalonConciergeState(
     whatsappPhone?: string;
     billingStatus?: SalonBillingStatus;
     packageTier?: SalonPackageTier;
+    salonCategory?: SalonCategory;
+    enabledServices?: SalonServiceRate[];
   }
 ): SalonConciergeStateResponse {
   const store = ensureStoreLoaded();
   const settings = ensureSalonExists(salonId, meta);
   if (!settings.billingStatus) {
     settings.billingStatus = 'ACTIVE';
+  }
+  if (!settings.salonCategory) {
+    settings.salonCategory = inferSalonCategory(settings.salonName, salonId);
+  }
+  if (!Array.isArray(settings.enabledServices) || settings.enabledServices.length === 0) {
+    settings.enabledServices = getDefaultServicesForCategory(settings.salonCategory, settings.currency);
   }
   runAutoCompleteAppointmentsCron(salonId);
   const regionMeta = detectRegionFromPhone(settings.whatsappPhone);
@@ -801,6 +960,9 @@ export function getSalonConciergeState(
     barbers: getSalonBarbers(salonId),
     alerts: store.alerts.filter((al) => al.salonId === salonId),
     logs: store.logs.filter((l) => l.salonId === salonId).slice(0, 50),
+    walkInQueue: (store.walkInQueue || []).filter((w) => w.salonId === salonId),
+    bridalBookings: (store.bridalBookings || []).filter((b) => b.salonId === salonId),
+    servicePackages: (store.servicePackages || []).filter((p) => p.salonId === salonId),
   };
 }
 
@@ -810,10 +972,27 @@ export function updateRetentionSettings(
 ): SalonConciergeStateResponse {
   const store = ensureStoreLoaded();
   const current = ensureSalonExists(salonId);
+  const cleanCategory: SalonCategory | undefined =
+    patch.salonCategory === 'LADIES' || patch.salonCategory === 'MENS' ? patch.salonCategory : undefined;
+  const cleanServices: SalonServiceRate[] | undefined = Array.isArray(patch.enabledServices)
+    ? patch.enabledServices
+        .slice(0, 30)
+        .map((svc, idx) => ({
+          id: sanitizePlainText(svc?.id || `svc-${idx + 1}`, 40),
+          name: sanitizePlainText(svc?.name, 80),
+          price: clampInteger(svc?.price, 0, 500000, 1000),
+          durationMins: clampInteger(svc?.durationMins ?? 35, 5, 360, 35),
+          active: svc?.active !== false,
+        }))
+        .filter((s) => Boolean(s.name))
+    : undefined;
+
   const safePatch: Partial<RetentionSettings> = {
     salonName: patch.salonName !== undefined ? sanitizePlainText(patch.salonName, 100) || current.salonName : current.salonName,
     ownerName: patch.ownerName !== undefined ? sanitizePlainText(patch.ownerName, 80) || current.ownerName : current.ownerName,
     whatsappPhone: patch.whatsappPhone !== undefined ? sanitizePhone(patch.whatsappPhone) || current.whatsappPhone : current.whatsappPhone,
+    salonCategory: cleanCategory || current.salonCategory || inferSalonCategory(current.salonName, salonId),
+    enabledServices: cleanServices && cleanServices.length > 0 ? cleanServices : current.enabledServices,
     birthdayEnabled: patch.birthdayEnabled !== undefined ? Boolean(patch.birthdayEnabled) : current.birthdayEnabled,
     birthdayDiscountPct:
       patch.birthdayDiscountPct !== undefined
@@ -873,6 +1052,147 @@ export function updateRetentionSettings(
   }
   store.settingsBySalon[salonId] = updated;
   persistStore();
+  return getSalonConciergeState(salonId);
+}
+
+export function addWalkInQueueItem(
+  salonId: string,
+  input: {
+    clientName: string;
+    phone?: string;
+    service: string;
+    assignedStaff?: string;
+    etaMinutes?: number;
+  }
+): SalonConciergeStateResponse {
+  const store = ensureStoreLoaded();
+  ensureSalonExists(salonId);
+  const barbers = getSalonBarbers(salonId);
+  const item: WalkInQueueItem = {
+    id: `wq-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 4)}`,
+    salonId,
+    clientName: sanitizePlainText(input.clientName, 80) || 'Walk-In Guest',
+    phone: sanitizePhone(input.phone || '') || '',
+    service: sanitizePlainText(input.service, 100) || 'Express Service',
+    assignedStaff: sanitizePlainText(input.assignedStaff, 60) || barbers[0] || 'Next Available',
+    etaMinutes: clampInteger(input.etaMinutes ?? 15, 5, 180, 15),
+    status: 'WAITING',
+    createdAt: new Date().toISOString(),
+  };
+  store.walkInQueue.unshift(item);
+  store.walkInQueue = store.walkInQueue.slice(0, 60);
+  persistStore();
+  return getSalonConciergeState(salonId);
+}
+
+export function updateWalkInQueueStatus(
+  salonId: string,
+  itemId: string,
+  status: 'WAITING' | 'NOTIFIED' | 'SEATED'
+): SalonConciergeStateResponse {
+  const store = ensureStoreLoaded();
+  const target = store.walkInQueue.find((w) => w.salonId === salonId && w.id === itemId);
+  if (target) {
+    target.status = status;
+    persistStore();
+  }
+  return getSalonConciergeState(salonId);
+}
+
+export function upsertBridalBooking(
+  salonId: string,
+  input: {
+    brideOrEventName: string;
+    phone: string;
+    packageName: string;
+    eventDate: string;
+    trialDate?: string;
+    totalAmount: number;
+    advancePaid: number;
+    assignedStylist?: string;
+    homeService?: boolean;
+  }
+): SalonConciergeStateResponse {
+  const store = ensureStoreLoaded();
+  ensureSalonExists(salonId);
+  const totalAmount = clampInteger(input.totalAmount, 0, 2000000, 25000);
+  const advancePaid = clampInteger(input.advancePaid, 0, totalAmount, 0);
+  const barbers = getSalonBarbers(salonId);
+  const record: BridalBookingRecord = {
+    id: `br-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 4)}`,
+    salonId,
+    brideOrEventName: sanitizePlainText(input.brideOrEventName, 100) || 'Bridal Event',
+    phone: sanitizePhone(input.phone || '') || '+92 300 0000000',
+    packageName: sanitizePlainText(input.packageName, 100) || 'Bridal Makeup & Styling',
+    eventDate: sanitizePlainText(input.eventDate, 40) || 'Upcoming Event',
+    trialDate: input.trialDate ? sanitizePlainText(input.trialDate, 40) : undefined,
+    totalAmount,
+    advancePaid,
+    assignedStylist: sanitizePlainText(input.assignedStylist, 60) || barbers[0] || 'Lead Stylist',
+    homeService: Boolean(input.homeService),
+    status: advancePaid >= totalAmount ? 'SETTLED' : 'ADVANCE_LOCKED',
+    createdAt: new Date().toISOString(),
+  };
+  store.bridalBookings.unshift(record);
+  store.bridalBookings = store.bridalBookings.slice(0, 60);
+  persistStore();
+  return getSalonConciergeState(salonId);
+}
+
+export function settleBridalBookingBalance(
+  salonId: string,
+  bookingId: string
+): SalonConciergeStateResponse {
+  const store = ensureStoreLoaded();
+  const target = store.bridalBookings.find((b) => b.salonId === salonId && b.id === bookingId);
+  if (target) {
+    target.advancePaid = target.totalAmount;
+    target.status = 'SETTLED';
+    persistStore();
+  }
+  return getSalonConciergeState(salonId);
+}
+
+export function upsertServicePackage(
+  salonId: string,
+  input: {
+    clientName: string;
+    phone?: string;
+    packageTitle: string;
+    totalSessions: number;
+    pricePaid: number;
+  }
+): SalonConciergeStateResponse {
+  const store = ensureStoreLoaded();
+  ensureSalonExists(salonId);
+  const pass: ServicePackagePass = {
+    id: `pkg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 4)}`,
+    salonId,
+    clientName: sanitizePlainText(input.clientName, 80) || 'VIP Member',
+    phone: sanitizePhone(input.phone || '') || '',
+    packageTitle: sanitizePlainText(input.packageTitle, 100) || 'Multi-Session Package',
+    totalSessions: clampInteger(input.totalSessions, 2, 30, 5),
+    usedSessions: 0,
+    pricePaid: clampInteger(input.pricePaid, 0, 1000000, 5000),
+    updatedAt: new Date().toISOString(),
+  };
+  store.servicePackages.unshift(pass);
+  store.servicePackages = store.servicePackages.slice(0, 80);
+  persistStore();
+  return getSalonConciergeState(salonId);
+}
+
+export function consumeServicePackageSession(
+  salonId: string,
+  pkgId: string
+): SalonConciergeStateResponse {
+  const store = ensureStoreLoaded();
+  const target = store.servicePackages.find((p) => p.salonId === salonId && p.id === pkgId);
+  if (target && target.usedSessions < target.totalSessions) {
+    target.usedSessions += 1;
+    target.updatedAt = new Date().toISOString();
+    persistStore();
+  }
   return getSalonConciergeState(salonId);
 }
 
@@ -1089,17 +1409,30 @@ export function processWhatsAppWebhook(payload: {
         ))
   );
 
+  const isPendingRescheduleReply = Boolean(
+    client.pendingReschedule &&
+      client.pendingReschedule.alternatives.some((alt) => alt.index === raw)
+  );
+
   const isGreeting = /^(hi|hello|hey|salam|assalam|assalamu|marhaba|السلام|مرحبا)\b/i.test(lower);
   const starMatch = raw.match(/^([1-5])(\s*(stars?|★|\*)?.*)?$/i);
   const reviewApptId = payload.appointmentIdForReview || client.awaitingReviewAppointmentId;
   const isStarFeedback = Boolean(
     !isPendingRerouteReply &&
+      !isPendingRescheduleReply &&
       starMatch &&
       (reviewApptId || lower.includes('star') || (raw.length <= 2 && !client.awaitingLanguageSelection))
   );
   const isWinbackRebook =
     !isPendingRerouteReply &&
+    !isPendingRescheduleReply &&
     (lower.includes('rebook') || (client.awaitingWinbackRebook && raw === '1'));
+  const isPriceListQuery =
+    !isPendingRerouteReply &&
+    !isPendingRescheduleReply &&
+    !client.awaitingLanguageSelection &&
+    (/\b(price|prices|rate|rates|menu|charges|fee|list|kitne|qeemat)\b|قیمت|ریٹ|اسعار|أسعار|قائمة/i.test(lower) ||
+      (raw === '2' && !isStarFeedback));
   const isLateReply =
     /\b(late|delay|minutes?\s*late|min\s*late|der\s*ho|تأخير|متأخر)\b/i.test(lower);
   const isRescheduleReply =
@@ -1117,8 +1450,10 @@ export function processWhatsAppWebhook(payload: {
 
   const hasStructuredAction =
     isPendingRerouteReply ||
+    isPendingRescheduleReply ||
     isStarFeedback ||
     isWinbackRebook ||
+    isPriceListQuery ||
     isLateReply ||
     isRescheduleReply ||
     isBookingOrConfirm;
@@ -1133,6 +1468,8 @@ export function processWhatsAppWebhook(payload: {
 
   const isStep5Action =
     isPendingRerouteReply ||
+    isPendingRescheduleReply ||
+    isPriceListQuery ||
     (!isStarFeedback &&
       !isWinbackRebook &&
       (isLateReply || isRescheduleReply || isBookingOrConfirm));
@@ -1322,6 +1659,71 @@ export function processWhatsAppWebhook(payload: {
     }
   }
 
+  // 3B. Localized Price List / Rate Menu Auto-Reply (Includes Ladies Female-Only Privacy Notice)
+  if (isPriceListQuery) {
+    const activeServices = (
+      Array.isArray(settings.enabledServices) && settings.enabledServices.length > 0
+        ? settings.enabledServices
+        : getDefaultServicesForCategory(settings.salonCategory || 'MENS', settings.currency)
+    )
+      .filter((s) => s.active !== false)
+      .slice(0, 6);
+
+    const lines = activeServices
+      .map(
+        (s, idx) =>
+          `${idx + 1}. ${s.name} — ${settings.currencySymbol}${Number(s.price).toLocaleString()}`
+      )
+      .join('\n');
+
+    const isLadiesSalon = settings.salonCategory === 'LADIES';
+    const privacyNoteMap: Record<ClientPreferredLang, string> = isLadiesSalon
+      ? {
+          en: '\nFemale-Only Private Cabins & Ladies Staff Assured.',
+          roman_ur: '\nLadies-Only Private Cabins aur Female Staff 100% maujood hai.',
+          ur: '\nخواتین کے لیے علیحدہ پرائیویٹ کیبن اور فی میل اسٹاف کی مکمل سہولت موجود ہے۔',
+          ar: '\nخصوصية تامة: كابينات خاصة للسيدات وطاقم نسائي بالكامل.',
+        }
+      : { en: '', roman_ur: '', ur: '', ar: '' };
+
+    const menuReplyMap: Record<ClientPreferredLang, string> = {
+      en: `${settings.salonName} Rate Menu:\n${lines}${privacyNoteMap.en}\nReply with your service & time to book!`,
+      roman_ur: `${settings.salonName} Ki Rate List:\n${lines}${privacyNoteMap.roman_ur}\nBook karne ke liye service aur waqt reply karein!`,
+      ur: `${settings.salonName} کی ریٹ لسٹ:\n${lines}${privacyNoteMap.ur}\nاپائنٹمنٹ بک کرنے کے لیے سروس اور وقت لکھ کر بھیجیں!`,
+      ar: `قائمة أسعار ${settings.salonName}:\n${lines}${privacyNoteMap.ar}\nأرسل الخدمة والوقت لحجز موعدك فوراً!`,
+    };
+
+    appendLog(payload.salonId, {
+      direction: 'INBOUND',
+      module: 'BOOKING',
+      clientName: client.name,
+      clientPhone: client.phone,
+      language: activeLang,
+      dir: activeDir,
+      body: raw,
+      eventMetadata: { eventType: 'PRICE_MENU_SENT' },
+    });
+
+    const replyText = menuReplyMap[activeLang];
+    appendLog(payload.salonId, {
+      direction: 'OUTBOUND',
+      module: 'BOOKING',
+      clientName: client.name,
+      clientPhone: client.phone,
+      language: activeLang,
+      dir: activeDir,
+      body: replyText,
+    });
+    persistStore();
+    return {
+      replyText,
+      replyDir: activeDir,
+      lockedLanguage: activeLang,
+      routedAction: 'PRICE_MENU_SENT',
+      state: getSalonConciergeState(payload.salonId),
+    };
+  }
+
   // 4. 1-Tap Rebooking from 30-Day Dormant Win-Back (Module 3)
   if (lower.includes('rebook') || (client.awaitingWinbackRebook && raw === '1')) {
     client.awaitingWinbackRebook = false;
@@ -1458,6 +1860,86 @@ export function processWhatsAppWebhook(payload: {
     }
   }
 
+  // 4C. Resolve pending 1-Tap Auto-Reschedule Slot Pick (1 / 2 / 3)
+  if (isPendingRescheduleReply && client.pendingReschedule) {
+    const pending = client.pendingReschedule;
+    const picked =
+      pending.alternatives.find((alt) => alt.index === raw) || pending.alternatives[0];
+    client.pendingReschedule = null;
+
+    if (picked) {
+      const startMins = parseTimeSlotToMinutes(picked.timeSlot);
+      const startDate = new Date(Date.now() + 86400000);
+      if (startMins >= 0) {
+        startDate.setHours(Math.floor(startMins / 60), startMins % 60, 0, 0);
+      }
+
+      const rescheduledAppt: ConciergeAppointment = {
+        id: `BK-RS-${Date.now().toString().slice(-4)}`,
+        salonId: payload.salonId,
+        clientId: client.id,
+        clientName: client.name,
+        clientPhone: client.phone,
+        barberName: picked.barberName,
+        service: pending.preferredService,
+        price: settings.currency === 'PKR' ? 1200 : 85,
+        timeSlot: `${picked.timeSlot} (${picked.dateLabel})`,
+        durationMins: 40,
+        scheduledEndMs: startDate.getTime() + 40 * 60000,
+        sourceType: 'WHATSAPP_BOT',
+        status: 'CONFIRMED',
+        scheduledForIso: startDate.toISOString(),
+        completedAt: null,
+        reviewPromptSentAt: null,
+        rating: null,
+        ratingComment: null,
+        reviewRoutedStatus: 'PENDING',
+      };
+      store.appointments.unshift(rescheduledAppt);
+
+      appendLog(payload.salonId, {
+        direction: 'INBOUND',
+        module: 'BOOKING',
+        clientName: client.name,
+        clientPhone: client.phone,
+        language: activeLang,
+        dir: activeDir,
+        body: raw,
+        eventMetadata: {
+          eventType: 'RESCHEDULE_CONFIRMED',
+          barberName: picked.barberName,
+          services: pending.preferredService,
+          timeSlot: `${picked.timeSlot} (${picked.dateLabel})`,
+        },
+      });
+
+      const reschedConfirmMap: Record<ClientPreferredLang, string> = {
+        en: `Rescheduled! ${client.name}, your new slot is locked for ${picked.dateLabel} at ${picked.timeSlot} with ${picked.barberName}.`,
+        roman_ur: `Reschedule confirm ${client.name}! Kal ${picked.timeSlot} par ${picked.barberName} ke sath aap ka slot lock ho gaya hai.`,
+        ur: `ری شیڈول کنفرم ${client.name}! کل ${picked.timeSlot} بجے ${picked.barberName} کے ساتھ آپ کا نیا وقت محفوظ ہو گیا ہے۔`,
+        ar: `تم تأكيد إعادة الجدولة يا ${client.name}! موعدك الجديد ${picked.dateLabel} الساعة ${picked.timeSlot} مع ${picked.barberName}.`,
+      };
+      const replyText = reschedConfirmMap[activeLang];
+      appendLog(payload.salonId, {
+        direction: 'OUTBOUND',
+        module: 'BOOKING',
+        clientName: client.name,
+        clientPhone: client.phone,
+        language: activeLang,
+        dir: activeDir,
+        body: replyText,
+      });
+      persistStore();
+      return {
+        replyText,
+        replyDir: activeDir,
+        lockedLanguage: activeLang,
+        routedAction: 'RESCHEDULE_CONFIRMED',
+        state: getSalonConciergeState(payload.salonId),
+      };
+    }
+  }
+
   // 5. Appointment Confirmations, Busy-Rerouting & Reminder Replies (triggers hands-free loud owner announcements)
   if (isLateReply || isRescheduleReply || isBookingOrConfirm) {
     const salonBarbers = getSalonBarbers(payload.salonId);
@@ -1531,6 +2013,22 @@ export function processWhatsAppWebhook(payload: {
     }
 
     if (isRescheduleReply) {
+      const slotTimes = ['11:30 AM', '02:00 PM', '05:30 PM'];
+      const slotAlternatives = slotTimes.map((timeSlot, idx) => ({
+        index: String(idx + 1),
+        barberName: salonBarbers[idx % salonBarbers.length] || extractedBarber,
+        timeSlot,
+        dateLabel: 'Tomorrow',
+      }));
+      client.pendingReschedule = {
+        requestedAt: new Date().toISOString(),
+        preferredService: extractedServices,
+        alternatives: slotAlternatives,
+      };
+      const slotLines = slotAlternatives
+        .map((alt) => `[${alt.index}. ${alt.dateLabel} ${alt.timeSlot} · ${alt.barberName}]`)
+        .join('\n');
+
       appendLog(payload.salonId, {
         direction: 'INBOUND',
         module: 'BOOKING',
@@ -1546,10 +2044,10 @@ export function processWhatsAppWebhook(payload: {
         },
       });
       const reschedMap: Record<ClientPreferredLang, string> = {
-        en: `Got it ${client.name}. We alerted ${settings.salonName} so your chair can be offered to the waitlist and we will send tomorrow's slots.`,
-        roman_ur: `Ji ${client.name}, hum ne salon ko update kar diya hai aur kal ke available slots aap ko bhej rahe hain.`,
-        ur: `جی ${client.name}، ہم نے سیلون کو آگاہ کر دیا ہے اور کل کے دستیاب اوقات آپ کو بھیج رہے ہیں۔`,
-        ar: `تم استلام طلبك يا ${client.name}. أبلغنا الصالون وسنرسل لك المواعيد المتاحة ليوم غد.`,
+        en: `Got it ${client.name}. Reply 1, 2, or 3 to lock your new tomorrow slot at ${settings.salonName}:\n${slotLines}`,
+        roman_ur: `Ji ${client.name}, hum ne kal ke khali slots tayyar kiye hain — confirm karne ke liye 1, 2, ya 3 reply karein:\n${slotLines}`,
+        ur: `جی ${client.name}، کل کے دستیاب اوقات میں سے بک کرنے کے لیے 1، 2 یا 3 لکھ کر بھیجیں:\n${slotLines}`,
+        ar: `تم يا ${client.name}، اختر موعداً ليوم غد بالرد بـ 1 أو 2 أو 3 لتثبيته فوراً:\n${slotLines}`,
       };
       const replyText = reschedMap[activeLang];
       appendLog(payload.salonId, {
