@@ -148,7 +148,7 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
                   {MONTHLY_REVENUE_SUMMARY.pendingSalonsCount} Salons Due Today (5th of Month)
                 </span>
                 <span className="rounded bg-[#0D1117] px-2 py-0.5 text-[10px] font-bold text-[#D29922] border border-[#9E6A03]">
-                  PKR {MONTHLY_REVENUE_SUMMARY.pendingDueAmount.toLocaleString()} (10% SLA)
+                  PKR {MONTHLY_REVENUE_SUMMARY.pendingDueAmount.toLocaleString()} (Monthly SLA)
                 </span>
               </div>
               <p className="text-xs text-[#F0F6FC]/90 font-sans leading-relaxed">
@@ -171,9 +171,9 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
                 Pending Salons in Maintenance Window
               </p>
               {[
-                { name: 'Seven Cuts Salon', owner: 'Hamza', city: 'Lahore', amount: 'PKR 1,500', tier: 'Starter (10%)', method: 'EasyPaisa SMS Webhook expected' },
-                { name: 'Royal Fade DHA', owner: 'Usman', city: 'Lahore', amount: 'PKR 2,000', tier: 'Growth (10%)', method: 'Direct Bank IBFT receipt pending' },
-                { name: 'Glam Studio F-7', owner: 'Fatima', city: 'Islamabad', amount: 'PKR 2,500', tier: 'VIP (10%)', method: 'Self-serve payment link dispatched' },
+                { name: 'Seven Cuts Salon', owner: 'Hamza', city: 'Lahore', amount: 'PKR 1,750', tier: 'Starter (Monthly SLA)', method: 'EasyPaisa SMS Webhook expected' },
+                { name: 'Royal Fade DHA', owner: 'Usman', city: 'Lahore', amount: 'PKR 2,500', tier: 'Growth (Monthly SLA)', method: 'Direct Bank IBFT receipt pending' },
+                { name: 'Glam Studio F-7', owner: 'Fatima', city: 'Islamabad', amount: 'PKR 3,500', tier: 'VIP (Monthly SLA)', method: 'Self-serve payment link dispatched' },
               ].map((s) => (
                 <div key={s.name} className="rounded-xl border border-[#30363D] bg-[#21262D] p-3 flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -199,7 +199,7 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
             <div className="rounded-xl border border-[#30363D] bg-[#21262D] p-4 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-bold text-cyan-400 uppercase break-all [overflow-wrap:break-word]">
-                  Central SIM Socket Gateway (+92-300-WORKCRAFT-LOCAL)
+                  Central SIM Socket Gateway (+92-300-WORKCRAFT)
                 </span>
                 <span className="rounded bg-[#0D3822] px-2 py-0.5 text-[10px] font-bold text-[#3FB950] border border-[#116329]">
                   100% ONLINE · ZERO SPAM BLOCKS
@@ -298,12 +298,12 @@ export const DetailSheet: React.FC<DetailSheetProps> = ({
                 </div>
 
                 <div className="rounded-xl border border-[#116329] bg-[#0D3822]/60 p-3 space-y-1">
-                  <span className="text-[10px] text-[#8B949E] uppercase block">Paid 10% Maintenance</span>
+                  <span className="text-[10px] text-[#8B949E] uppercase block">Paid Monthly Maintenance</span>
                   <p className="text-lg font-bold text-[#3FB950]">
                     PKR {MONTHLY_REVENUE_SUMMARY.maintenanceCollected.toLocaleString()}
                   </p>
                   <p className="text-[10px] text-[#8B949E] font-sans">
-                    {MONTHLY_REVENUE_SUMMARY.maintenanceSalonsCount} Salons settled current month 10% SLA fee
+                    {MONTHLY_REVENUE_SUMMARY.maintenanceSalonsCount} Salons settled current month SLA fee
                   </p>
                 </div>
               </div>
