@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import type { NextFunction, Request, Response } from 'express';
 import type { AuthRole, AuthUser } from '../src/types/auth.js';
+import { kvGetJson, kvSetJson } from './kvBridge.js';
 
 export const SESSION_COOKIE_NAME = 'wc_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days persistent session
@@ -224,12 +225,12 @@ function loadPersistedDynamicUsers() {
 }
 
 function persistDynamicUsers() {
+  const dynamicUsers = USER_DIRECTORY.filter((u) => u.userId.startsWith('usr-onboard-'));
+  const assignments = Array.from(SALON_AGENT_ASSIGNMENTS.entries());
   try {
     if (!fs.existsSync(AUTH_DATA_DIR)) {
       fs.mkdirSync(AUTH_DATA_DIR, { recursive: true });
     }
-    const dynamicUsers = USER_DIRECTORY.filter((u) => u.userId.startsWith('usr-onboard-'));
-    const assignments = Array.from(SALON_AGENT_ASSIGNMENTS.entries());
     fs.writeFileSync(
       AUTH_USERS_FILE,
       JSON.stringify({ users: dynamicUsers, assignments }, null, 2),
@@ -237,6 +238,29 @@ function persistDynamicUsers() {
     );
   } catch (err) {
     console.warn('Could not persist dynamic auth users:', err);
+  }
+  void kvSetJson('wc:auth:v1', { users: dynamicUsers, assignments });
+}
+
+export async function hydrateSecurityStoreFromKv(): Promise<void> {
+  const parsed = await kvGetJson<{
+    users?: StoredUserRecord[];
+    assignments?: Array<[string, string]>;
+  }>('wc:auth:v1');
+  if (!parsed) return;
+  if (Array.isArray(parsed.users)) {
+    for (const u of parsed.users) {
+      if (u?.userId && !USER_DIRECTORY.some((e) => e.userId === u.userId)) {
+        USER_DIRECTORY.push(u);
+      }
+    }
+  }
+  if (Array.isArray(parsed.assignments)) {
+    for (const [salonId, agentId] of parsed.assignments) {
+      if (salonId && agentId) {
+        SALON_AGENT_ASSIGNMENTS.set(salonId, agentId);
+      }
+    }
   }
 }
 
