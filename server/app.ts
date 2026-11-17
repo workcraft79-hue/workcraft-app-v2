@@ -79,6 +79,7 @@ import {
   revokeAllFounderBiometrics,
   rotateFounderPairingKey,
   updateFounderReportPhone,
+  verifyAuthoritativeWorkcraftPayment,
   verifyFounderBiometricAssertion,
 } from './opsStore.js';
 import { isKvConfigured } from './kvBridge.js';
@@ -374,7 +375,7 @@ export function createApiApp(port = 3000): express.Express {
       challenge,
       challengeToken,
       rpId: hostHeader,
-      rpName: 'WORKCRAFT Local',
+      rpName: 'WorkCraft',
     });
   });
 
@@ -1428,6 +1429,57 @@ export function createApiApp(port = 3000): express.Express {
     }
   );
 
+  // Authoritative 4-Layer Onboarding Payment Verification (Founder / Agent / Self-Serve Salon)
+  app.post('/api/onboarding/verify-payment', (req, res) => {
+    try {
+      const body = req.body || {};
+      const packageId = sanitizePlainText(body.packageId, 24) || 'STARTER';
+      const currency = sanitizePlainText(body.currency, 8) || 'PKR';
+      const amount = Number(body.amount || 0);
+      const method = sanitizePlainText(body.method, 80) || 'EasyPaisa';
+      const tid = sanitizePlainText(body.tid, 80);
+      const salonName = sanitizePlainText(body.salonName, 100) || 'New Partner Salon';
+
+      const verification = verifyAuthoritativeWorkcraftPayment({
+        kind: 'SETUP',
+        tier: packageId,
+        currency,
+        submittedAmount: amount,
+        method,
+        tid,
+      });
+
+      if (!verification.ok) {
+        return res.status(400).json({ verified: false, error: verification.error });
+      }
+
+      const entry = recordSalonFinancialPayment({
+        type: 'ONBOARDING_SETUP',
+        salonId: 'onboarding',
+        salonName,
+        amount: verification.verifiedAmount,
+        currency: verification.currency,
+        method,
+        referenceTid: verification.normalizedTid,
+        note: `Verified setup settlement (${packageId}) ➔ ${verification.officialDestination}`,
+      });
+
+      return res.status(201).json({
+        verified: true,
+        status: 'paid',
+        tid: verification.normalizedTid,
+        amount: verification.verifiedAmount,
+        currency: verification.currency,
+        officialDestination: verification.officialDestination,
+        sha256Proof: verification.sha256Proof,
+        entry,
+      });
+    } catch (err) {
+      console.error('Onboarding payment verify route error:', err);
+      return res.status(500).json({ verified: false, error: 'Failed to verify onboarding payment.' });
+    }
+  });
+
   // Persistent Salon Owner Maintenance Settlement & Zero-Loss Package Upgrade
   app.post(
     '/api/salons/:salonId/payments/maintenance',
@@ -1440,20 +1492,40 @@ export function createApiApp(port = 3000): express.Express {
         const amount = Number(body.amount || 0);
         const currency = sanitizePlainText(body.currency, 8) || 'PKR';
         const method = sanitizePlainText(body.method, 80) || 'EasyPaisa Webhook';
-        const referenceTid = sanitizePlainText(body.tid, 80) || `EP-${Date.now()}`;
+        const referenceTid = sanitizePlainText(body.tid, 80);
+        const packageId = typeof body.packageId === 'string' ? sanitizePlainText(body.packageId, 24) : undefined;
+
+        const verification = verifyAuthoritativeWorkcraftPayment({
+          kind: 'MAINTENANCE',
+          tier: packageId,
+          currency,
+          submittedAmount: amount,
+          method,
+          tid: referenceTid,
+          salonId,
+        });
+        if (!verification.ok) {
+          return res.status(400).json({ error: verification.error });
+        }
+
         const current = getSalonConciergeState(salonId);
         const entry = recordSalonFinancialPayment({
           type: 'MAINT_PAYMENT',
           salonId,
           salonName: sanitizePlainText(body.salonName, 100) || current.settings.salonName,
-          amount,
-          currency,
+          amount: verification.verifiedAmount,
+          currency: verification.currency,
           method,
-          referenceTid,
-          note: `10% maintenance settled (${referenceTid})`,
+          referenceTid: verification.normalizedTid,
+          note: `Monthly maintenance settled (${verification.normalizedTid}) ➔ ${verification.officialDestination}`,
         });
         const state = setSalonBillingStatus(salonId, 'ACTIVE');
-        return res.status(201).json({ entry, state });
+        return res.status(201).json({
+          entry,
+          state,
+          officialDestination: verification.officialDestination,
+          sha256Proof: verification.sha256Proof,
+        });
       } catch (err) {
         console.error('Maintenance payment route error:', err);
         return res.status(500).json({ error: 'Failed to record maintenance payment.' });
@@ -1472,22 +1544,44 @@ export function createApiApp(port = 3000): express.Express {
         const rawTier = sanitizePlainText(body.packageTier, 20).toUpperCase();
         const packageTier: 'STARTER' | 'PRO' | 'PRO++' =
           rawTier === 'STARTER' ? 'STARTER' : rawTier === 'PRO' || rawTier === 'GROWTH' ? 'PRO' : 'PRO++';
+        const targetCatalogTier = sanitizePlainText(body.targetPlanId || rawTier, 24);
+        const previousCatalogTier = typeof body.previousPlanId === 'string' ? sanitizePlainText(body.previousPlanId, 24) : undefined;
         const differenceAmount = Number(body.differenceAmount || 0);
         const currency = sanitizePlainText(body.currency, 8) || 'PKR';
         const method = sanitizePlainText(body.method, 80) || 'Digital Settlement';
-        const referenceTid = sanitizePlainText(body.tid, 80) || `UP-${Date.now()}`;
+        const referenceTid = sanitizePlainText(body.tid, 80);
+
+        const verification = verifyAuthoritativeWorkcraftPayment({
+          kind: 'UPGRADE',
+          tier: targetCatalogTier,
+          previousTier: previousCatalogTier,
+          currency,
+          submittedAmount: differenceAmount,
+          method,
+          tid: referenceTid,
+          salonId,
+        });
+        if (!verification.ok) {
+          return res.status(400).json({ error: verification.error });
+        }
+
         const updatedSettings = updateRetentionSettings(salonId, { packageTier });
         const entry = recordSalonFinancialPayment({
           type: 'PACKAGE_UPGRADE',
           salonId,
           salonName: sanitizePlainText(body.salonName, 100) || updatedSettings.settings.salonName,
-          amount: differenceAmount,
-          currency,
+          amount: verification.verifiedAmount,
+          currency: verification.currency,
           method,
-          referenceTid,
-          note: `Zero-loss upgrade to ${packageTier} (difference paid: ${currency} ${differenceAmount})`,
+          referenceTid: verification.normalizedTid,
+          note: `Zero-loss upgrade to ${targetCatalogTier} (paid: ${verification.currency} ${verification.verifiedAmount}) ➔ ${verification.officialDestination}`,
         });
-        return res.status(201).json({ entry, state: updatedSettings });
+        return res.status(201).json({
+          entry,
+          state: updatedSettings,
+          officialDestination: verification.officialDestination,
+          sha256Proof: verification.sha256Proof,
+        });
       } catch (err) {
         console.error('Package upgrade route error:', err);
         return res.status(500).json({ error: 'Failed to persist package upgrade.' });
