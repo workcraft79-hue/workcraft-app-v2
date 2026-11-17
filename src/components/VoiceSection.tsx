@@ -24,6 +24,7 @@ interface VoiceSectionProps {
   threads: VoiceThreadItem[];
   onThreadsUpdated: (threads: VoiceThreadItem[]) => void;
   onUsageUpdated?: (usage: LiveUsageMeter) => void;
+  onRefreshInbox?: () => Promise<void>;
   onClose?: () => void;
 }
 
@@ -34,9 +35,9 @@ function getSpeechLangForLocale(locale: SupportedVoiceLocale): string {
 }
 
 function getVoiceNameForLocale(locale: SupportedVoiceLocale): string {
-  if (locale === 'ar-AE') return 'Gemini Charon (ar-AE)';
-  if (locale === 'en-US') return 'Gemini Kore (en-US)';
-  return 'Gemini Charon (ur-PK)';
+  if (locale === 'ar-AE') return 'ar-AE-HamdanNeural';
+  if (locale === 'en-US') return 'en-US-AndrewNeural';
+  return 'ur-PK-AsadNeural';
 }
 
 interface VerifiedVoicePreview {
@@ -53,6 +54,7 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
   threads,
   onThreadsUpdated,
   onUsageUpdated,
+  onRefreshInbox,
   onClose,
 }) => {
   const [selectedThreadId, setSelectedThreadId] = useState<string>(
@@ -65,6 +67,7 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
   const [detectedFounderLang, setDetectedFounderLang] = useState<string>('Auto');
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
   const [isPreviewingVoice, setIsPreviewingVoice] = useState(false);
+  const [isRefreshingInbox, setIsRefreshingInbox] = useState(false);
   const [replySent, setReplySent] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [ttsWarning, setTtsWarning] = useState<string | null>(null);
@@ -811,6 +814,26 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
         kicker={`${unreadCount} UNREAD MESSAGE${unreadCount === 1 ? '' : 'S'}`}
       >
         <div className="space-y-3">
+          {onRefreshInbox && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                disabled={isRefreshingInbox}
+                onClick={async () => {
+                  setIsRefreshingInbox(true);
+                  try {
+                    await onRefreshInbox();
+                  } finally {
+                    setIsRefreshingInbox(false);
+                  }
+                }}
+                className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-3.5 py-1.5 text-xs font-mono font-bold text-[#06B6D4] transition disabled:opacity-60"
+              >
+                <RefreshCw className={`size-3.5 ${isRefreshingInbox ? 'animate-spin' : ''}`} />
+                <span>{isRefreshingInbox ? 'Syncing Inbox...' : 'Refresh Inbox'}</span>
+              </button>
+            </div>
+          )}
           {threads.map((thread) => {
             const isPlaying = playingThreadId === thread.id;
             const isSelected = activeThread.id === thread.id;
