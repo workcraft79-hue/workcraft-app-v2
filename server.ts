@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { createApiApp } from './server/app.js';
@@ -31,16 +32,26 @@ const PORT = resolveServerPort();
 
 async function startServer() {
   const app = createApiApp(PORT);
+  const httpServer = http.createServer(app);
+  let viteInstance: Awaited<ReturnType<typeof createViteServer>> | null = null;
 
   if (process.env.NODE_ENV !== 'production') {
-    let viteInstance: Awaited<ReturnType<typeof createViteServer>> | null = null;
+    const hmrDisabled = process.env.DISABLE_HMR === 'true';
     const viteReady = createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: hmrDisabled ? false : { server: httpServer },
+      },
       appType: 'spa',
-    }).then((v) => {
-      viteInstance = v;
-      return v;
-    });
+    })
+      .then((v) => {
+        viteInstance = v;
+        return v;
+      })
+      .catch((err) => {
+        console.error('Vite middleware initialization failed:', err);
+        throw err;
+      });
 
     app.use(async (req, res, next) => {
       try {
@@ -58,7 +69,30 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.on('error', (err) => {
+    console.error(`HTTP server error on port ${PORT}:`, err);
+    process.exit(1);
+  });
+
+  const shutdown = async () => {
+    try {
+      await viteInstance?.close();
+    } catch {
+      // ignore close errors during shutdown
+    }
+    httpServer.close(() => {
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 1500).unref();
+  };
+  process.once('SIGTERM', () => {
+    void shutdown();
+  });
+  process.once('SIGINT', () => {
+    void shutdown();
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`WORKCRAFT Local server listening on http://0.0.0.0:${PORT}`);
     setImmediate(() => {
       startConciergeSchedulers();
