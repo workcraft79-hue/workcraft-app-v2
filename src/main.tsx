@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { reportClientIncident } from './utils/errorTelemetry';
 
 if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -19,11 +20,45 @@ function RootShell() {
   useEffect(() => {
     const goOffline = () => setIsOffline(true);
     const goOnline = () => setIsOffline(false);
+    const onGlobalError = (event: ErrorEvent) => {
+      const msg = event.message || 'Runtime script error';
+      // Ignore WebSocket / ResizeObserver browser noise
+      if (/ResizeObserver|WebSocket|HMR/i.test(msg)) return;
+      reportClientIncident({
+        area: 'Global Runtime Guard',
+        severity: 'MEDIUM',
+        message: msg,
+        stackHint: `${event.filename || ''}:${event.lineno || 0}`,
+        resolutionStatus: 'FALLBACK_ACTIVE',
+        recoveryMs: 45,
+      });
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason =
+        event.reason instanceof Error
+          ? event.reason.message
+          : typeof event.reason === 'string'
+          ? event.reason
+          : 'Unhandled async promise rejection';
+      if (/AbortError|Failed to fetch/i.test(reason)) return;
+      reportClientIncident({
+        area: 'Async Request Guard',
+        severity: 'MEDIUM',
+        message: reason,
+        resolutionStatus: 'FALLBACK_ACTIVE',
+        recoveryMs: 40,
+      });
+    };
+
     window.addEventListener('offline', goOffline);
     window.addEventListener('online', goOnline);
+    window.addEventListener('error', onGlobalError);
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
     return () => {
       window.removeEventListener('offline', goOffline);
       window.removeEventListener('online', goOnline);
+      window.removeEventListener('error', onGlobalError);
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
     };
   }, []);
 
