@@ -208,7 +208,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
       drawRoundedRect(ctx, 54, 54, canvas.width - 108, canvas.height - 108, 24);
       ctx.stroke();
 
-      // 2. TOP ROW: TOP-LEFT WORKCRAFT LOCAL LOGO + TOP-RIGHT QR CODE & WHATSAPP NUMBER UNDERNEATH
+      // 2. TOP ROW: TOP-LEFT WORKCRAFT LOGO + TOP-RIGHT QR CODE & WHATSAPP NUMBER UNDERNEATH
       const loadDataUrlImage = (src: string): Promise<HTMLImageElement | null> =>
         new Promise((resolve) => {
           const img = new Image();
@@ -381,7 +381,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
       ctx.fillStyle = '#00FFFF';
       ctx.font = 'bold 22px monospace';
       ctx.fillText(
-        `WhatsApp: ${whatsappNumber}  ·  Powered by WorkCraft Local`,
+        `WhatsApp: ${whatsappNumber}  ·  Powered by WorkCraft`,
         canvas.width / 2,
         canvas.height - 96
       );
@@ -620,7 +620,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
               dir="ltr"
               className="text-[11px] font-mono font-bold text-[#00FFFF] pt-1"
             >
-              WhatsApp: {whatsappNumber} · Powered by WorkCraft Local
+              WhatsApp: {whatsappNumber} · Powered by WorkCraft
             </p>
           </div>
         </div>
