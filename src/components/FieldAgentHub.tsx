@@ -2565,11 +2565,217 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const [enrollSelfiePreviewUrl, setEnrollSelfiePreviewUrl] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isAnalyzingSelfie, setIsAnalyzingSelfie] = useState(false);
+  const [selfieOvalStatus, setSelfieOvalStatus] = useState<
+    'checking' | 'aligned' | 'dark' | 'blur' | 'clipped' | 'offcenter' | 'noface'
+  >('checking');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [step2BiometricError, setStep2BiometricError] = useState<string | null>(null);
   const [step4BiometricError, setStep4BiometricError] = useState<string | null>(null);
   const selfieVideoRef = React.useRef<HTMLVideoElement | null>(null);
   const selfieStreamRef = React.useRef<MediaStream | null>(null);
+  const liveProbeCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
+
+  const getSelfieErrorMessage = React.useCallback(
+    (reason: 'dark' | 'blur' | 'clipped' | 'offcenter' | 'noface' | 'checking') => {
+      if (reason === 'dark') {
+        return enrollmentLang === 'ur_roman'
+          ? 'روشنی بہت کم ہے یا کیمرہ ڈھکا ہوا ہے — روشن جگہ پر پورا چہرہ سامنے رکھیں۔'
+          : enrollmentLang === 'ar'
+          ? 'الإضاءة منخفضة جداً أو العدسة مغطاة — قف في إضاءة واضحة.'
+          : 'Lighting too dark or lens covered — move to clear light.';
+      }
+      if (reason === 'blur') {
+        return enrollmentLang === 'ur_roman'
+          ? 'تصویر دھندلی ہے — کیمرہ مستحکم رکھیں تاکہ پورا چہرہ صاف نظر آئے۔'
+          : enrollmentLang === 'ar'
+          ? 'الصورة غير واضحة — ثبت الهاتف ليظهر الوجه بوضوح.'
+          : 'Hold phone steady — face inside oval is blurry.';
+      }
+      if (reason === 'clipped') {
+        return enrollmentLang === 'ur_roman'
+          ? 'آدھا سر یا چہرہ کٹ رہا ہے — کیمرے سے تھوڑا پیچھے ہٹیں تاکہ پورا سر اور چہرہ بیضوی دائرے میں آئے۔'
+          : enrollmentLang === 'ar'
+          ? 'جزء من الرأس أو الوجه مقطوع — ابتعد قليلاً ليظهر الرأس والوجه بالكامل داخل الإطار البيضاوي.'
+          : 'Head or face cropped — step back slightly so full head & face fit inside oval.';
+      }
+      if (reason === 'offcenter') {
+        return enrollmentLang === 'ur_roman'
+          ? 'چہرہ بیچ میں نہیں ہے — اپنا مکمل چہرہ بیضوی دائرے کے بالکل درمیان میں رکھیں۔'
+          : enrollmentLang === 'ar'
+          ? 'الوجه غير متمركز — ضع كامل وجهك في منتصف الإطار البيضاوي.'
+          : 'Face off-center — align both eyes and full face in center of oval.';
+      }
+      if (reason === 'checking') {
+        return enrollmentLang === 'ur_roman'
+          ? 'پورا سر اور چہرہ بیضوی دائرے میں رکھیں...'
+          : enrollmentLang === 'ar'
+          ? 'ضع كامل الرأس والوجه داخل الإطار البيضاوي...'
+          : 'Center full head & face inside oval...';
+      }
+      return enrollmentLang === 'ur_roman'
+        ? 'واضح پورا چہرہ نظر نہیں آ رہا — اپنا مکمل چہرہ بیضوی دائرے کے بیچ میں رکھیں۔'
+        : enrollmentLang === 'ar'
+        ? 'لم يتم رصد وجه كامل واضح — ضع كامل وجهك داخل الإطار البيضاوي.'
+        : 'Full face not detected — position your complete face inside the oval.';
+    },
+    [enrollmentLang]
+  );
+
+  const analyzeOvalSelfieCanvas = React.useCallback(
+    async (
+      canvas: HTMLCanvasElement,
+      ctx: CanvasRenderingContext2D,
+      runNativeFaceDetector: boolean
+    ): Promise<'aligned' | 'dark' | 'blur' | 'clipped' | 'offcenter' | 'noface'> => {
+      const w = canvas.width;
+      const h = canvas.height;
+      const step = Math.max(1, Math.round(w / 180));
+      const frame = ctx.getImageData(0, 0, w, h);
+      const data = frame.data;
+
+      const measureBox = (x0: number, y0: number, x1: number, y1: number) => {
+        const rx0 = Math.max(1, Math.floor(x0 * w));
+        const ry0 = Math.max(1, Math.floor(y0 * h));
+        const rx1 = Math.min(w - step - 1, Math.floor(x1 * w));
+        const ry1 = Math.min(h - step - 1, Math.floor(y1 * h));
+
+        let sum = 0;
+        let sumSq = 0;
+        let edgeSum = 0;
+        let skinHits = 0;
+        let count = 0;
+
+        for (let y = ry0; y < ry1; y += step) {
+          for (let x = rx0; x < rx1; x += step) {
+            const idx = (y * w + x) * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+
+            const idxR = (y * w + (x + step)) * 4;
+            const lumaR = 0.299 * data[idxR] + 0.587 * data[idxR + 1] + 0.114 * data[idxR + 2];
+            const idxD = ((y + step) * w + x) * 4;
+            const lumaD = 0.299 * data[idxD] + 0.587 * data[idxD + 1] + 0.114 * data[idxD + 2];
+
+            edgeSum += Math.abs(luma - lumaR) + Math.abs(luma - lumaD);
+            sum += luma;
+            sumSq += luma * luma;
+
+            const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+            const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+            if (cb >= 72 && cb <= 133 && cr >= 131 && cr <= 183) {
+              skinHits++;
+            }
+            count++;
+          }
+        }
+
+        const mean = count > 0 ? sum / count : 0;
+        const stdDev = count > 0 ? Math.sqrt(Math.max(0, sumSq / count - mean * mean)) : 0;
+        const edgeEnergy = count > 0 ? edgeSum / count : 0;
+        const skinRatio = count > 0 ? skinHits / count : 0;
+        return { mean, stdDev, edgeEnergy, skinRatio };
+      };
+
+      const centerOval = measureBox(0.24, 0.16, 0.76, 0.68);
+      if (centerOval.mean < 30 || centerOval.mean > 244) {
+        return 'dark';
+      }
+      if (centerOval.edgeEnergy < 5.5) {
+        return 'blur';
+      }
+
+      const topLeft = measureBox(0.26, 0.21, 0.49, 0.42);
+      const topRight = measureBox(0.51, 0.21, 0.74, 0.42);
+      const botLeft = measureBox(0.28, 0.43, 0.49, 0.64);
+      const botRight = measureBox(0.51, 0.43, 0.72, 0.64);
+      const upperCrownBand = measureBox(0.35, 0.01, 0.65, 0.08);
+      const lowerChinZone = measureBox(0.35, 0.54, 0.65, 0.68);
+
+      const leftPresence = (topLeft.skinRatio + botLeft.skinRatio) / 2;
+      const rightPresence = (topRight.skinRatio + botRight.skinRatio) / 2;
+      const minQStd = Math.min(topLeft.stdDev, topRight.stdDev, botLeft.stdDev, botRight.stdDev);
+      const minQEdge = Math.min(
+        topLeft.edgeEnergy,
+        topRight.edgeEnergy,
+        botLeft.edgeEnergy,
+        botRight.edgeEnergy
+      );
+
+      type BrowserFaceBox = { boundingBox: { x: number; y: number; width: number; height: number } };
+      type BrowserFaceDetectorCtor = new (opts?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
+        detect: (source: HTMLCanvasElement) => Promise<BrowserFaceBox[]>;
+      };
+      const FaceDetectorApi = runNativeFaceDetector
+        ? (window as unknown as { FaceDetector?: BrowserFaceDetectorCtor }).FaceDetector
+        : undefined;
+
+      let nativeFaceVerified = false;
+      if (typeof FaceDetectorApi === 'function') {
+        try {
+          const detector = new FaceDetectorApi({ fastMode: true, maxDetectedFaces: 2 });
+          const faces = await detector.detect(canvas);
+          if (faces.length === 0) {
+            return 'noface';
+          }
+          const primary = faces.reduce((best, cur) =>
+            cur.boundingBox.width * cur.boundingBox.height >
+            best.boundingBox.width * best.boundingBox.height
+              ? cur
+              : best
+          );
+          const box = primary.boundingBox;
+          const nx = box.x / w;
+          const ny = box.y / h;
+          const nw = box.width / w;
+          const nh = box.height / h;
+          const cx = nx + nw / 2;
+          const cy = ny + nh / 2;
+
+          if (
+            nw < 0.22 ||
+            nh < 0.22 ||
+            nw > 0.70 ||
+            nh > 0.68 ||
+            ny < 0.06 ||
+            ny + nh > 0.84 ||
+            nx < 0.13 ||
+            nx + nw > 0.87
+          ) {
+            return 'clipped';
+          }
+          if (Math.abs(cx - 0.5) > 0.14 || Math.abs(cy - 0.42) > 0.15) {
+            return 'offcenter';
+          }
+          nativeFaceVerified = true;
+        } catch {
+          // Fall back to deterministic cross-browser pixel geometry checks below
+        }
+      }
+
+      if (!nativeFaceVerified) {
+        if (centerOval.skinRatio < 0.16) {
+          return 'noface';
+        }
+        if (
+          Math.min(leftPresence, rightPresence) < 0.09 ||
+          Math.max(leftPresence, rightPresence) / Math.max(0.05, Math.min(leftPresence, rightPresence)) > 3.6
+        ) {
+          return 'offcenter';
+        }
+        if (upperCrownBand.skinRatio > 0.38 && lowerChinZone.skinRatio < 0.10) {
+          return 'clipped';
+        }
+        if (minQStd < 7.5 || minQEdge < 4.2) {
+          return 'clipped';
+        }
+      }
+
+      return 'aligned';
+    },
+    []
+  );
 
   const stopSelfieCamera = React.useCallback(() => {
     if (selfieStreamRef.current) {
@@ -2580,11 +2786,13 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       selfieVideoRef.current.srcObject = null;
     }
     setIsCameraActive(false);
+    setSelfieOvalStatus('checking');
   }, []);
 
   const startSelfieCamera = async () => {
     setCameraError(null);
     setStep2BiometricError(null);
+    setSelfieOvalStatus('checking');
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setCameraError(
         enrollmentLang === 'ur_roman'
@@ -2623,132 +2831,57 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     }
   };
 
+  const drawVideoToPortraitCanvas = (
+    videoEl: HTMLVideoElement,
+    canvas: HTMLCanvasElement,
+    targetW: number,
+    targetH: number
+  ): CanvasRenderingContext2D | null => {
+    const vw = videoEl.videoWidth;
+    const vh = videoEl.videoHeight;
+    if (!vw || !vh) return null;
+    const targetRatio = 3 / 4;
+    const videoRatio = vw / vh;
+    let sx = 0;
+    let sy = 0;
+    let sw = vw;
+    let sh = vh;
+    if (videoRatio > targetRatio) {
+      sw = Math.round(vh * targetRatio);
+      sx = Math.round((vw - sw) / 2);
+    } else if (videoRatio < targetRatio) {
+      sh = Math.round(vw / targetRatio);
+      sy = Math.round((vh - sh) / 2);
+    }
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    return ctx;
+  };
+
   const captureSelfieFrame = async () => {
     const videoEl = selfieVideoRef.current;
     if (!videoEl || videoEl.videoWidth === 0 || isAnalyzingSelfie) return;
     setIsAnalyzingSelfie(true);
     setCameraError(null);
     try {
-      const vw = videoEl.videoWidth;
-      const vh = videoEl.videoHeight;
-      const targetRatio = 3 / 4;
-      const videoRatio = vw / vh;
-      let sx = 0;
-      let sy = 0;
-      let sw = vw;
-      let sh = vh;
-      if (videoRatio > targetRatio) {
-        sw = Math.round(vh * targetRatio);
-        sx = Math.round((vw - sw) / 2);
-      } else if (videoRatio < targetRatio) {
-        sh = Math.round(vw / targetRatio);
-        sy = Math.round((vh - sh) / 2);
-      }
-
       const canvas = document.createElement('canvas');
-      canvas.width = 540;
-      canvas.height = 720;
-      const ctx = canvas.getContext('2d');
+      const ctx = drawVideoToPortraitCanvas(videoEl, canvas, 540, 720);
       if (!ctx) return;
 
-      ctx.save();
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-      ctx.restore();
-
-      const rejectFrame = (reason: 'dark' | 'noface' | 'clipped') => {
+      const verdict = await analyzeOvalSelfieCanvas(canvas, ctx, true);
+      if (verdict !== 'aligned') {
         setEnrollSelfieDone(false);
         setEnrollSelfiePreviewUrl('');
-        if (reason === 'dark') {
-          setCameraError(
-            enrollmentLang === 'ur_roman'
-              ? 'روشنی بہت کم ہے یا کیمرہ ڈھکا ہوا ہے — روشن جگہ پر پورا چہرہ سامنے رکھ کر دوبارہ تصویر لیں۔'
-              : enrollmentLang === 'ar'
-              ? 'الإضاءة منخفضة جداً أو العدسة مغطاة — يرجى الوقوف في إضاءة واضحة وإظهار كامل الوجه.'
-              : 'Lighting is too dark or lens is covered — move to clear light with your full face visible and capture again.'
-          );
-        } else if (reason === 'clipped') {
-          setCameraError(
-            enrollmentLang === 'ur_roman'
-              ? 'آدھا سر یا چہرہ کٹ رہا ہے — کیمرے سے تھوڑا پیچھے ہٹیں تاکہ پورا سر اور چہرہ بیضوی دائرے کے اندر آ جائے۔'
-              : enrollmentLang === 'ar'
-              ? 'الوجه مقطوع أو غير مكتمل داخل الإطار — ابتعد قليلاً ليظهر الرأس والوجه بالكامل داخل الإطار البيضاوي.'
-              : 'Head or face is cropped at the edge — step back slightly so your complete head and face fit cleanly inside the oval.'
-          );
-        } else {
-          setCameraError(
-            enrollmentLang === 'ur_roman'
-              ? 'واضح پورا چہرہ نظر نہیں آ رہا — اپنا مکمل چہرہ بیضوی دائرے کے بیچ میں رکھ کر دوبارہ سیلفی لیں۔'
-              : enrollmentLang === 'ar'
-              ? 'لم يتم رصد وجه كامل واضح — ضع كامل وجهك في منتصف الإطار البيضاوي وأعد المحاولة.'
-              : 'Complete face not clearly visible — center your full face inside the oval guide and retake your selfie.'
-          );
-        }
-      };
-
-      const sampleStats = (x0: number, y0: number, x1: number, y1: number) => {
-        const rx = Math.max(0, Math.floor(x0 * canvas.width));
-        const ry = Math.max(0, Math.floor(y0 * canvas.height));
-        const rw = Math.max(4, Math.floor((x1 - x0) * canvas.width));
-        const rh = Math.max(4, Math.floor((y1 - y0) * canvas.height));
-        const imgData = ctx.getImageData(rx, ry, rw, rh).data;
-        let sum = 0;
-        let sumSq = 0;
-        let count = 0;
-        for (let i = 0; i < imgData.length; i += 16) {
-          const luma = 0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2];
-          sum += luma;
-          sumSq += luma * luma;
-          count++;
-        }
-        const mean = count > 0 ? sum / count : 0;
-        const stdDev = count > 0 ? Math.sqrt(Math.max(0, sumSq / count - mean * mean)) : 0;
-        return { mean, stdDev };
-      };
-
-      const centerOval = sampleStats(0.26, 0.16, 0.74, 0.68);
-      const centerLeft = sampleStats(0.24, 0.22, 0.48, 0.64);
-      const centerRight = sampleStats(0.52, 0.22, 0.76, 0.64);
-
-      if (centerOval.mean < 28 || centerOval.mean > 246) {
-        rejectFrame('dark');
+        setSelfieOvalStatus(verdict);
+        setCameraError(getSelfieErrorMessage(verdict));
         return;
-      }
-      if (centerOval.stdDev < 11 || Math.min(centerLeft.stdDev, centerRight.stdDev) < 8) {
-        rejectFrame('clipped');
-        return;
-      }
-
-      type BrowserFaceBox = { boundingBox: { x: number; y: number; width: number; height: number } };
-      type BrowserFaceDetectorCtor = new (opts?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
-        detect: (source: HTMLCanvasElement) => Promise<BrowserFaceBox[]>;
-      };
-      const FaceDetectorApi = (window as unknown as { FaceDetector?: BrowserFaceDetectorCtor }).FaceDetector;
-      if (typeof FaceDetectorApi === 'function') {
-        try {
-          const detector = new FaceDetectorApi({ fastMode: true, maxDetectedFaces: 2 });
-          const faces = await detector.detect(canvas);
-          if (faces.length === 0) {
-            rejectFrame('noface');
-            return;
-          }
-          const primary = faces.reduce((best, cur) =>
-            cur.boundingBox.width * cur.boundingBox.height > best.boundingBox.width * best.boundingBox.height ? cur : best
-          );
-          const box = primary.boundingBox;
-          const cx = box.x + box.width / 2;
-          const tooSmall = box.width < canvas.width * 0.16 || box.height < canvas.height * 0.16;
-          const topCut = box.y < canvas.height * 0.04;
-          const bottomCut = box.y + box.height > canvas.height * 0.93;
-          const sideCut = cx < canvas.width * 0.22 || cx > canvas.width * 0.78 || box.x < 8 || box.x + box.width > canvas.width - 8;
-          if (tooSmall || topCut || bottomCut || sideCut) {
-            rejectFrame('clipped');
-            return;
-          }
-        } catch {
-          // FaceDetector unsupported at runtime on this device — fall back to portrait region stats above
-        }
       }
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
@@ -2767,6 +2900,31 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       selfieVideoRef.current.play().catch(() => {});
     }
   }, [isCameraActive]);
+
+  React.useEffect(() => {
+    if (!isCameraActive) return;
+    let active = true;
+    const probe = async () => {
+      const videoEl = selfieVideoRef.current;
+      if (!active || !videoEl || videoEl.videoWidth === 0) return;
+      if (!liveProbeCanvasRef.current) {
+        liveProbeCanvasRef.current = document.createElement('canvas');
+      }
+      const ctx = drawVideoToPortraitCanvas(videoEl, liveProbeCanvasRef.current, 180, 240);
+      if (!ctx) return;
+      const verdict = await analyzeOvalSelfieCanvas(liveProbeCanvasRef.current, ctx, true);
+      if (active) {
+        setSelfieOvalStatus(verdict);
+      }
+    };
+    const timer = window.setInterval(() => {
+      void probe();
+    }, 380);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [isCameraActive, analyzeOvalSelfieCanvas]);
 
   React.useEffect(() => {
     if (!isRemoteEnrollmentWizardOpen || enrollmentStep !== 2) {
@@ -8707,7 +8865,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           muted
                           className="w-full h-full object-cover scale-x-[-1]"
                         />
-                        {/* Full Head & Face Oval Framing Guide */}
+                        {/* Live Color-Locked Oval Framing Guide (Green = Aligned, Amber = Adjust) */}
                         <svg
                           viewBox="0 0 180 240"
                           className="pointer-events-none absolute inset-0 w-full h-full"
@@ -8719,26 +8877,34 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                             rx="54"
                             ry="70"
                             fill="none"
-                            stroke="#22D3EE"
-                            strokeWidth="2"
-                            strokeDasharray="6 4"
-                            opacity="0.9"
+                            stroke={selfieOvalStatus === 'aligned' ? '#3FB950' : '#D29922'}
+                            strokeWidth={selfieOvalStatus === 'aligned' ? '3' : '2.2'}
+                            strokeDasharray={selfieOvalStatus === 'aligned' ? undefined : '6 4'}
+                            opacity="0.95"
                           />
                           <path
                             d="M28 228 C34 188, 146 188, 152 228"
                             fill="none"
-                            stroke="#22D3EE"
+                            stroke={selfieOvalStatus === 'aligned' ? '#3FB950' : '#22D3EE'}
                             strokeWidth="1.5"
                             strokeDasharray="4 4"
                             opacity="0.65"
                           />
                         </svg>
-                        <span className="pointer-events-none absolute bottom-1.5 left-2 right-2 rounded-md bg-[#0D1117]/85 border border-[#06B6D4]/50 px-2 py-0.5 text-[9px] font-mono font-bold text-[#22D3EE]">
-                          {enrollmentLang === 'ur_roman'
-                            ? 'پورا سر اور چہرہ بیضوی دائرے میں رکھیں'
-                            : enrollmentLang === 'ar'
-                            ? 'ضع كامل الرأس والوجه داخل الإطار'
-                            : 'Keep full head & face inside oval'}
+                        <span
+                          className={`pointer-events-none absolute bottom-1.5 left-2 right-2 rounded-md px-2 py-0.5 text-[9px] font-mono font-bold border ${
+                            selfieOvalStatus === 'aligned'
+                              ? 'bg-[#0D3822]/90 border-[#116329] text-[#3FB950]'
+                              : 'bg-[#0D1117]/90 border-[#9E6A03] text-[#D29922]'
+                          }`}
+                        >
+                          {selfieOvalStatus === 'aligned'
+                            ? enrollmentLang === 'ur_roman'
+                              ? '✓ چہرہ دائرے میں درست ہے — اب تصویر کھینچیں'
+                              : enrollmentLang === 'ar'
+                              ? '✓ الوجه مكتمل داخل الإطار — التقط الصورة الآن'
+                              : '✓ Oval Aligned — Ready to Capture'
+                            : getSelfieErrorMessage(selfieOvalStatus)}
                         </span>
                       </>
                     ) : enrollSelfieDone && enrollSelfiePreviewUrl ? (
@@ -8771,15 +8937,21 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       <>
                         <button
                           type="button"
-                          disabled={isAnalyzingSelfie}
+                          disabled={isAnalyzingSelfie || selfieOvalStatus !== 'aligned'}
                           onClick={captureSelfieFrame}
-                          className="min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] px-4 py-2 text-xs font-mono font-bold text-[#0D1117] transition flex items-center gap-1.5 disabled:opacity-60"
+                          className={`min-h-[44px] rounded-xl px-4 py-2 text-xs font-mono font-bold transition flex items-center gap-1.5 disabled:opacity-50 ${
+                            selfieOvalStatus === 'aligned'
+                              ? 'bg-[#3FB950] hover:bg-[#56D364] text-[#0D1117]'
+                              : 'bg-[#21262D] border border-[#9E6A03] text-[#D29922] cursor-not-allowed'
+                          }`}
                         >
                           <Camera className="size-4" />
                           <span>
                             {isAnalyzingSelfie
                               ? (enrollmentLang === 'ur_roman' ? 'چہرہ چیک ہو رہا ہے...' : enrollmentLang === 'ar' ? 'جاري التحقق من الوجه...' : 'Verifying Full Face...')
-                              : (enrollmentLang === 'ur_roman' ? 'ابھی تصویر کھینچیں' : enrollmentLang === 'ar' ? 'التقاط الصورة الآن' : 'Capture Selfie Photo')}
+                              : selfieOvalStatus === 'aligned'
+                              ? (enrollmentLang === 'ur_roman' ? 'ابھی تصویر کھینچیں' : enrollmentLang === 'ar' ? 'التقاط الصورة الآن' : 'Capture Selfie Photo')
+                              : (enrollmentLang === 'ur_roman' ? 'چہرہ دائرے میں لائیں' : enrollmentLang === 'ar' ? 'اضبط الوجه داخل الإطار' : 'Align Face in Oval First')}
                           </span>
                         </button>
                         <button
