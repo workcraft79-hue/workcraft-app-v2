@@ -263,7 +263,7 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
                   <div>
                     <span className="text-[#F0F6FC] font-bold">Official Bank Account (IBFT / Raast / Overseas)</span>
                     <p className="text-[10px] text-[#8B949E] font-sans">
-                      {data.methods.bankSalons} salons · Local IBFT + Overseas package &amp; 10% maint auto-deposits
+                      {data.methods.bankSalons} salons · Local IBFT + Overseas package &amp; monthly maint auto-deposits
                     </p>
                   </div>
                   <div className="text-right shrink-0 ml-2">
@@ -327,7 +327,7 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
                   <div>
                     <span className="text-[#F0F6FC] font-bold">New Salon Setups (One-Time Setup Fee)</span>
                     <p className="text-[10px] text-[#8B949E] font-sans">
-                      {data.products.newServicesSalons} new salons onboarded (Starter PKR 15k, Growth PKR 20k, VIP PKR 25k)
+                      {data.products.newServicesSalons} new salons onboarded (Starter PKR 17.5k, Growth PKR 25k, VIP PKR 35k, Custom PKR 50k)
                     </p>
                   </div>
                   <div className="text-right shrink-0 ml-2">
@@ -338,9 +338,9 @@ export const FinancialReportModal: React.FC<FinancialReportModalProps> = ({
 
                 <div className="flex items-center justify-between rounded-xl bg-[#0D1117] p-2.5 border border-[#30363D]">
                   <div>
-                    <span className="text-[#F0F6FC] font-bold">Maintenance Paid (10% SLA Recurring)</span>
+                    <span className="text-[#F0F6FC] font-bold">Maintenance Paid (Monthly SLA Recurring)</span>
                     <p className="text-[10px] text-[#8B949E] font-sans">
-                      {data.products.maintenanceSalons} salons settled · Starter (1.5k), Growth (2k), VIP (2.5k)
+                      {data.products.maintenanceSalons} salons settled · Starter (1,750), Growth (2,500), VIP (3,500), Custom (5,000)
                     </p>
                   </div>
                   <div className="text-right shrink-0 ml-2">
