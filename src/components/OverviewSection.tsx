@@ -65,7 +65,7 @@ export const OverviewSection: React.FC<OverviewSectionProps> = ({
       owner: s.owner,
       location: s.location,
       initials: s.initials,
-      reason: '5th-of-Month 10% Fee Pending',
+      reason: '5th-of-Month Maintenance Fee Pending',
       badge: 'DUE AFTER 5TH',
       urgent: true,
     })),
