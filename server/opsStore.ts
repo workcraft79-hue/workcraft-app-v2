@@ -39,7 +39,8 @@ export interface FinancialLedgerEntry {
     | 'CASH_REMITTED'
     | 'CO_AGENT_HANDOFF'
     | 'MAINT_PAYMENT'
-    | 'PACKAGE_UPGRADE';
+    | 'PACKAGE_UPGRADE'
+    | 'ONBOARDING_SETUP';
   salonId?: string;
   salonName: string;
   agentId?: string;
@@ -89,6 +90,7 @@ interface PersistedOpsState {
   ledgerEntries: FinancialLedgerEntry[];
   broadcasts: BroadcastHistoryEntry[];
   incidents: IncidentRecord[];
+  usedPaymentTids: string[];
 }
 
 const DEFAULT_OPS_STATE: PersistedOpsState = {
@@ -122,6 +124,7 @@ const DEFAULT_OPS_STATE: PersistedOpsState = {
   ledgerEntries: [],
   broadcasts: [],
   incidents: [],
+  usedPaymentTids: [],
 };
 
 let opsState: PersistedOpsState = structuredClone(DEFAULT_OPS_STATE);
@@ -140,6 +143,7 @@ function loadOpsState() {
       broadcasts: Array.isArray(parsed.broadcasts) ? parsed.broadcasts : [],
       biometricDevices: Array.isArray(parsed.biometricDevices) ? parsed.biometricDevices : [],
       incidents: Array.isArray(parsed.incidents) ? parsed.incidents : [],
+      usedPaymentTids: Array.isArray(parsed.usedPaymentTids) ? parsed.usedPaymentTids : [],
     };
   } catch {
     // boot cleanly from defaults
@@ -158,6 +162,7 @@ export async function hydrateOpsStoreFromKv(): Promise<void> {
     broadcasts: Array.isArray(remote.broadcasts) ? remote.broadcasts : opsState.broadcasts,
     biometricDevices: Array.isArray(remote.biometricDevices) ? remote.biometricDevices : opsState.biometricDevices,
     incidents: Array.isArray(remote.incidents) ? remote.incidents : opsState.incidents,
+    usedPaymentTids: Array.isArray(remote.usedPaymentTids) ? remote.usedPaymentTids : opsState.usedPaymentTids,
   };
 }
 
@@ -579,8 +584,177 @@ export function recordCoAgentCashHandoff(params: {
   return { coAgent, entry, ...getFinanceAndAgentSummary(params.leadAgentId || coAgent.leadAgentId) };
 }
 
+export type WorkcraftTierId = 'STARTER' | 'GROWTH' | 'VIP' | 'CUSTOM';
+
+export const WORKCRAFT_PACKAGE_CATALOG: Record<
+  'PKR' | 'USD' | 'AED' | 'SAR' | 'GBP',
+  Record<WorkcraftTierId, { setupFee: number; monthlyMaint: number; bookingsLimit: string }>
+> = {
+  PKR: {
+    STARTER: { setupFee: 17500, monthlyMaint: 1750, bookingsLimit: '750 bookings/mo' },
+    GROWTH: { setupFee: 25000, monthlyMaint: 2500, bookingsLimit: '1,500 bookings/mo' },
+    VIP: { setupFee: 35000, monthlyMaint: 3500, bookingsLimit: '3,000 bookings/mo' },
+    CUSTOM: { setupFee: 50000, monthlyMaint: 5000, bookingsLimit: '> 3,000 bookings/mo' },
+  },
+  USD: {
+    STARTER: { setupFee: 79, monthlyMaint: 15, bookingsLimit: '750 bookings/mo' },
+    GROWTH: { setupFee: 129, monthlyMaint: 25, bookingsLimit: '1,500 bookings/mo' },
+    VIP: { setupFee: 169, monthlyMaint: 35, bookingsLimit: '3,000 bookings/mo' },
+    CUSTOM: { setupFee: 250, monthlyMaint: 50, bookingsLimit: '> 3,000 bookings/mo' },
+  },
+  AED: {
+    STARTER: { setupFee: 290, monthlyMaint: 55, bookingsLimit: '750 bookings/mo' },
+    GROWTH: { setupFee: 475, monthlyMaint: 92, bookingsLimit: '1,500 bookings/mo' },
+    VIP: { setupFee: 620, monthlyMaint: 129, bookingsLimit: '3,000 bookings/mo' },
+    CUSTOM: { setupFee: 920, monthlyMaint: 184, bookingsLimit: '> 3,000 bookings/mo' },
+  },
+  SAR: {
+    STARTER: { setupFee: 295, monthlyMaint: 56, bookingsLimit: '750 bookings/mo' },
+    GROWTH: { setupFee: 485, monthlyMaint: 94, bookingsLimit: '1,500 bookings/mo' },
+    VIP: { setupFee: 635, monthlyMaint: 131, bookingsLimit: '3,000 bookings/mo' },
+    CUSTOM: { setupFee: 940, monthlyMaint: 188, bookingsLimit: '> 3,000 bookings/mo' },
+  },
+  GBP: {
+    STARTER: { setupFee: 62, monthlyMaint: 12, bookingsLimit: '750 bookings/mo' },
+    GROWTH: { setupFee: 102, monthlyMaint: 20, bookingsLimit: '1,500 bookings/mo' },
+    VIP: { setupFee: 134, monthlyMaint: 28, bookingsLimit: '3,000 bookings/mo' },
+    CUSTOM: { setupFee: 198, monthlyMaint: 40, bookingsLimit: '> 3,000 bookings/mo' },
+  },
+};
+
+export function normalizeWorkcraftTier(rawTier: string | undefined): WorkcraftTierId {
+  const upper = String(rawTier || '').trim().toUpperCase();
+  if (upper === 'STARTER') return 'STARTER';
+  if (upper === 'GROWTH' || upper === 'PRO') return 'GROWTH';
+  if (upper === 'VIP' || upper === 'PRO++') return 'VIP';
+  if (upper === 'CUSTOM') return 'CUSTOM';
+  return 'GROWTH';
+}
+
+export function resolveOfficialWorkcraftDestination(method: string, currency: string): string {
+  const m = method.toLowerCase();
+  if (m.includes('easypaisa')) return 'WorkCraft EasyPaisa Merchant Till (0300-WORKCRAFT)';
+  if (m.includes('jazzcash')) return 'WorkCraft JazzCash Corporate Till (789210)';
+  if (m.includes('stripe') || m.includes('card')) return `WorkCraft Official Stripe 3DS Account (${currency})`;
+  if (m.includes('cash')) return 'WorkCraft Pakistan Field Cash Custody (48h Meezan Remittance Locked)';
+  return 'WorkCraft Meezan Bank Ltd Official (PK64MEZN0001020304050607)';
+}
+
+export function verifyAuthoritativeWorkcraftPayment(params: {
+  kind: 'SETUP' | 'MAINTENANCE' | 'UPGRADE';
+  tier?: string;
+  previousTier?: string;
+  currency: string;
+  submittedAmount: number;
+  method: string;
+  tid: string;
+  salonId?: string;
+}):
+  | {
+      ok: true;
+      normalizedTid: string;
+      verifiedAmount: number;
+      currency: 'PKR' | 'USD' | 'AED' | 'SAR' | 'GBP';
+      officialDestination: string;
+      sha256Proof: string;
+    }
+  | { ok: false; error: string } {
+  const cleanTid = sanitizePlainText(params.tid, 80).trim();
+  if (cleanTid.length < 6 || !/^[A-Za-z0-9._:/-]+$/.test(cleanTid)) {
+    return {
+      ok: false,
+      error: 'Valid Transaction ID (TID) / Bank Reference (min 6 alphanumeric characters) is required.',
+    };
+  }
+  const lowerTid = cleanTid.toLowerCase();
+  if (/^(test|demo|fake|000000|111111|123456|abcdef)/.test(lowerTid)) {
+    return {
+      ok: false,
+      error: 'Placeholder or test TID rejected. Enter an authentic wallet, bank, or card reference.',
+    };
+  }
+  if (opsState.usedPaymentTids.includes(cleanTid.toUpperCase())) {
+    return {
+      ok: false,
+      error: `Duplicate TID detected (${cleanTid}). Every WorkCraft payment receipt must be unique.`,
+    };
+  }
+
+  const normCurrency = (String(params.currency || 'PKR').toUpperCase() as
+    | 'PKR'
+    | 'USD'
+    | 'AED'
+    | 'SAR'
+    | 'GBP');
+  const catalog = WORKCRAFT_PACKAGE_CATALOG[normCurrency] || WORKCRAFT_PACKAGE_CATALOG.PKR;
+  const effectiveCurrency: 'PKR' | 'USD' | 'AED' | 'SAR' | 'GBP' =
+    WORKCRAFT_PACKAGE_CATALOG[normCurrency] ? normCurrency : 'PKR';
+
+  const submitted = Number(params.submittedAmount || 0);
+  if (!Number.isFinite(submitted) || submitted <= 0) {
+    return { ok: false, error: 'Payment amount must be greater than zero.' };
+  }
+
+  let expectedAmount = submitted;
+  if (params.kind === 'SETUP') {
+    const tierKey = normalizeWorkcraftTier(params.tier);
+    expectedAmount = catalog[tierKey].setupFee;
+  } else if (params.kind === 'MAINTENANCE') {
+    if (params.tier) {
+      const tierKey = normalizeWorkcraftTier(params.tier);
+      expectedAmount = catalog[tierKey].monthlyMaint;
+    } else {
+      const allowedMaints = Object.values(catalog).map((c) => c.monthlyMaint);
+      if (!allowedMaints.some((m) => Math.abs(m - submitted) < 0.01)) {
+        return {
+          ok: false,
+          error: `Maintenance amount ${effectiveCurrency} ${submitted} does not match any official WorkCraft monthly plan.`,
+        };
+      }
+      expectedAmount = submitted;
+    }
+  } else if (params.kind === 'UPGRADE') {
+    const targetTier = normalizeWorkcraftTier(params.tier);
+    if (params.previousTier) {
+      const prevTier = normalizeWorkcraftTier(params.previousTier);
+      expectedAmount = Math.max(0, catalog[targetTier].setupFee - catalog[prevTier].setupFee);
+    } else {
+      expectedAmount = catalog[targetTier].setupFee;
+    }
+  }
+
+  if (params.kind !== 'UPGRADE' || params.previousTier) {
+    if (Math.abs(submitted - expectedAmount) > 0.5) {
+      return {
+        ok: false,
+        error: `Amount mismatch: expected exact ${effectiveCurrency} ${expectedAmount.toLocaleString()} for WorkCraft settlement, received ${effectiveCurrency} ${submitted.toLocaleString()}.`,
+      };
+    }
+  }
+
+  opsState.usedPaymentTids.unshift(cleanTid.toUpperCase());
+  opsState.usedPaymentTids = opsState.usedPaymentTids.slice(0, 1000);
+  saveOpsState();
+
+  const officialDestination = resolveOfficialWorkcraftDestination(params.method, effectiveCurrency);
+  const sha256Proof = `sha256:${crypto
+    .createHash('sha256')
+    .update(`${params.kind}:${params.salonId || 'onboarding'}:${cleanTid}:${expectedAmount}:${effectiveCurrency}`)
+    .digest('hex')
+    .slice(0, 32)}`;
+
+  return {
+    ok: true,
+    normalizedTid: cleanTid,
+    verifiedAmount: expectedAmount,
+    currency: effectiveCurrency,
+    officialDestination,
+    sha256Proof,
+  };
+}
+
 export function recordSalonFinancialPayment(params: {
-  type: 'MAINT_PAYMENT' | 'PACKAGE_UPGRADE';
+  type: 'MAINT_PAYMENT' | 'PACKAGE_UPGRADE' | 'ONBOARDING_SETUP';
   salonId: string;
   salonName: string;
   amount: number;
