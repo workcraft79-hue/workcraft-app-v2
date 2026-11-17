@@ -494,10 +494,13 @@ export function appendVoiceMessage(params: {
   const store = loadStore();
   const now = Date.now();
   const normalizedTargetSalon = normalizeSalonKey(params.salonId);
+  const normalizedTargetSalonName = (params.salonName || '').trim().toLowerCase();
   let targetThread =
     (params.threadId && store.threads.find((t) => t.id === params.threadId)) ||
     (normalizedTargetSalon &&
       store.threads.find((t) => normalizeSalonKey(t.salonId) === normalizedTargetSalon)) ||
+    (normalizedTargetSalonName &&
+      store.threads.find((t) => t.salonName.trim().toLowerCase() === normalizedTargetSalonName)) ||
     undefined;
 
   if (!targetThread) {
@@ -558,6 +561,12 @@ export function appendVoiceMessage(params: {
     targetThread.receivedAgo = 'Just now';
     targetThread.transcript = `“${params.originalText}”`;
     targetThread.speechPlayText = params.translatedText || params.originalText;
+    // Bubble active incoming salon owner thread to top of Founder Voice Inbox
+    const existingIdx = store.threads.findIndex((t) => t.id === targetThread!.id);
+    if (existingIdx > 0) {
+      store.threads.splice(existingIdx, 1);
+      store.threads.unshift(targetThread);
+    }
   } else {
     targetThread.unread = false;
   }
