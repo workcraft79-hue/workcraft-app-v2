@@ -122,6 +122,13 @@ export default function App() {
   const [hasCompletedSalonOnboarding, setHasCompletedSalonOnboarding] = useState(true);
   const [onboardedSalonName, setOnboardedSalonName] = useState<string | undefined>(undefined);
   const [completedOnboardingData, setCompletedOnboardingData] = useState<OnboardedSalonPayload | null>(null);
+  const [enrolledAgentDisplayName, setEnrolledAgentDisplayName] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('wcl_enrolled_agent_name_v1') || null;
+    } catch {
+      return null;
+    }
+  });
 
   // Founder Command Center Workspace Navigation
   const [activeTab, setActiveTab] = useState<TabName>('Overview');
@@ -314,6 +321,13 @@ export default function App() {
     }
     if (typeof window !== 'undefined' && window.location.pathname === '/enroll/agent') {
       window.history.replaceState({}, '', '/');
+    }
+    const syncedName = (agentPayload.name || data.user.displayName || '').trim();
+    if (syncedName) {
+      setEnrolledAgentDisplayName(syncedName);
+      try {
+        localStorage.setItem('wcl_enrolled_agent_name_v1', syncedName);
+      } catch {}
     }
     applyVerifiedSession(data.user);
     showToast('Invite locked permanently — welcome to your editable Field Agent Hub.');
@@ -776,6 +790,14 @@ export default function App() {
                 initialAutoOpenEnrollment={true}
                 initialEnrollAgentData={initialEnrollAgentData}
                 onAgentEnrollmentComplete={handleAgentEnrollmentComplete}
+                onAgentProfileNameSync={(name) => {
+                  const trimmed = name.trim();
+                  if (!trimmed) return;
+                  setEnrolledAgentDisplayName(trimmed);
+                  try {
+                    localStorage.setItem('wcl_enrolled_agent_name_v1', trimmed);
+                  } catch {}
+                }}
                 onSalonCreated={() => {}}
               />
             </SilentSelfHealingBoundary>
@@ -1046,13 +1068,20 @@ export default function App() {
                     : 'SALON PARTNER'}
                 </p>
                 <p className="mt-1 text-sm font-bold text-[#F0F6FC] tracking-wide">
-                  {authUser.displayName}
+                  {activeRole === 'FIELD_AGENT'
+                    ? enrolledAgentDisplayName ||
+                      (authUser.userRole === 'AGENT' ? authUser.displayName : 'Kamran Tariq')
+                    : activeRole === 'SALON_OWNER'
+                    ? completedOnboardingData?.ownerName ||
+                      (authUser.userRole === 'SALON_OWNER' ? authUser.displayName : 'Hamza Tariq')
+                    : authUser.displayName}
                 </p>
-                {authUser.salonName && (
-                  <p className="text-[11px] font-mono text-[#8B949E] truncate">
-                    {authUser.salonName}
-                  </p>
-                )}
+                {activeRole === 'SALON_OWNER' &&
+                  (completedOnboardingData?.salonName || authUser.salonName) && (
+                    <p className="text-[11px] font-mono text-[#8B949E] truncate">
+                      {completedOnboardingData?.salonName || authUser.salonName}
+                    </p>
+                  )}
               </div>
               <button
                 type="button"
@@ -1393,6 +1422,14 @@ export default function App() {
                   initialEnrollAgentData={initialEnrollAgentData || undefined}
                   userRole={activeRole === 'FIELD_AGENT' ? 'FIELD_AGENT' : 'FOUNDER'}
                   onActiveCountriesChange={setDynamicAgentCountries}
+                  onAgentProfileNameSync={(name) => {
+                    const trimmed = name.trim();
+                    if (!trimmed) return;
+                    setEnrolledAgentDisplayName(trimmed);
+                    try {
+                      localStorage.setItem('wcl_enrolled_agent_name_v1', trimmed);
+                    } catch {}
+                  }}
                 />
               </SilentSelfHealingBoundary>
             ) : activeTab === 'Salon Owner Dashboard' ? (
