@@ -114,7 +114,7 @@ export const MONTHLY_REVENUE_SUMMARY = {
       amount: 52000,
       pct: '48.1%',
       tag: '48.1% · PRIMARY',
-      desc: '11 salons · Local Bank IBFT (PKR 24,000) + Overseas Package & 10% Maint Auto-Deposits (PKR 28,000)',
+      desc: '11 salons · Local Bank IBFT (PKR 24,000) + Overseas Package & Monthly Maint Auto-Deposits (PKR 28,000)',
     },
     {
       id: 'easypaisa',
@@ -141,7 +141,7 @@ export const MONTHLY_REVENUE_SUMMARY = {
       amount: 16000,
       pct: '14.8%',
       tag: '14.8%',
-      desc: '3 overseas salons · 80% net settled into local WorkCraft bank account',
+      desc: '3 overseas salons · 80% net settled into official WorkCraft bank account',
     },
   ],
 };
@@ -235,7 +235,7 @@ export const SALONS: Salon[] = [
     owner: 'Hamza',
     location: 'Lahore',
     status: 'Pending',
-    plan: 'PKR 1,500 (Starter)',
+    plan: 'PKR 1,750 (Starter)',
     initials: 'SC',
   },
   {
@@ -243,7 +243,7 @@ export const SALONS: Salon[] = [
     owner: 'Ayesha',
     location: 'Karachi',
     status: 'Paid',
-    plan: 'PKR 2,000 (Growth)',
+    plan: 'PKR 2,500 (Growth)',
     initials: 'NB',
   },
   {
@@ -251,16 +251,16 @@ export const SALONS: Salon[] = [
     owner: 'Bilal',
     location: 'Islamabad',
     status: 'Paid',
-    plan: 'PKR 2,500 (VIP)',
+    plan: 'PKR 3,500 (VIP)',
     initials: 'GR',
   },
 ];
 
 export const ARCHIVED_SALONS = [
-  { name: 'Elite Cuts Gulberg', owner: 'Zubair', status: 'Archived', plan: 'PKR 1,500 (Starter)' },
-  { name: 'Sultan Barber DHA', owner: 'Taimoor', status: 'Archived', plan: 'PKR 2,000 (Growth)' },
-  { name: 'Karachi Grooming Hub', owner: 'Farhan', status: 'Archived', plan: 'PKR 2,500 (VIP)' },
-  { name: 'Islamabad Fade Studio', owner: 'Rehan', status: 'Archived', plan: 'PKR 2,000 (Growth)' },
+  { name: 'Elite Cuts Gulberg', owner: 'Zubair', status: 'Archived', plan: 'PKR 1,750 (Starter)' },
+  { name: 'Sultan Barber DHA', owner: 'Taimoor', status: 'Archived', plan: 'PKR 2,500 (Growth)' },
+  { name: 'Karachi Grooming Hub', owner: 'Farhan', status: 'Archived', plan: 'PKR 3,500 (VIP)' },
+  { name: 'Islamabad Fade Studio', owner: 'Rehan', status: 'Archived', plan: 'PKR 2,500 (Growth)' },
 ];
 
 export const NOTIFICATIONS: NotificationItem[] = [
