@@ -70,9 +70,18 @@ export default async function handler(req: JsonRequest, res: ServerResponse) {
     });
 
     const usage = recordAiVoiceApiUsage(
-      result.translationSource !== 'fallback',
-      result.ttsSource === 'msedge-tts'
+      result.translationSource !== 'error',
+      result.ttsSource !== 'unavailable'
     );
+
+    if (result.translationSource === 'error') {
+      sendJson(res, 503, {
+        ...result,
+        error: result.translationError || 'Voice translation & TTS synthesis failed.',
+        usage,
+      });
+      return;
+    }
 
     sendJson(res, 200, { ...result, usage });
   } catch (err) {
