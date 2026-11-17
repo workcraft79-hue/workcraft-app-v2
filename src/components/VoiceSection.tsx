@@ -34,9 +34,19 @@ function getSpeechLangForLocale(locale: SupportedVoiceLocale): string {
 }
 
 function getVoiceNameForLocale(locale: SupportedVoiceLocale): string {
-  if (locale === 'ar-AE') return 'ar-AE-HamdanNeural';
-  if (locale === 'en-US') return 'en-US-AndrewNeural';
-  return 'ur-PK-AsadNeural';
+  if (locale === 'ar-AE') return 'Gemini Charon (ar-AE)';
+  if (locale === 'en-US') return 'Gemini Kore (en-US)';
+  return 'Gemini Charon (ur-PK)';
+}
+
+interface VerifiedVoicePreview {
+  transcript: string;
+  translatedText: string;
+  detectedInputLanguage: string;
+  voiceName: string;
+  convertedAudioUrl: string | null;
+  ttsWarning?: string;
+  sourceSignature: string;
 }
 
 export const VoiceSection: React.FC<VoiceSectionProps> = ({
@@ -54,8 +64,11 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
   const [recordedClip, setRecordedClip] = useState<RecordedOpusClip | null>(null);
   const [detectedFounderLang, setDetectedFounderLang] = useState<string>('Auto');
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
+  const [isPreviewingVoice, setIsPreviewingVoice] = useState(false);
   const [replySent, setReplySent] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [ttsWarning, setTtsWarning] = useState<string | null>(null);
+  const [verifiedPreview, setVerifiedPreview] = useState<VerifiedVoicePreview | null>(null);
 
   const [autoTranslatedOutput, setAutoTranslatedOutput] = useState<string>('');
   const [convertedAudioUrl, setConvertedAudioUrl] = useState<string | null>(null);
@@ -81,6 +94,8 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
     setDetectedFounderLang('Auto');
     setReplySent(false);
     setVoiceError(null);
+    setTtsWarning(null);
+    setVerifiedPreview(null);
   }, [selectedThreadId]);
 
   useEffect(() => {
@@ -100,6 +115,8 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
   const isAutoOutputRtl =
     activeThread.targetLocale === 'ur-PK' || activeThread.targetLocale === 'ar-AE';
 
+  const currentInputSignature = `${activeThread.id}::${activeThread.targetLocale}::${recordedClip?.base64.slice(0, 48) || ''}::${founderInputText.trim()}`;
+
   const markThreadAsRead = async (threadId: string) => {
     const nextThreads = threads.map((t) =>
       t.id === threadId ? { ...t, unread: false } : t
@@ -108,6 +125,7 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
     try {
       await fetch(`/api/voice/threads/${encodeURIComponent(threadId)}/read`, {
         method: 'PATCH',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ unread: false }),
       });
@@ -259,9 +277,109 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
     }
   };
 
-  const handleConvertAndSendReply = async () => {
+  const requestTranslationFromServer = async (): Promise<VerifiedVoicePreview> => {
+    const cleanDraft = founderInputText.trim();
+    const translateRes = await fetch('/api/translate-voice', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audioBase64: recordedClip?.base64 || undefined,
+        audioMimeType: recordedClip?.mimeType || undefined,
+        text: cleanDraft || undefined,
+        targetLocale: activeThread.targetLocale,
+        targetDialect: activeThread.dialect,
+      }),
+    });
+
+    const translateData = (await translateRes.json().catch(() => ({}))) as {
+      transcript?: string;
+      translatedText?: string;
+      detectedInputLanguage?: string;
+      voiceName?: string;
+      audioBase64?: string | null;
+      audioMimeType?: string;
+      translationSource?: 'gemini-audio' | 'gemini-text' | 'error';
+      translationError?: string;
+      ttsSource?: 'gemini-tts' | 'msedge-tts' | 'unavailable';
+      ttsError?: string;
+      usage?: LiveUsageMeter;
+      error?: string;
+    };
+
+    if (translateData.usage && onUsageUpdated) {
+      onUsageUpdated(translateData.usage);
+    }
+
+    if (
+      !translateRes.ok ||
+      translateData.error ||
+      translateData.translationError ||
+      translateData.translationSource === 'error' ||
+      !translateData.translatedText?.trim()
+    ) {
+      throw new Error(
+        translateData.error ||
+          translateData.translationError ||
+          'Server could not translate your message. Please verify GEMINI_API_KEY and try again.'
+      );
+    }
+
+    const finalTranscript =
+      translateData.transcript?.trim() || cleanDraft || '(Recorded voice clip)';
+    const finalTranslated = translateData.translatedText.trim();
+    const finalVoiceName =
+      translateData.voiceName || getVoiceNameForLocale(activeThread.targetLocale);
+    const convertedDataUrl = translateData.audioBase64
+      ? `data:${translateData.audioMimeType || 'audio/wav'};base64,${translateData.audioBase64}`
+      : null;
+
+    const preview: VerifiedVoicePreview = {
+      transcript: finalTranscript,
+      translatedText: finalTranslated,
+      detectedInputLanguage: translateData.detectedInputLanguage || 'Auto',
+      voiceName: finalVoiceName,
+      convertedAudioUrl: convertedDataUrl,
+      ttsWarning: !convertedDataUrl
+        ? translateData.ttsError || 'Neural audio was unavailable; translated text is ready for delivery.'
+        : undefined,
+      sourceSignature: currentInputSignature,
+    };
+
+    setDetectedFounderLang(preview.detectedInputLanguage);
+    setAutoTranslatedOutput(preview.translatedText);
+    setTtsVoiceUsed(preview.voiceName);
+    setConvertedAudioUrl(preview.convertedAudioUrl);
+    setTtsWarning(preview.ttsWarning || null);
+    setVerifiedPreview(preview);
+
+    return preview;
+  };
+
+  const handlePreviewTranslation = async () => {
     const cleanDraft = founderInputText.trim();
     if (!cleanDraft && !recordedClip) {
+      setVoiceError('Record a compressed Opus voice clip or enter a reply message first.');
+      return;
+    }
+    setVoiceError(null);
+    setTtsWarning(null);
+    setReplySent(false);
+    setIsPreviewingVoice(true);
+    try {
+      await requestTranslationFromServer();
+    } catch (err) {
+      setVoiceError(
+        err instanceof Error ? err.message : 'Unable to translate preview right now.'
+      );
+    } finally {
+      setIsPreviewingVoice(false);
+    }
+  };
+
+  const handleConvertAndSendReply = async () => {
+    const cleanDraft = founderInputText.trim();
+    if (!cleanDraft && !recordedClip && !verifiedPreview) {
       setVoiceError('Record a compressed Opus voice clip or enter a reply message first.');
       return;
     }
@@ -271,130 +389,65 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
     setReplySent(false);
 
     try {
-      const translateRes = await fetch('/api/translate-voice', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          audioBase64: recordedClip?.base64 || undefined,
-          audioMimeType: recordedClip?.mimeType || undefined,
-          text: cleanDraft || undefined,
-          targetLocale: activeThread.targetLocale,
-          targetDialect: activeThread.dialect,
-        }),
-      });
+      const activePreview =
+        verifiedPreview && verifiedPreview.sourceSignature === currentInputSignature
+          ? verifiedPreview
+          : await requestTranslationFromServer();
 
-      const translateData = (await translateRes.json()) as {
-        transcript?: string;
-        translatedText?: string;
-        detectedInputLanguage?: string;
-        voiceName?: string;
-        audioBase64?: string | null;
-        audioMimeType?: string;
-        ttsError?: string;
-        usage?: LiveUsageMeter;
-        error?: string;
-      };
+      const finalTranscript = activePreview.transcript.trim();
+      const finalTranslated = activePreview.translatedText.trim();
+      const finalVoiceName = activePreview.voiceName;
+      const audioDataUrl = activePreview.convertedAudioUrl || undefined;
 
-      if (!translateRes.ok || translateData.error) {
-        throw new Error(translateData.error || 'Server voice pipeline failed.');
-      }
-
-      const finalTranscript =
-        translateData.transcript?.trim() || cleanDraft || '(Compressed Opus Voice Clip)';
-      const finalTranslated = translateData.translatedText?.trim() || finalTranscript;
-      const finalVoiceName =
-        translateData.voiceName || getVoiceNameForLocale(activeThread.targetLocale);
-      const audioDataUrl = translateData.audioBase64
-        ? `data:${translateData.audioMimeType || 'audio/mpeg'};base64,${translateData.audioBase64}`
-        : recordedClip?.url || undefined;
-
-      setDetectedFounderLang(translateData.detectedInputLanguage || 'Auto');
-      setAutoTranslatedOutput(finalTranslated);
-      setTtsVoiceUsed(finalVoiceName);
-      setConvertedAudioUrl(audioDataUrl || null);
-      if (translateData.usage && onUsageUpdated) {
-        onUsageUpdated(translateData.usage);
+      if (!finalTranslated) {
+        throw new Error('Translated reply text is empty. Please re-record or type your reply.');
       }
 
       // Persist unified message into backend voice thread (syncs straight to Salon Owner Dashboard)
-      let syncedFromServer = false;
-      try {
-        const saveRes = await fetch('/api/voice/threads/message', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            threadId: activeThread.id,
-            salonId: activeThread.salonId,
-            salonName: activeThread.salonName,
-            ownerName: activeThread.ownerName,
-            city: activeThread.city,
-            targetLocale: activeThread.targetLocale,
-            senderRole: 'FOUNDER',
-            originalText: finalTranscript,
-            translatedText: finalTranslated,
-            detectedInputLanguage: translateData.detectedInputLanguage || 'Auto',
-            voiceName: finalVoiceName,
-            audioDataUrl: audioDataUrl?.startsWith('data:audio/') ? audioDataUrl : undefined,
-            sizeBytes:
-              recordedClip?.sizeBytes ||
-              (translateData.audioBase64 ? Math.round((translateData.audioBase64.length * 3) / 4) : 2048),
-          }),
-        });
-        if (saveRes.ok) {
-          const savedData = (await saveRes.json()) as {
-            threads?: VoiceThreadItem[];
-            usage?: LiveUsageMeter;
-          };
-          if (savedData.threads) {
-            onThreadsUpdated(savedData.threads);
-            syncedFromServer = true;
-          }
-          if (savedData.usage && onUsageUpdated) {
-            onUsageUpdated(savedData.usage);
-          }
-        } else {
-          const errBody = (await saveRes.json().catch(() => ({}))) as { error?: string };
-          throw new Error(errBody.error || `Failed to save voice reply (HTTP ${saveRes.status}).`);
-        }
-      } catch (saveErr) {
-        if (saveErr instanceof Error && saveErr.message.startsWith('Failed to save voice reply')) {
-          throw saveErr;
-        }
-        // Offline / static host fallback handled cleanly below
-      }
-
-      if (!syncedFromServer) {
-        const localNewMsg = {
-          id: `vmsg-${Date.now()}`,
-          senderRole: 'FOUNDER' as const,
-          senderLabel: 'WorkCraft Founder (Private Line)',
+      const saveRes = await fetch('/api/voice/threads/message', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId: activeThread.id,
+          salonId: activeThread.salonId,
+          salonName: activeThread.salonName,
+          ownerName: activeThread.ownerName,
+          city: activeThread.city,
+          targetLocale: activeThread.targetLocale,
+          senderRole: 'FOUNDER',
           originalText: finalTranscript,
           translatedText: finalTranslated,
-          detectedInputLanguage: translateData.detectedInputLanguage || 'Auto',
-          targetLocale: activeThread.targetLocale,
+          detectedInputLanguage: activePreview.detectedInputLanguage || 'Auto',
           voiceName: finalVoiceName,
-          audioDataUrl,
-          sizeBytes: recordedClip?.sizeBytes || 2048,
-          createdAtMs: Date.now(),
-          expiresAtMs: Date.now() + 7 * 24 * 60 * 60 * 1000,
-        };
-        onThreadsUpdated(
-          threads.map((t) =>
-            t.id === activeThread.id
-              ? {
-                  ...t,
-                  unread: false,
-                  messages: [...t.messages, localNewMsg],
-                }
-              : t
-          )
-        );
+          audioDataUrl: audioDataUrl?.startsWith('data:audio/') ? audioDataUrl : undefined,
+          sizeBytes: audioDataUrl
+            ? Math.round((audioDataUrl.length * 3) / 4)
+            : recordedClip?.sizeBytes || 2048,
+        }),
+      });
+
+      if (!saveRes.ok) {
+        const errBody = (await saveRes.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errBody.error || `Failed to save voice reply (HTTP ${saveRes.status}).`);
+      }
+
+      const savedData = (await saveRes.json()) as {
+        threads?: VoiceThreadItem[];
+        usage?: LiveUsageMeter;
+      };
+      if (savedData.threads) {
+        onThreadsUpdated(savedData.threads);
+      }
+      if (savedData.usage && onUsageUpdated) {
+        onUsageUpdated(savedData.usage);
       }
 
       setRecordedClip(null);
       setFounderInputText('');
+      setVerifiedPreview(null);
       setReplySent(true);
-      window.setTimeout(() => setReplySent(false), 4500);
+      window.setTimeout(() => setReplySent(false), 5000);
     } catch (err) {
       setVoiceError(
         err instanceof Error
@@ -481,10 +534,12 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
               <VoiceRecorder
                 key={activeThread.id}
                 title={`Record Voice Reply for #${activeThread.serialNumber} · ${activeThread.ownerName}`}
-                subtitle="Compressed Opus (~150 KB max) · Sent straight to Gemini + Edge Neural TTS."
+                subtitle="Speak in Arabic, Urdu, or English. Click Translate & Preview to verify exact words & target audio before sending."
                 onRecorded={(clip) => {
                   setRecordedClip(clip);
+                  setVerifiedPreview(null);
                   setVoiceError(null);
+                  setTtsWarning(null);
                 }}
               />
 
@@ -496,7 +551,10 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
                     </span>
                     <button
                       type="button"
-                      onClick={() => setRecordedClip(null)}
+                      onClick={() => {
+                        setRecordedClip(null);
+                        setVerifiedPreview(null);
+                      }}
                       className="text-[#F85149] hover:underline"
                     >
                       Discard
@@ -514,7 +572,10 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
                 <textarea
                   ref={replyTextareaRef}
                   value={founderInputText}
-                  onChange={(e) => setFounderInputText(e.target.value)}
+                  onChange={(e) => {
+                    setFounderInputText(e.target.value);
+                    setVerifiedPreview(null);
+                  }}
                   placeholder={`Optional text note for ${activeThread.ownerName} (${activeThread.salonName})...`}
                   rows={2}
                   className="w-full rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm font-mono text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4] resize-none"
@@ -522,58 +583,152 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
               </div>
 
               {voiceError && (
-                <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] px-3 py-2 text-xs font-mono text-[#F85149] flex items-center gap-2">
-                  <AlertTriangle className="size-4 shrink-0" />
+                <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] px-3 py-2 text-xs font-mono text-[#F85149] flex items-start gap-2">
+                  <AlertTriangle className="size-4 shrink-0 mt-0.5" />
                   <span>{voiceError}</span>
                 </div>
               )}
 
-              {/* Converted Output & Streamed Neural Audio Preview */}
-              {(autoTranslatedOutput || convertedAudioUrl) && (
-                <div className="rounded-xl border border-[#116329] bg-[#0D3822]/50 p-3 space-y-2 text-xs">
-                  <div className="flex items-center justify-between text-[10px] font-mono">
+              {ttsWarning && (
+                <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3 py-2 text-[11px] font-mono text-[#D29922] flex items-start gap-2">
+                  <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                  <span>{ttsWarning}</span>
+                </div>
+              )}
+
+              {/* Verified Preview / Converted Output (Both Target Text + Target Audio) */}
+              {(verifiedPreview || autoTranslatedOutput || convertedAudioUrl) && (
+                <div className="rounded-xl border border-[#116329] bg-[#0D3822]/50 p-3 space-y-2.5 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono">
                     <span className="text-[#3FB950] font-bold">
-                      ✓ Converted Output ({activeThread.targetLocale} · {ttsVoiceUsed || getVoiceNameForLocale(activeThread.targetLocale)})
+                      {verifiedPreview ? '✓ Preview Ready — Verify Before Sending' : '✓ Delivered Output'} ({activeThread.targetLocale} · {ttsVoiceUsed || getVoiceNameForLocale(activeThread.targetLocale)})
+                    </span>
+                    <span className="text-[#8B949E]">
+                      Detected: {verifiedPreview?.detectedInputLanguage || detectedFounderLang}
                     </span>
                   </div>
-                  {autoTranslatedOutput && (
-                    <p
-                      dir={isAutoOutputRtl ? 'rtl' : 'ltr'}
-                      className={`text-xs text-[#F0F6FC] font-sans leading-relaxed ${
-                        isAutoOutputRtl ? 'text-right' : 'text-left'
-                      }`}
-                    >
-                      “{autoTranslatedOutput}”
-                    </p>
+
+                  {verifiedPreview ? (
+                    <>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-[#8B949E] block">
+                          Heard Original ({verifiedPreview.detectedInputLanguage}):
+                        </label>
+                        <input
+                          type="text"
+                          value={verifiedPreview.transcript}
+                          onChange={(e) =>
+                            setVerifiedPreview((prev) =>
+                              prev ? { ...prev, transcript: e.target.value } : prev
+                            )
+                          }
+                          className="w-full rounded-lg border border-[#30363D] bg-[#0D1117] px-2.5 py-1.5 text-xs text-[#F0F6FC] font-sans"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-[#3FB950] block">
+                          Translated Text Sent to {activeThread.ownerName} ({activeThread.targetLocale} — Voice + Text Fallback):
+                        </label>
+                        <textarea
+                          rows={2}
+                          dir={isAutoOutputRtl ? 'rtl' : 'ltr'}
+                          value={verifiedPreview.translatedText}
+                          onChange={(e) =>
+                            setVerifiedPreview((prev) =>
+                              prev ? { ...prev, translatedText: e.target.value } : prev
+                            )
+                          }
+                          className={`w-full rounded-lg border border-[#116329] bg-[#0D1117] px-2.5 py-1.5 text-xs text-[#F0F6FC] font-sans leading-relaxed resize-none ${
+                            isAutoOutputRtl ? 'text-right' : 'text-left'
+                          }`}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    autoTranslatedOutput && (
+                      <p
+                        dir={isAutoOutputRtl ? 'rtl' : 'ltr'}
+                        className={`text-xs text-[#F0F6FC] font-sans leading-relaxed ${
+                          isAutoOutputRtl ? 'text-right' : 'text-left'
+                        }`}
+                      >
+                        “{autoTranslatedOutput}”
+                      </p>
+                    )
                   )}
-                  {convertedAudioUrl && (
-                    <audio controls src={convertedAudioUrl} className="w-full h-9" />
+
+                  {(verifiedPreview?.convertedAudioUrl || convertedAudioUrl) && (
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-mono text-[#06B6D4] block">
+                        Converted {activeThread.dialect} Audio Preview:
+                      </span>
+                      <audio
+                        controls
+                        src={verifiedPreview?.convertedAudioUrl || convertedAudioUrl || undefined}
+                        className="w-full h-9"
+                      />
+                    </div>
                   )}
                 </div>
               )}
 
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#161B22] border border-[#30363D] p-3">
                 <span className="text-[11px] font-mono text-[#8B949E]">
-                  Target: #{activeThread.serialNumber} · {activeThread.ownerName}
+                  Target: #{activeThread.serialNumber} · {activeThread.ownerName} ({activeThread.targetLocale})
                 </span>
-                <button
-                  type="button"
-                  disabled={isProcessingVoice || (!recordedClip && !founderInputText.trim())}
-                  onClick={handleConvertAndSendReply}
-                  className="min-h-[48px] px-5 py-2.5 bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 text-[#0D1117] font-mono font-bold text-xs uppercase rounded-xl transition active:scale-95 flex items-center gap-2"
-                >
-                  {isProcessingVoice ? (
-                    <>
-                      <RefreshCw className="size-3.5 animate-spin" />
-                      <span>Converting Voice...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Send className="size-3.5" />
-                      <span>{replySent ? 'Sent in Owner Language ✓' : 'Send Reply'}</span>
-                    </>
-                  )}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={
+                      isPreviewingVoice ||
+                      isProcessingVoice ||
+                      (!recordedClip && !founderInputText.trim())
+                    }
+                    onClick={handlePreviewTranslation}
+                    className="min-h-[48px] px-4 py-2.5 border border-[#06B6D4] bg-[#0D1117] hover:bg-[#161B22] disabled:opacity-50 text-[#06B6D4] font-mono font-bold text-xs uppercase rounded-xl transition active:scale-95 flex items-center gap-2"
+                  >
+                    {isPreviewingVoice ? (
+                      <>
+                        <RefreshCw className="size-3.5 animate-spin" />
+                        <span>Translating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="size-3.5" />
+                        <span>Translate &amp; Preview</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={
+                      isProcessingVoice ||
+                      isPreviewingVoice ||
+                      (!recordedClip && !founderInputText.trim() && !verifiedPreview)
+                    }
+                    onClick={handleConvertAndSendReply}
+                    className="min-h-[48px] px-5 py-2.5 bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 text-[#0D1117] font-mono font-bold text-xs uppercase rounded-xl transition active:scale-95 flex items-center gap-2"
+                  >
+                    {isProcessingVoice ? (
+                      <>
+                        <RefreshCw className="size-3.5 animate-spin" />
+                        <span>Converting Voice...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="size-3.5" />
+                        <span>
+                          {replySent
+                            ? 'Sent Voice + Text ✓'
+                            : verifiedPreview
+                            ? 'Confirm & Send Reply'
+                            : 'Send Reply'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 
