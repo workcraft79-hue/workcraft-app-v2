@@ -49,7 +49,12 @@ import {
   signSessionToken,
   verifyFounderPin,
 } from './security.js';
-import { resolveTargetLocale, translateAndSynthesizeVoice } from './voiceTranslator.js';
+import {
+  resolveTargetLocale,
+  synthesizeEdgeTtsInMemory,
+  transcribeChairIntentAudio,
+  translateAndSynthesizeVoice,
+} from './voiceTranslator.js';
 import {
   appendVoiceMessage,
   getLiveUsageMeter,
@@ -776,6 +781,65 @@ export function createApiApp(port = 3000): express.Express {
     }
   });
 
+  // Zero-quota natural human voice neural TTS endpoint for Salon Owner Dashboard hands-free alerts
+  app.post('/api/voice/tts', requireAuth, async (req, res) => {
+    try {
+      const text = sanitizePlainText(req.body?.text, 1500);
+      const targetLocale = resolveTargetLocale(
+        typeof req.body?.locale === 'string' ? req.body.locale : undefined,
+        undefined
+      );
+      if (!text) {
+        return res.status(400).json({ error: 'Speech text is required.' });
+      }
+      const ttsResult = await synthesizeEdgeTtsInMemory(text, targetLocale);
+      if (!ttsResult.audioBase64) {
+        return res.status(503).json({
+          error: ttsResult.ttsError || 'Neural TTS unavailable.',
+          voiceName: ttsResult.voiceName,
+        });
+      }
+      return res.json({
+        audioBase64: ttsResult.audioBase64,
+        audioMimeType: 'audio/mpeg',
+        voiceName: ttsResult.voiceName,
+        ttsSource: ttsResult.ttsSource,
+      });
+    } catch (err) {
+      console.error('Voice TTS route error:', err);
+      return res.status(500).json({ error: 'Could not synthesize voice.' });
+    }
+  });
+
+  // Transcribe short spoken chair-lock voice command when browser SpeechRecognition is unavailable
+  app.post('/api/voice/chair-intent', requireAuth, async (req, res) => {
+    try {
+      const audioBase64 = typeof req.body?.audioBase64 === 'string' ? req.body.audioBase64.trim() : '';
+      const audioMimeType =
+        typeof req.body?.audioMimeType === 'string'
+          ? sanitizePlainText(req.body.audioMimeType, 80)
+          : 'audio/webm';
+      const langRaw = sanitizePlainText(req.body?.lang, 10).toLowerCase();
+      const ownerLang: 'ur' | 'ar' | 'en' =
+        langRaw.startsWith('ar') ? 'ar' : langRaw.startsWith('en') ? 'en' : 'ur';
+
+      if (!audioBase64) {
+        return res.status(400).json({ error: 'Audio recording is required.' });
+      }
+      if (audioBase64.length > 2 * 1024 * 1024) {
+        return res.status(413).json({ error: 'Audio clip too large.' });
+      }
+      const out = await transcribeChairIntentAudio(audioBase64, audioMimeType, ownerLang);
+      if (!out.transcript) {
+        return res.status(503).json({ error: out.error || 'Could not transcribe command.' });
+      }
+      return res.json({ transcript: out.transcript });
+    } catch (err) {
+      console.error('Chair intent route error:', err);
+      return res.status(500).json({ error: 'Failed to transcribe chair lock audio.' });
+    }
+  });
+
   // ===========================================================================
   // UNIFIED VOICE INBOX, LIVE USAGE METER (7-DAY CLEANUP) & WHATSAPP HEARTBEAT
   // ===========================================================================
@@ -809,9 +873,13 @@ export function createApiApp(port = 3000): express.Express {
       try {
         const authUser = req.authUser!;
         const body = req.body || {};
-        // Derive senderRole strictly from verified session cookie (prevents role spoofing)
+        // SALON_OWNER sessions are strictly locked to SALON_OWNER; FOUNDER can post as FOUNDER or simulate SALON_OWNER from Preview mode
         const senderRole: 'FOUNDER' | 'SALON_OWNER' =
-          authUser.userRole === 'FOUNDER' ? 'FOUNDER' : 'SALON_OWNER';
+          authUser.userRole === 'FOUNDER'
+            ? body.senderRole === 'SALON_OWNER'
+              ? 'SALON_OWNER'
+              : 'FOUNDER'
+            : 'SALON_OWNER';
 
         const threadId =
           typeof body.threadId === 'string' ? sanitizePlainText(body.threadId, 60) : undefined;
