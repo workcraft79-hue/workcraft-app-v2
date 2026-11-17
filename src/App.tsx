@@ -40,6 +40,7 @@ import { DetailSheet } from './components/DetailSheet';
 import { FieldAgentHub, OnboardedSalonPayload } from './components/FieldAgentHub';
 import { SalonOwnerDashboard } from './components/SalonOwnerDashboard';
 import { SilentSelfHealingBoundary } from './components/SilentSelfHealingBoundary';
+import { reportClientIncident, setActiveTelemetryRole } from './utils/errorTelemetry';
 import {
   FounderBiometricEnrollPrompt,
   FounderUnlockGate,
@@ -333,6 +334,16 @@ export default function App() {
           location: payload.location,
           planId: payload.planId,
           language: payload.language,
+          salonCategory: payload.salonCategory,
+          enabledServices: Array.isArray(payload.services)
+            ? payload.services.map((s) => ({
+                id: s.id,
+                name: s.name,
+                price: s.price,
+                durationMins: 35,
+                active: s.enabled,
+              }))
+            : undefined,
           barbers: payload.barbers,
           websiteUrl: payload.websiteUrl || '',
         }),
@@ -584,6 +595,10 @@ export default function App() {
     };
   }, [activeRole]);
 
+  useEffect(() => {
+    setActiveTelemetryRole(authUser?.userRole || activeRole);
+  }, [authUser?.userRole, activeRole]);
+
   const BASE_COUNTRY_PAUSE_LIST: { code: string; label: string; flag: string }[] = [
     { code: 'PK', label: 'Pakistan', flag: '🇵🇰' },
     { code: 'AE', label: 'UAE', flag: '🇦🇪' },
@@ -743,7 +758,19 @@ export default function App() {
                 {agentInviteError}
               </div>
             )}
-            <SilentSelfHealingBoundary areaName="Agent Invite Enrollment">
+            <SilentSelfHealingBoundary
+              areaName="Agent Invite Enrollment"
+              onSilentRecovered={(d) =>
+                reportClientIncident({
+                  role: 'AGENT',
+                  area: d.areaName,
+                  message: d.message,
+                  severity: 'MEDIUM',
+                  resolutionStatus: 'AUTO_RESOLVED',
+                  recoveryMs: 800,
+                })
+              }
+            >
               <FieldAgentHub
                 userRole="FIELD_AGENT"
                 initialAutoOpenEnrollment={true}
@@ -821,7 +848,19 @@ export default function App() {
                 {publicOnboardingError}
               </div>
             )}
-            <SilentSelfHealingBoundary areaName="Salon Self-Onboarding">
+            <SilentSelfHealingBoundary
+              areaName="Salon Self-Onboarding"
+              onSilentRecovered={(d) =>
+                reportClientIncident({
+                  role: 'END_USER',
+                  area: d.areaName,
+                  message: d.message,
+                  severity: 'MEDIUM',
+                  resolutionStatus: 'AUTO_RESOLVED',
+                  recoveryMs: 800,
+                })
+              }
+            >
               <FieldAgentHub
                 userRole="SALON_OWNER"
                 socialCampaignSource={socialCampaignSource}
@@ -1328,7 +1367,17 @@ export default function App() {
             {activeTab === 'Agent Hub / Onboarding' ? (
               <SilentSelfHealingBoundary
                 areaName="Field Agent Hub"
-                onSilentRecovered={(d) => showToast(`🛡️ Auto-recovered ${d.areaName} seamlessly`)}
+                onSilentRecovered={(d) => {
+                  reportClientIncident({
+                    role: activeRole === 'FIELD_AGENT' ? 'AGENT' : 'FOUNDER',
+                    area: d.areaName,
+                    message: d.message,
+                    severity: 'MEDIUM',
+                    resolutionStatus: 'AUTO_RESOLVED',
+                    recoveryMs: 800,
+                  });
+                  showToast(`🛡️ Auto-recovered ${d.areaName} seamlessly`);
+                }}
               >
                 <FieldAgentHub
                   onSalonCreated={handleSalonCreated}
@@ -1349,7 +1398,17 @@ export default function App() {
             ) : activeTab === 'Salon Owner Dashboard' ? (
               <SilentSelfHealingBoundary
                 areaName="Salon Portal"
-                onSilentRecovered={(d) => showToast(`🛡️ Auto-recovered ${d.areaName} seamlessly`)}
+                onSilentRecovered={(d) => {
+                  reportClientIncident({
+                    role: activeRole === 'SALON_OWNER' ? 'SALON_OWNER' : 'FOUNDER',
+                    area: d.areaName,
+                    message: d.message,
+                    severity: 'MEDIUM',
+                    resolutionStatus: 'AUTO_RESOLVED',
+                    recoveryMs: 800,
+                  });
+                  showToast(`🛡️ Auto-recovered ${d.areaName} seamlessly`);
+                }}
               >
                 {activeRole === 'SALON_OWNER' && !hasCompletedSalonOnboarding ? (
                   <FieldAgentHub
@@ -1382,7 +1441,17 @@ export default function App() {
             ) : (
               <SilentSelfHealingBoundary
                 areaName="Founder Workspace"
-                onSilentRecovered={(d) => showToast(`🛡️ Auto-recovered ${d.areaName} cleanly`)}
+                onSilentRecovered={(d) => {
+                  reportClientIncident({
+                    role: 'FOUNDER',
+                    area: d.areaName,
+                    message: d.message,
+                    severity: 'MEDIUM',
+                    resolutionStatus: 'AUTO_RESOLVED',
+                    recoveryMs: 800,
+                  });
+                  showToast(`🛡️ Auto-recovered ${d.areaName} cleanly`);
+                }}
               >
                 {activeTab === 'Voice' ? (
                   <VoiceSection
