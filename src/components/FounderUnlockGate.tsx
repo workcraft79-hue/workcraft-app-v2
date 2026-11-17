@@ -122,7 +122,7 @@ export async function enrollFounderBiometricDevice(
     const createOptions: CredentialCreationOptions = {
       publicKey: {
         rp: {
-          name: chData.rpName || 'WORKCRAFT Local',
+          name: chData.rpName || 'WorkCraft',
           id: chData.rpId || window.location.hostname,
         },
         user: {
