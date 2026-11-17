@@ -463,43 +463,181 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <label className="space-y-1.5 block">
-            <span className="text-xs font-mono text-[#8B949E] block">Discount Percentage (%)</span>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={draft.birthdayDiscountPct}
-              onChange={(e) => setDraft({ ...draft, birthdayDiscountPct: Math.max(0, Number(e.target.value) || 0) })}
-              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono font-bold text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
-            />
-          </label>
+        {(() => {
+          const offerMode: 'PCT' | 'FIXED' | 'GIFT' | 'COMBO' =
+            draft.birthdayDiscountPct > 0 && draft.birthdayFixedDiscount > 0
+              ? 'COMBO'
+              : draft.birthdayDiscountPct > 0 && draft.birthdayGiftService.trim().length > 0
+              ? 'COMBO'
+              : draft.birthdayFixedDiscount > 0 && draft.birthdayGiftService.trim().length > 0
+              ? 'COMBO'
+              : draft.birthdayDiscountPct > 0
+              ? 'PCT'
+              : draft.birthdayFixedDiscount > 0
+              ? 'FIXED'
+              : 'GIFT';
 
-          <label className="space-y-1.5 block">
-            <span className="text-xs font-mono text-[#8B949E] block">
-              Fixed Discount ({draft.currency})
-            </span>
-            <input
-              type="number"
-              min={0}
-              value={draft.birthdayFixedDiscount}
-              onChange={(e) => setDraft({ ...draft, birthdayFixedDiscount: Math.max(0, Number(e.target.value) || 0) })}
-              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono font-bold text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
-            />
-          </label>
+          const setOfferMode = (mode: 'PCT' | 'FIXED' | 'GIFT' | 'COMBO') => {
+            if (mode === 'PCT') {
+              setDraft({
+                ...draft,
+                birthdayDiscountPct: draft.birthdayDiscountPct > 0 ? draft.birthdayDiscountPct : 20,
+                birthdayFixedDiscount: 0,
+                birthdayGiftService: '',
+              });
+            } else if (mode === 'FIXED') {
+              setDraft({
+                ...draft,
+                birthdayDiscountPct: 0,
+                birthdayFixedDiscount: draft.birthdayFixedDiscount > 0 ? draft.birthdayFixedDiscount : (draft.currency === 'PKR' ? 500 : 10),
+                birthdayGiftService: '',
+              });
+            } else if (mode === 'GIFT') {
+              setDraft({
+                ...draft,
+                birthdayDiscountPct: 0,
+                birthdayFixedDiscount: 0,
+                birthdayGiftService: draft.birthdayGiftService.trim() || 'Free Deep Conditioning & Wash',
+              });
+            } else {
+              setDraft({
+                ...draft,
+                birthdayDiscountPct: draft.birthdayDiscountPct > 0 ? draft.birthdayDiscountPct : 15,
+                birthdayFixedDiscount: draft.birthdayFixedDiscount > 0 ? draft.birthdayFixedDiscount : (draft.currency === 'PKR' ? 300 : 5),
+                birthdayGiftService: draft.birthdayGiftService.trim() || 'Complimentary Beard / Facial Care',
+              });
+            }
+          };
 
-          <label className="space-y-1.5 block">
-            <span className="text-xs font-mono text-[#8B949E] block">Complimentary Service Gift</span>
-            <input
-              type="text"
-              value={draft.birthdayGiftService}
-              onChange={(e) => setDraft({ ...draft, birthdayGiftService: e.target.value })}
-              placeholder="e.g. Free Organic Hair Mask"
-              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
-            />
-          </label>
-        </div>
+          return (
+            <div className="space-y-3">
+              {/* Offer Type Switcher */}
+              <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-mono font-bold uppercase text-[#06B6D4]">
+                    Select Offer Type (Birthday &amp; Special Events)
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(
+                      [
+                        { id: 'PCT', label: '% Discount' },
+                        { id: 'FIXED', label: `Fixed ${draft.currency}` },
+                        { id: 'GIFT', label: 'Service Gift' },
+                        { id: 'COMBO', label: 'Combo Offer' },
+                      ] as const
+                    ).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setOfferMode(m.id)}
+                        className={`min-h-[38px] rounded-lg border px-2.5 py-1 text-[11px] font-mono font-bold transition ${
+                          offerMode === m.id
+                            ? 'border-[#06B6D4] bg-[#06B6D4]/15 text-[#06B6D4]'
+                            : 'border-[#30363D] bg-[#161B22] text-[#8B949E] hover:text-[#F0F6FC]'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Quick Event Offer Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#21262D]">
+                  <span className="text-[10px] font-mono text-[#8B949E] mr-1">Event Presets:</span>
+                  {[
+                    {
+                      label: '🎂 Birthday Default',
+                      pct: 20,
+                      fixed: 0,
+                      gift: 'Free Organic Hair Mask',
+                      tpl: 'Happy Birthday {client_name}! {salon_name} gifts you {offer_summary} on your special week.',
+                    },
+                    {
+                      label: '🌙 Eid Mubarak Deal',
+                      pct: 15,
+                      fixed: 0,
+                      gift: 'Free Charcoal Express Polish',
+                      tpl: 'Eid Mubarak {client_name}! Celebrate with {salon_name}: enjoy {offer_summary} this festive week.',
+                    },
+                    {
+                      label: '💐 Wedding / Party Glow',
+                      pct: 0,
+                      fixed: draft.currency === 'PKR' ? 1000 : 15,
+                      gift: 'Complimentary Hair Styling Trial',
+                      tpl: 'Special invitation for {client_name} from {salon_name}: claim {offer_summary} for your upcoming event.',
+                    },
+                    {
+                      label: '⭐ VIP Appreciation',
+                      pct: 0,
+                      fixed: 0,
+                      gift: 'Complimentary Signature Facial / Beard Spa',
+                      tpl: 'Thank you for being a VIP client at {salon_name}, {client_name}! Your reward: {offer_summary}.',
+                    },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          birthdayDiscountPct: preset.pct,
+                          birthdayFixedDiscount: preset.fixed,
+                          birthdayGiftService: preset.gift,
+                          birthdayMessageTemplate: preset.tpl,
+                        })
+                      }
+                      className="min-h-[34px] rounded-lg border border-[#30363D] bg-[#161B22] hover:border-[#D29922] px-2.5 py-1 text-[11px] font-mono text-[#F0F6FC] transition"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className={`space-y-1.5 block ${offerMode !== 'PCT' && offerMode !== 'COMBO' ? 'opacity-50' : ''}`}>
+                  <span className="text-xs font-mono text-[#8B949E] block">Discount Percentage (%)</span>
+                  <input
+                    type="number"
+                    dir="ltr"
+                    min={0}
+                    max={100}
+                    value={draft.birthdayDiscountPct}
+                    onChange={(e) => setDraft({ ...draft, birthdayDiscountPct: Math.max(0, Number(e.target.value) || 0) })}
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
+                  />
+                </label>
+
+                <label className={`space-y-1.5 block ${offerMode !== 'FIXED' && offerMode !== 'COMBO' ? 'opacity-50' : ''}`}>
+                  <span className="text-xs font-mono text-[#8B949E] block">
+                    Fixed Discount ({draft.currency})
+                  </span>
+                  <input
+                    type="number"
+                    dir="ltr"
+                    min={0}
+                    value={draft.birthdayFixedDiscount}
+                    onChange={(e) => setDraft({ ...draft, birthdayFixedDiscount: Math.max(0, Number(e.target.value) || 0) })}
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
+                  />
+                </label>
+
+                <label className={`space-y-1.5 block ${offerMode !== 'GIFT' && offerMode !== 'COMBO' ? 'opacity-50' : ''}`}>
+                  <span className="text-xs font-mono text-[#8B949E] block">Complimentary Service Gift</span>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={draft.birthdayGiftService}
+                    onChange={(e) => setDraft({ ...draft, birthdayGiftService: e.target.value })}
+                    placeholder="e.g. Free Organic Hair Mask"
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+                  />
+                </label>
+              </div>
+            </div>
+          );
+        })()}
 
         <label className="space-y-1.5 block">
           <span className="text-xs font-mono text-[#8B949E] block">
