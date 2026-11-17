@@ -222,16 +222,16 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
         startDate: '12 May 2026',
         monthsActive: 6,
         monthsPaid: 6,
-        totalRevenue: 24000,
-        setupFee: 15000,
-        monthlyFee: 1500, // 10% Starter maintenance
+        totalRevenue: 28000,
+        setupFee: 17500,
+        monthlyFee: 1750, // Monthly Starter maintenance
         history: [
-          { month: 'October 2026', amount: 1500, method: 'EasyPaisa Auto-Webhook', txn: 'EP-95412', status: 'Settled & Verified' },
-          { month: 'September 2026', amount: 1500, method: 'EasyPaisa Auto-Webhook', txn: 'EP-92338', status: 'Settled & Verified' },
-          { month: 'August 2026', amount: 1500, method: 'EasyPaisa Auto-Webhook', txn: 'EP-90114', status: 'Settled & Verified' },
-          { month: 'July 2026', amount: 1500, method: 'Direct IBFT Meezan Bank', txn: 'MB-41002', status: 'Settled & Verified' },
-          { month: 'June 2026', amount: 1500, method: 'JazzCash Direct Wallet', txn: 'JC-99201', status: 'Settled & Verified' },
-          { month: 'May 2026', amount: 16500, method: 'EasyPaisa (Setup + May Maint)', txn: 'EP-88219', status: 'Settled & Verified' },
+          { month: 'October 2026', amount: 1750, method: 'EasyPaisa Auto-Webhook', txn: 'EP-95412', status: 'Settled & Verified' },
+          { month: 'September 2026', amount: 1750, method: 'EasyPaisa Auto-Webhook', txn: 'EP-92338', status: 'Settled & Verified' },
+          { month: 'August 2026', amount: 1750, method: 'EasyPaisa Auto-Webhook', txn: 'EP-90114', status: 'Settled & Verified' },
+          { month: 'July 2026', amount: 1750, method: 'Direct IBFT Meezan Bank', txn: 'MB-41002', status: 'Settled & Verified' },
+          { month: 'June 2026', amount: 1750, method: 'JazzCash Direct Wallet', txn: 'JC-99201', status: 'Settled & Verified' },
+          { month: 'May 2026', amount: 19250, method: 'EasyPaisa (Setup + May Maint)', txn: 'EP-88219', status: 'Settled & Verified' },
         ],
       });
     } else {
@@ -244,15 +244,15 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
         startDate: '18 June 2026',
         monthsActive: 5,
         monthsPaid: 5,
-        totalRevenue: 22500,
-        setupFee: 15000,
-        monthlyFee: 1500, // 10% maintenance
+        totalRevenue: 26250,
+        setupFee: 17500,
+        monthlyFee: 1750, // Monthly maintenance
         history: [
-          { month: 'October 2026', amount: 1500, method: 'EasyPaisa', txn: 'EP-77412', status: 'Settled' },
-          { month: 'September 2026', amount: 1500, method: 'JazzCash', txn: 'JC-66338', status: 'Settled' },
-          { month: 'August 2026', amount: 1500, method: 'Bank IBFT', txn: 'BK-55114', status: 'Settled' },
-          { month: 'July 2026', amount: 1500, method: 'EasyPaisa', txn: 'EP-44002', status: 'Settled' },
-          { month: 'June 2026', amount: 16500, method: 'EasyPaisa (Setup + June)', txn: 'EP-33219', status: 'Settled' },
+          { month: 'October 2026', amount: 1750, method: 'EasyPaisa', txn: 'EP-77412', status: 'Settled' },
+          { month: 'September 2026', amount: 1750, method: 'JazzCash', txn: 'JC-66338', status: 'Settled' },
+          { month: 'August 2026', amount: 1750, method: 'Bank IBFT', txn: 'BK-55114', status: 'Settled' },
+          { month: 'July 2026', amount: 1750, method: 'EasyPaisa', txn: 'EP-44002', status: 'Settled' },
+          { month: 'June 2026', amount: 19250, method: 'EasyPaisa (Setup + June)', txn: 'EP-33219', status: 'Settled' },
         ],
       });
     }
@@ -260,7 +260,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
 
   const handleSimulateAutoReactivation = () => {
     setReactivationSuccessMsg(
-      'Payment of PKR 1,500 detected via EasyPaisa webhook! Metric box reactivated instantly · Continuous Care SLA active (<60 min recovery) · WhatsApp dispatch: "Assalamu Alaikum! We have received your 10% maintenance payment. Your Workcraft metric box and automated booking services are fully active."'
+      'Payment of PKR 1,750 detected via EasyPaisa webhook! Metric box reactivated instantly · Continuous Care SLA active (<60 min recovery) · WhatsApp dispatch: "Assalamu Alaikum! We have received your monthly maintenance payment. Your Workcraft metric box and automated booking services are fully active."'
     );
     setTimeout(() => setReactivationSuccessMsg(null), 6000);
   };
@@ -285,7 +285,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
   };
 
   return (
-    <PortalCard title={getTitle()} kicker="WORKCRAFT LOCAL" onClose={() => go('Overview')}>
+    <PortalCard title={getTitle()} kicker="WORKCRAFT" onClose={() => go('Overview')}>
       <div className="flex flex-col gap-5 pb-28 lg:pb-8 min-w-0 text-sm text-[#F0F6FC]">
         {/* 1. Contact / Clients Tab */}
         {active === 'Contact / Clients' && (
@@ -509,7 +509,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     <div className="rounded-lg bg-[#161B22] border border-[#30363D] p-3 text-[11px] font-mono text-[#3FB950] space-y-1 overflow-hidden">
                       <p className="text-[#6E7681] text-[10px] uppercase font-bold">Auto-Generated Native WhatsApp Template (Strict Greeting Rule):</p>
                       <p className="italic font-sans break-words [overflow-wrap:break-word]">
-                        “Assalamu Alaikum {selectedSalonDetail.owner}! Aap ki 10% maintenance payment PKR {selectedSalonDetail.monthlyFee.toLocaleString()} receive ho gayi hai. Continuous Care SLA (&lt;60 min recovery) active hai aur booking lines dubara open ho chuki hain. Aap ka metric box ab live hai.”
+                        “Assalamu Alaikum {selectedSalonDetail.owner}! Aap ki monthly maintenance payment PKR {selectedSalonDetail.monthlyFee.toLocaleString()} receive ho gayi hai. Continuous Care SLA (&lt;60 min recovery) active hai aur booking lines dubara open ho chuki hain. Aap ka metric box ab live hai.”
                       </p>
                     </div>
 
@@ -663,7 +663,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     Revenue Collection Breakdown by Channel
                   </h4>
                   <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">
-                    Overseas package purchases &amp; 10% monthly maintenance settle automatically into the local Pakistan bank account alongside local IBFT/Raast transfers.
+                    Overseas package purchases &amp; monthly maintenance settle automatically into the official Pakistan bank account alongside local IBFT/Raast transfers.
                   </p>
                 </div>
                 <span className="rounded bg-[#0D3822] border border-[#116329] px-2.5 py-1 text-[10px] font-mono font-bold text-[#3FB950] shrink-0">
@@ -711,7 +711,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 {[
                   {
                     name: 'Bank Account (IBFT / Raast / Overseas Wire)',
-                    desc: 'Primary settlement hub: receives local Pakistan IBFT/Raast transfers plus automatic deposits from overseas package & 10% maintenance payments.',
+                    desc: 'Primary settlement hub: receives local Pakistan IBFT/Raast transfers plus automatic deposits from overseas package & monthly maintenance payments.',
                     status: 'Primary Rail',
                   },
                   {
@@ -726,7 +726,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                   },
                   {
                     name: 'Stripe Connect (Overseas 20/80 Split)',
-                    desc: 'Same-currency direct split outside Pakistan: 20% paid straight to Agent in deal currency, 80% routed directly into WorkCraft local bank account.',
+                    desc: 'Same-currency direct split outside Pakistan: 20% paid straight to Agent in deal currency, 80% routed directly into WorkCraft official bank account.',
                     status: 'Direct Split',
                   },
                 ].map((item) => (
@@ -1290,7 +1290,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 </div>
                 <div className="p-3 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] space-y-1">
                   <span className="text-[#D29922] font-bold block">3. 4-Step Setup</span>
-                  <p className="text-[10px] text-[#8B949E] font-sans">Info ➔ Menu ➔ Package &amp; 10% SLA ➔ Link WhatsApp</p>
+                  <p className="text-[10px] text-[#8B949E] font-sans">Info ➔ Menu ➔ Package &amp; Monthly SLA ➔ Link WhatsApp</p>
                 </div>
                 <div className="p-3 rounded-xl border border-[#06B6D4] bg-[#06B6D4]/15 space-y-1">
                   <span className="text-[#06B6D4] font-bold block">4. Live PWA</span>
