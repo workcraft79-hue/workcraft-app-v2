@@ -2162,47 +2162,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     }
   }, [kamranCashHeld]);
 
-  // Co-Agent Registry & Cash Handoff State (Synced with /api/agent/co-agents)
-  interface CoAgentUiItem {
-    id: string;
-    name: string;
-    phone: string;
-    city: string;
-    splitPctOfAgentShare: number;
-    cashHeld: number;
-    dealsClosed: number;
-    status: 'ACTIVE' | 'HANDOFF_PENDING';
-  }
-  const [coAgentsList, setCoAgentsList] = useState<CoAgentUiItem[]>([
-    {
-      id: 'coagent-pk-1',
-      name: 'Bilal Raza (Co-Agent)',
-      phone: '+92 302 5544332',
-      city: 'Lahore Gulberg & Model Town',
-      splitPctOfAgentShare: 50,
-      cashHeld: 0,
-      dealsClosed: 3,
-      status: 'ACTIVE',
-    },
-  ]);
-  const [selectedCoAgentId, setSelectedCoAgentId] = useState<string>('');
-  const [newCoAgentName, setNewCoAgentName] = useState('');
-  const [newCoAgentPhone, setNewCoAgentPhone] = useState('+92 3');
-  const [newCoAgentCity, setNewCoAgentCity] = useState('');
-  const [newCoAgentSplit, setNewCoAgentSplit] = useState('50');
-  const [isSavingCoAgent, setIsSavingCoAgent] = useState(false);
-  const [coAgentStatusMsg, setCoAgentStatusMsg] = useState<string | null>(null);
-
+  // Sync Agent Held Cash Summary (/api/finance/summary)
   React.useEffect(() => {
     if (isSelfServeOwner) return;
     let active = true;
-    fetch('/api/agent/co-agents', { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { coAgents?: CoAgentUiItem[] } | null) => {
-        if (!active || !data?.coAgents) return;
-        setCoAgentsList(data.coAgents);
-      })
-      .catch(() => {});
     fetch('/api/finance/summary', { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { cashHeld?: number; dealsCount?: number } | null) => {
@@ -2217,96 +2180,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       active = false;
     };
   }, [isSelfServeOwner]);
-
-  const handleAddCoAgent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCoAgentName.trim() || !newCoAgentPhone.trim()) return;
-    setIsSavingCoAgent(true);
-    setCoAgentStatusMsg(null);
-    const splitPct = Math.min(90, Math.max(10, Number(newCoAgentSplit) || 50));
-    try {
-      const res = await fetch('/api/agent/co-agents', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newCoAgentName.trim(),
-          phone: newCoAgentPhone.trim(),
-          city: newCoAgentCity.trim() || agentTerritory,
-          splitPctOfAgentShare: splitPct,
-        }),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { coAgent?: CoAgentUiItem };
-        if (data.coAgent) {
-          setCoAgentsList((prev) => [data.coAgent!, ...prev]);
-          setNewCoAgentName('');
-          setNewCoAgentPhone('+92 3');
-          setNewCoAgentCity('');
-          setCoAgentStatusMsg(`✓ Registered ${data.coAgent.name} (${splitPct}% split).`);
-          setTimeout(() => setCoAgentStatusMsg(null), 5000);
-          return;
-        }
-      }
-    } catch {
-      // Fallback local add below
-    } finally {
-      setIsSavingCoAgent(false);
-    }
-    const localItem: CoAgentUiItem = {
-      id: `coagent_${Date.now()}`,
-      name: newCoAgentName.trim(),
-      phone: newCoAgentPhone.trim(),
-      city: newCoAgentCity.trim() || agentTerritory,
-      splitPctOfAgentShare: splitPct,
-      cashHeld: 0,
-      dealsClosed: 0,
-      status: 'ACTIVE',
-    };
-    setCoAgentsList((prev) => [localItem, ...prev]);
-    setNewCoAgentName('');
-    setNewCoAgentCity('');
-    setCoAgentStatusMsg(`✓ Registered ${localItem.name}.`);
-    setTimeout(() => setCoAgentStatusMsg(null), 5000);
-  };
-
-  const handleCoAgentHandoff = async (coAgentId: string) => {
-    setCoAgentStatusMsg(null);
-    try {
-      const res = await fetch(`/api/agent/co-agents/${encodeURIComponent(coAgentId)}/handoff`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ referenceTid: `HO-${Date.now()}` }),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as {
-          coAgent?: CoAgentUiItem;
-          leadAgentCashHeld?: number;
-        };
-        if (data.coAgent) {
-          setCoAgentsList((prev) => prev.map((c) => (c.id === coAgentId ? data.coAgent! : c)));
-        }
-        if (typeof data.leadAgentCashHeld === 'number') {
-          setCashLiabilityHeld(data.leadAgentCashHeld);
-        }
-        setCoAgentStatusMsg('✓ Co-Agent cash handoff verified and added to Lead Agent drawer.');
-        setTimeout(() => setCoAgentStatusMsg(null), 5000);
-        return;
-      }
-    } catch {
-      // Local fallback below
-    }
-    const target = coAgentsList.find((c) => c.id === coAgentId);
-    if (!target) return;
-    const nextHeld = cashLiabilityHeld + target.cashHeld;
-    setCashLiabilityHeld(nextHeld);
-    setCoAgentsList((prev) =>
-      prev.map((c) => (c.id === coAgentId ? { ...c, cashHeld: 0, status: 'ACTIVE' } : c))
-    );
-    setCoAgentStatusMsg(`✓ Handed off PKR ${target.cashHeld.toLocaleString()} to Lead Agent drawer.`);
-    setTimeout(() => setCoAgentStatusMsg(null), 5000);
-  };
 
   // Strict Biometric Thumbprint State (Zero PIN Fallback)
   const [isThumbprintVerified, setIsThumbprintVerified] = useState(false);
@@ -3444,27 +3317,8 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
           amount: activePackage.setupFee,
           tid: cleanTid,
           proofHash: computedProofHash,
-          coAgentId: selectedCoAgentId || undefined,
         }),
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then(() => {
-          if (selectedCoAgentId) {
-            setCoAgentsList((prev) =>
-              prev.map((c) =>
-                c.id === selectedCoAgentId
-                  ? {
-                      ...c,
-                      cashHeld: c.cashHeld + activePackage.setupFee,
-                      dealsClosed: c.dealsClosed + 1,
-                      status: 'HANDOFF_PENDING',
-                    }
-                  : c
-              )
-            );
-          }
-        })
-        .catch(() => {});
+      }).catch(() => {});
       if (onCashCollected) {
         onCashCollected(activePackage.setupFee, salonName);
       }
@@ -7326,120 +7180,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     </div>
                   </div>
 
-                  {/* Co-Agents Split Commission & Cash Handoff Control */}
-                  <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-4 font-mono">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#21262D] pb-2.5">
-                      <div>
-                        <h4 className="text-xs font-bold uppercase text-[#F0F6FC]">
-                          Co-Agents &amp; Sub-Agent Cash Handoff
-                        </h4>
-                        <p className="text-[11px] text-[#8B949E] font-sans">
-                          Register sub-agents under your Lead Agent ID, track their split % of your commission, and settle held cash cleanly into your drawer.
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-[#161B22] border border-[#30363D] px-2.5 py-0.5 text-[10px] text-[#06B6D4] font-bold">
-                        {coAgentsList.length} Active
-                      </span>
-                    </div>
-
-                    {coAgentStatusMsg && (
-                      <div className="rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-2 text-xs text-[#3FB950]">
-                        {coAgentStatusMsg}
-                      </div>
-                    )}
-
-                    <form onSubmit={handleAddCoAgent} className="grid gap-2.5 sm:grid-cols-4 items-end">
-                      <div>
-                        <label className="block text-[10px] uppercase text-[#8B949E] mb-1">Co-Agent Name</label>
-                        <input
-                          type="text"
-                          dir="ltr"
-                          value={newCoAgentName}
-                          onChange={(e) => setNewCoAgentName(e.target.value)}
-                          placeholder="e.g. Bilal Raza"
-                          className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs text-left text-[#F0F6FC] [unicode-bidi:isolate]"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] uppercase text-[#8B949E] mb-1">WhatsApp Phone</label>
-                        <input
-                          type="tel"
-                          value={newCoAgentPhone}
-                          onChange={(e) => setNewCoAgentPhone(e.target.value)}
-                          placeholder="+92 300 0000000"
-                          dir="ltr"
-                          className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs text-left text-[#F0F6FC] [unicode-bidi:isolate]"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] uppercase text-[#8B949E] mb-1">City &amp; Split %</label>
-                        <div className="flex gap-1.5">
-                          <input
-                            type="text"
-                            dir="ltr"
-                            value={newCoAgentCity}
-                            onChange={(e) => setNewCoAgentCity(e.target.value)}
-                            placeholder="Area"
-                            className="w-2/3 min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 py-2 text-xs text-left text-[#F0F6FC] [unicode-bidi:isolate]"
-                          />
-                          <input
-                            type="number"
-                            dir="ltr"
-                            min={10}
-                            max={90}
-                            value={newCoAgentSplit}
-                            onChange={(e) => setNewCoAgentSplit(e.target.value)}
-                            className="w-1/3 min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-2 py-2 text-xs text-[#D29922] text-center [unicode-bidi:isolate]"
-                            title="Split % of Agent Commission"
-                          />
-                        </div>
-                      </div>
-                      <button
-                        type="submit"
-                        disabled={isSavingCoAgent}
-                        className="min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-3.5 py-2 text-xs font-bold uppercase transition"
-                      >
-                        {isSavingCoAgent ? 'Saving...' : '+ Add Co-Agent'}
-                      </button>
-                    </form>
-
-                    <div className="grid gap-2.5 sm:grid-cols-2">
-                      {coAgentsList.map((coAgent) => (
-                        <div
-                          key={coAgent.id}
-                          className="rounded-xl border border-[#30363D] bg-[#161B22] p-3 flex flex-col justify-between gap-2.5"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="text-xs font-bold text-[#F0F6FC] truncate">{coAgent.name}</p>
-                              <p className="text-[11px] text-[#8B949E] truncate" dir="ltr">
-                                {coAgent.phone} · {coAgent.city}
-                              </p>
-                            </div>
-                            <span className="shrink-0 rounded-full bg-[#0D1117] border border-[#D29922]/50 px-2 py-0.5 text-[10px] text-[#D29922] font-bold">
-                              {coAgent.splitPctOfAgentShare}% Share
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[#21262D] text-[11px]">
-                            <div>
-                              <span className="text-[#8B949E] block text-[10px]">Held Cash · Deals ({coAgent.dealsClosed})</span>
-                              <span className="font-bold text-[#F0F6FC]" dir="ltr">
-                                PKR {coAgent.cashHeld.toLocaleString()}
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleCoAgentHandoff(coAgent.id)}
-                              disabled={coAgent.cashHeld <= 0}
-                              className="min-h-[40px] rounded-xl border border-[#06B6D4]/50 bg-[#0D1117] hover:border-[#06B6D4] disabled:opacity-40 px-3 py-1.5 text-[10px] font-bold text-[#06B6D4] transition"
-                            >
-                              {coAgent.cashHeld > 0 ? 'Log Cash Handoff →' : 'Cleared ✓'}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               )}
             </div>
@@ -7616,25 +7356,6 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       ? 'يتم تسجيل العهدة النقدية تلقائياً في سجل الوكيل · يُمنع النقد خارج باكستان'
                       : 'Held Cash Liability automatically recorded against agent ledger · Zero cash outside Pakistan'}
                   </p>
-                  {coAgentsList.length > 0 && (
-                    <div className="pt-1">
-                      <label className="block text-[10px] text-[#8B949E] uppercase mb-1">
-                        Assign Collection To (Optional Co-Agent Split)
-                      </label>
-                      <select
-                        value={selectedCoAgentId}
-                        onChange={(e) => setSelectedCoAgentId(e.target.value)}
-                        className="w-full min-h-[42px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-xs text-[#F0F6FC]"
-                      >
-                        <option value="">Lead Agent Direct ({agentFullName})</option>
-                        {coAgentsList.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} ({c.splitPctOfAgentShare}% Split)
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
