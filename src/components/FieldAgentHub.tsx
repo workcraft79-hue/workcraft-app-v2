@@ -2133,14 +2133,14 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     setDrawerTid(demoTid);
   };
 
-  // Strict Security & Cash Risk Framework (Pakistan Agents Only: PKR 50,000 / 2 Deals / 40 Hours)
+  // Strict Security & Cash Risk Framework (Pakistan Agents Only: PKR 50,000 / 2 Deals / 48 Hours)
   const MAX_CASH_CEILING = 50000;
   const MAX_CASH_DEALS = 2;
-  const MAX_CASH_HOLD_HOURS = 40;
+  const MAX_CASH_HOLD_HOURS = 48;
   const [cashLiabilityHeld, setCashLiabilityHeld] = useState<number>(kamranCashHeld ?? 25000);
   const [pkCashDealsCount, setPkCashDealsCount] = useState<number>((kamranCashHeld ?? 25000) > 0 ? 1 : 0);
   const [cashLiabilitySalon, setCashLiabilitySalon] = useState('Noor Beauty Lounge');
-  const [countdownHours, setCountdownHours] = useState<number>(14); // Remaining hours inside 40h window
+  const [countdownHours, setCountdownHours] = useState<number>(14); // Remaining hours inside 48h window
   const [countdownMinutes, setCountdownMinutes] = useState<number>(18);
   const [isRemitModalOpen, setIsRemitModalOpen] = useState(false);
   const [remitChannel, setRemitChannel] = useState<'Meezan Bank IBFT' | 'Raast Instant Pay' | 'EasyPaisa Official' | 'JazzCash Official'>('Meezan Bank IBFT');
@@ -2446,7 +2446,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       selfieVerified: true,
       thumbHash: 'SHA256: 9b8c-02e1-48af-9102-thumb-enrolled',
       legalRemittanceAgreed: true,
-      legalTermsText: 'Agreed: Remit physical cash within 40 hours (max PKR 50,000 / 2 cash deals) into WORKCRAFT Official Accounts. Subject to auto-stop & recovery under Laws of Pakistan.',
+      legalTermsText: 'Agreed: Remit physical cash within 48 hours (max PKR 50,000 / 2 cash deals) into WORKCRAFT Official Accounts. Subject to auto-stop & recovery. WorkCraft has the right to take legal action according to Pakistani law.',
       guarantorName: 'Tariq Mehmood',
       guarantorPhone: '+92-300-8419201',
     },
@@ -2467,7 +2467,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       selfieVerified: true,
       thumbHash: 'SHA256: 3a7e-11d9-72fc-4401-thumb-enrolled',
       legalRemittanceAgreed: true,
-      legalTermsText: 'Agreed: Remit physical cash within 40 hours (max PKR 50,000 / 2 cash deals) into WORKCRAFT Official Accounts. Subject to auto-stop & recovery under Laws of Pakistan.',
+      legalTermsText: 'Agreed: Remit physical cash within 48 hours (max PKR 50,000 / 2 cash deals) into WORKCRAFT Official Accounts. Subject to auto-stop & recovery. WorkCraft has the right to take legal action according to Pakistani law.',
       guarantorName: 'Imran Sheikh',
       guarantorPhone: '+92-321-8890123',
     },
@@ -2564,6 +2564,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
   const [cityValidationError, setCityValidationError] = useState<{ en: string; ur: string; ar: string } | null>(null);
   const [enrollSelfiePreviewUrl, setEnrollSelfiePreviewUrl] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isAnalyzingSelfie, setIsAnalyzingSelfie] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [step2BiometricError, setStep2BiometricError] = useState<string | null>(null);
   const [step4BiometricError, setStep4BiometricError] = useState<string | null>(null);
@@ -2599,12 +2600,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { exact: 'user' } },
+          video: { facingMode: { exact: 'user' }, width: { ideal: 720 }, height: { ideal: 960 } },
           audio: false,
         });
       } catch {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user' },
+          video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } },
           audio: false,
         });
       }
@@ -2622,20 +2623,141 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
     }
   };
 
-  const captureSelfieFrame = () => {
+  const captureSelfieFrame = async () => {
     const videoEl = selfieVideoRef.current;
-    if (!videoEl || videoEl.videoWidth === 0) return;
-    const canvas = document.createElement('canvas');
-    canvas.width = videoEl.videoWidth;
-    canvas.height = videoEl.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    if (!videoEl || videoEl.videoWidth === 0 || isAnalyzingSelfie) return;
+    setIsAnalyzingSelfie(true);
+    setCameraError(null);
+    try {
+      const vw = videoEl.videoWidth;
+      const vh = videoEl.videoHeight;
+      const targetRatio = 3 / 4;
+      const videoRatio = vw / vh;
+      let sx = 0;
+      let sy = 0;
+      let sw = vw;
+      let sh = vh;
+      if (videoRatio > targetRatio) {
+        sw = Math.round(vh * targetRatio);
+        sx = Math.round((vw - sw) / 2);
+      } else if (videoRatio < targetRatio) {
+        sh = Math.round(vw / targetRatio);
+        sy = Math.round((vh - sh) / 2);
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 540;
+      canvas.height = 720;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.save();
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+
+      const rejectFrame = (reason: 'dark' | 'noface' | 'clipped') => {
+        setEnrollSelfieDone(false);
+        setEnrollSelfiePreviewUrl('');
+        if (reason === 'dark') {
+          setCameraError(
+            enrollmentLang === 'ur_roman'
+              ? 'روشنی بہت کم ہے یا کیمرہ ڈھکا ہوا ہے — روشن جگہ پر پورا چہرہ سامنے رکھ کر دوبارہ تصویر لیں۔'
+              : enrollmentLang === 'ar'
+              ? 'الإضاءة منخفضة جداً أو العدسة مغطاة — يرجى الوقوف في إضاءة واضحة وإظهار كامل الوجه.'
+              : 'Lighting is too dark or lens is covered — move to clear light with your full face visible and capture again.'
+          );
+        } else if (reason === 'clipped') {
+          setCameraError(
+            enrollmentLang === 'ur_roman'
+              ? 'آدھا سر یا چہرہ کٹ رہا ہے — کیمرے سے تھوڑا پیچھے ہٹیں تاکہ پورا سر اور چہرہ بیضوی دائرے کے اندر آ جائے۔'
+              : enrollmentLang === 'ar'
+              ? 'الوجه مقطوع أو غير مكتمل داخل الإطار — ابتعد قليلاً ليظهر الرأس والوجه بالكامل داخل الإطار البيضاوي.'
+              : 'Head or face is cropped at the edge — step back slightly so your complete head and face fit cleanly inside the oval.'
+          );
+        } else {
+          setCameraError(
+            enrollmentLang === 'ur_roman'
+              ? 'واضح پورا چہرہ نظر نہیں آ رہا — اپنا مکمل چہرہ بیضوی دائرے کے بیچ میں رکھ کر دوبارہ سیلفی لیں۔'
+              : enrollmentLang === 'ar'
+              ? 'لم يتم رصد وجه كامل واضح — ضع كامل وجهك في منتصف الإطار البيضاوي وأعد المحاولة.'
+              : 'Complete face not clearly visible — center your full face inside the oval guide and retake your selfie.'
+          );
+        }
+      };
+
+      const sampleStats = (x0: number, y0: number, x1: number, y1: number) => {
+        const rx = Math.max(0, Math.floor(x0 * canvas.width));
+        const ry = Math.max(0, Math.floor(y0 * canvas.height));
+        const rw = Math.max(4, Math.floor((x1 - x0) * canvas.width));
+        const rh = Math.max(4, Math.floor((y1 - y0) * canvas.height));
+        const imgData = ctx.getImageData(rx, ry, rw, rh).data;
+        let sum = 0;
+        let sumSq = 0;
+        let count = 0;
+        for (let i = 0; i < imgData.length; i += 16) {
+          const luma = 0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2];
+          sum += luma;
+          sumSq += luma * luma;
+          count++;
+        }
+        const mean = count > 0 ? sum / count : 0;
+        const stdDev = count > 0 ? Math.sqrt(Math.max(0, sumSq / count - mean * mean)) : 0;
+        return { mean, stdDev };
+      };
+
+      const centerOval = sampleStats(0.26, 0.16, 0.74, 0.68);
+      const centerLeft = sampleStats(0.24, 0.22, 0.48, 0.64);
+      const centerRight = sampleStats(0.52, 0.22, 0.76, 0.64);
+
+      if (centerOval.mean < 28 || centerOval.mean > 246) {
+        rejectFrame('dark');
+        return;
+      }
+      if (centerOval.stdDev < 11 || Math.min(centerLeft.stdDev, centerRight.stdDev) < 8) {
+        rejectFrame('clipped');
+        return;
+      }
+
+      type BrowserFaceBox = { boundingBox: { x: number; y: number; width: number; height: number } };
+      type BrowserFaceDetectorCtor = new (opts?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
+        detect: (source: HTMLCanvasElement) => Promise<BrowserFaceBox[]>;
+      };
+      const FaceDetectorApi = (window as unknown as { FaceDetector?: BrowserFaceDetectorCtor }).FaceDetector;
+      if (typeof FaceDetectorApi === 'function') {
+        try {
+          const detector = new FaceDetectorApi({ fastMode: true, maxDetectedFaces: 2 });
+          const faces = await detector.detect(canvas);
+          if (faces.length === 0) {
+            rejectFrame('noface');
+            return;
+          }
+          const primary = faces.reduce((best, cur) =>
+            cur.boundingBox.width * cur.boundingBox.height > best.boundingBox.width * best.boundingBox.height ? cur : best
+          );
+          const box = primary.boundingBox;
+          const cx = box.x + box.width / 2;
+          const tooSmall = box.width < canvas.width * 0.16 || box.height < canvas.height * 0.16;
+          const topCut = box.y < canvas.height * 0.04;
+          const bottomCut = box.y + box.height > canvas.height * 0.93;
+          const sideCut = cx < canvas.width * 0.22 || cx > canvas.width * 0.78 || box.x < 8 || box.x + box.width > canvas.width - 8;
+          if (tooSmall || topCut || bottomCut || sideCut) {
+            rejectFrame('clipped');
+            return;
+          }
+        } catch {
+          // FaceDetector unsupported at runtime on this device — fall back to portrait region stats above
+        }
+      }
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
       setEnrollSelfiePreviewUrl(dataUrl);
       setEnrollSelfieDone(true);
       setStep2BiometricError(null);
       stopSelfieCamera();
+    } finally {
+      setIsAnalyzingSelfie(false);
     }
   };
 
@@ -3044,7 +3166,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
         return;
       }
       if (isCashAutoSuspended || pkCashDealsCount >= MAX_CASH_DEALS || (cashLiabilityHeld > 0 && countdownHours <= 0 && countdownMinutes <= 0)) {
-        setDrawerError(`Agent ID auto-paused under Pakistan Cash Policy (PKR 50,000 / 2 Deals / 40 Hours). Deposit current cash to WORKCRAFT Main Account first.`);
+        setDrawerError(`Agent ID auto-paused under Pakistan Cash Policy (PKR 50,000 / 2 Deals / 48 Hours). Deposit current cash to WORKCRAFT Main Account first.`);
         return;
       }
       if (cashLiabilityHeld + activePackage.setupFee > MAX_CASH_CEILING) {
@@ -3064,7 +3186,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
       let newRemainingDebt = cashLiabilityHeld;
       let commissionAdjusted = false;
 
-      // Track Pakistan physical cash collection + 2-deal / 50k / 40h threshold + Option A Net-Adjustment
+      // Track Pakistan physical cash collection + 2-deal / 50k / 48h threshold + Option A Net-Adjustment
       if (!isSelfServeOwner && detectedCountry.isDomestic) {
         if (setupPaymentMethod === 'Cash Collection') {
           newRemainingDebt = cashLiabilityHeld + activePackage.setupFee;
@@ -3582,15 +3704,15 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 <p className="text-xs text-[#F0F6FC] font-sans leading-relaxed">
                   {agentLanguage === 'ur' || agentLanguage === 'ur_roman' ? (
                     <>
-                      آپ کے پاس <strong dir="ltr" className="text-[#D29922]">PKR {cashLiabilityHeld.toLocaleString()}</strong> کیش موجود ہے (حد: <span dir="ltr">PKR 50,000</span> / <span dir="ltr">{pkCashDealsCount}/2</span> ڈیلز)۔ مین اکاؤنٹ میں جمع کرانے کے لیے <strong dir="ltr" className="text-[#06B6D4]">{countdownHours}h {countdownMinutes}m</strong> (40 گھنٹے کی حد میں سے) باقی ہیں۔
+                      آپ کے پاس <strong dir="ltr" className="text-[#D29922]">PKR {cashLiabilityHeld.toLocaleString()}</strong> کیش موجود ہے (حد: <span dir="ltr">PKR 50,000</span> / <span dir="ltr">{pkCashDealsCount}/2</span> ڈیلز)۔ مین اکاؤنٹ میں جمع کرانے کے لیے <strong dir="ltr" className="text-[#06B6D4]">{countdownHours}h {countdownMinutes}m</strong> (48 گھنٹے کی حد میں سے) باقی ہیں۔
                     </>
                   ) : agentLanguage === 'ar' ? (
                     <>
-                      لديك نقد محصل <strong dir="ltr" className="text-[#D29922]">PKR {cashLiabilityHeld.toLocaleString()}</strong> (الحد: <span dir="ltr">PKR 50,000</span> / <span dir="ltr">{pkCashDealsCount}/2</span> صفقات). المتبقي للإيداع في الحساب الرئيسي <strong dir="ltr" className="text-[#06B6D4]">{countdownHours}h {countdownMinutes}m</strong> من مهلة 40 ساعة.
+                      لديك نقد محصل <strong dir="ltr" className="text-[#D29922]">PKR {cashLiabilityHeld.toLocaleString()}</strong> (الحد: <span dir="ltr">PKR 50,000</span> / <span dir="ltr">{pkCashDealsCount}/2</span> صفقات). المتبقي للإيداع في الحساب الرئيسي <strong dir="ltr" className="text-[#06B6D4]">{countdownHours}h {countdownMinutes}m</strong> من مهلة 48 ساعة.
                     </>
                   ) : (
                     <>
-                      You hold <strong dir="ltr" className="text-[#D29922]">PKR {cashLiabilityHeld.toLocaleString()}</strong> (<span dir="ltr">{pkCashDealsCount} / {MAX_CASH_DEALS}</span> deals). You have <strong dir="ltr" className="text-[#06B6D4]">{countdownHours}h {countdownMinutes}m</strong> remaining out of 40 hours to deposit into the WORKCRAFT Main Account. Auto-stop triggers at PKR 50,000, 2 deals, or 40h.
+                      You hold <strong dir="ltr" className="text-[#D29922]">PKR {cashLiabilityHeld.toLocaleString()}</strong> (<span dir="ltr">{pkCashDealsCount} / {MAX_CASH_DEALS}</span> deals). You have <strong dir="ltr" className="text-[#06B6D4]">{countdownHours}h {countdownMinutes}m</strong> remaining out of 48 hours to deposit into the WORKCRAFT Main Account. Auto-stop triggers at PKR 50,000, 2 deals, or 48h.
                     </>
                   )}
                 </p>
@@ -3626,7 +3748,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
         </div>
       )}
 
-      {/* Query 6: Hard Auto-Stop Lockout Card for Pakistani Agents when PKR 50k / 2 Deals / 40h reached */}
+      {/* Query 6: Hard Auto-Stop Lockout Card for Pakistani Agents when PKR 50k / 2 Deals / 48h reached */}
       {isCashAutoSuspended && !isAgentSuspendedByFounder && effectiveHubView === 'ONBOARDING' && (
         <div
           dir={isHubRtl ? 'rtl' : 'ltr'}
@@ -3652,10 +3774,10 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                 </h3>
                 <p className="text-xs text-[#F0F6FC]/90 font-sans leading-relaxed">
                   {agentLanguage === 'ur' || agentLanguage === 'ur_roman'
-                    ? 'پاکستانی ایجنٹ کے لیے PKR 50,000 کیش، 2 ڈیلز، یا 40 گھنٹے مکمل ہونے پر آئی ڈی خودکار رک جاتی ہے۔ ورک کرافٹ کے مین اکاؤنٹ میں رقم جمع کرا کر رسید کی تصدیق کریں، سسٹم فوراً آپ کا پورٹل بحال کر دے گا۔'
+                    ? 'پاکستانی ایجنٹ کے لیے PKR 50,000 کیش، 2 ڈیلز، یا 48 گھنٹے مکمل ہونے پر آئی ڈی خودکار رک جاتی ہے۔ ورک کرافٹ کے مین اکاؤنٹ میں رقم جمع کرا کر رسید کی تصدیق کریں، سسٹم فوراً آپ کا پورٹل بحال کر دے گا۔'
                     : agentLanguage === 'ar'
-                    ? 'يتم إيقاف معرف الوكيل في باكستان تلقائياً عند بلوغ PKR 50,000 نقداً أو صفقتين أو 40 ساعة. أودع المبلغ في حساب WORKCRAFT الرئيسي وأكد الإيصال لإعادة تفعيل البوابة فوراً.'
-                    : 'Your Pakistani Agent ID automatically pauses whenever PKR 50,000 cash in hand, 2 cash deals, or 40 hours is reached. Deposit the balance into the WORKCRAFT Official Account below to automatically verify and restore your Agent Hub.'}
+                    ? 'يتم إيقاف معرف الوكيل في باكستان تلقائياً عند بلوغ PKR 50,000 نقداً أو صفقتين أو 48 ساعة. أودع المبلغ في حساب WORKCRAFT الرئيسي وأكد الإيصال لإعادة تفعيل البوابة فوراً.'
+                    : 'Your Pakistani Agent ID automatically pauses whenever PKR 50,000 cash in hand, 2 cash deals, or 48 hours is reached. Deposit the balance into the WORKCRAFT Official Account below to automatically verify and restore your Agent Hub.'}
                 </p>
               </div>
             </div>
@@ -6811,7 +6933,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     <span className="text-[#3FB950] font-bold">{agentL.badge}</span>
                   </div>
 
-                  {/* Option A Net-Adjustment Card (Localized · 40h / 2 Deals / 50k PKR) */}
+                  {/* Option A Net-Adjustment Card (Localized · 48h / 2 Deals / 50k PKR) */}
                   <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B] p-4 space-y-3 font-mono">
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#9E6A03]/50 pb-3">
                       <span className="text-xs text-[#D29922] font-bold">{agentL.optionATitle}</span>
@@ -6819,7 +6941,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                         <div className="rounded-xl bg-[#0D1117] border border-[#9E6A03] px-3 py-1 text-[11px]">
                           <span className="text-[#8B949E] mr-1.5">{agentL.windowLabel}:</span>
                           <span className="font-bold text-[#D29922]" dir="ltr">
-                            {countdownHours}h {countdownMinutes}m / 40h · {pkCashDealsCount}/2 deals
+                            {countdownHours}h {countdownMinutes}m / 48h · {pkCashDealsCount}/2 deals
                           </span>
                         </div>
                         {cashLiabilityHeld > 0 && (
@@ -8557,7 +8679,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                   </p>
                 </div>
 
-                {/* Live Selfie Viewfinder (Strict Front-Facing Live Camera Only) */}
+                {/* Live Selfie Viewfinder (Strict Front-Facing Portrait Full-Face Guide) */}
                 <div className="rounded-2xl bg-[#0D1117] border border-[#30363D] p-4 text-center space-y-3">
                   <div
                     role={!isCameraActive ? 'button' : undefined}
@@ -8572,38 +8694,73 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       }
                     }}
                     aria-label={!isCameraActive ? 'Open Live Selfie Camera' : 'Live Selfie Camera Feed'}
-                    className={`mx-auto size-40 rounded-2xl border-2 border-[#06B6D4] bg-[#161B22] grid place-items-center relative overflow-hidden ${
+                    className={`mx-auto w-48 h-64 rounded-2xl border-2 border-[#06B6D4] bg-[#161B22] grid place-items-center relative overflow-hidden ${
                       !isCameraActive ? 'cursor-pointer hover:border-[#22D3EE] transition' : ''
                     }`}
                   >
                     {isCameraActive ? (
-                      <video
-                        ref={selfieVideoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="w-full h-full object-cover scale-x-[-1]"
-                      />
+                      <>
+                        <video
+                          ref={selfieVideoRef}
+                          autoPlay
+                          playsInline
+                          muted
+                          className="w-full h-full object-cover scale-x-[-1]"
+                        />
+                        {/* Full Head & Face Oval Framing Guide */}
+                        <svg
+                          viewBox="0 0 180 240"
+                          className="pointer-events-none absolute inset-0 w-full h-full"
+                          aria-hidden="true"
+                        >
+                          <ellipse
+                            cx="90"
+                            cy="98"
+                            rx="54"
+                            ry="70"
+                            fill="none"
+                            stroke="#22D3EE"
+                            strokeWidth="2"
+                            strokeDasharray="6 4"
+                            opacity="0.9"
+                          />
+                          <path
+                            d="M28 228 C34 188, 146 188, 152 228"
+                            fill="none"
+                            stroke="#22D3EE"
+                            strokeWidth="1.5"
+                            strokeDasharray="4 4"
+                            opacity="0.65"
+                          />
+                        </svg>
+                        <span className="pointer-events-none absolute bottom-1.5 left-2 right-2 rounded-md bg-[#0D1117]/85 border border-[#06B6D4]/50 px-2 py-0.5 text-[9px] font-mono font-bold text-[#22D3EE]">
+                          {enrollmentLang === 'ur_roman'
+                            ? 'پورا سر اور چہرہ بیضوی دائرے میں رکھیں'
+                            : enrollmentLang === 'ar'
+                            ? 'ضع كامل الرأس والوجه داخل الإطار'
+                            : 'Keep full head & face inside oval'}
+                        </span>
+                      </>
                     ) : enrollSelfieDone && enrollSelfiePreviewUrl ? (
                       <>
                         <img
                           src={enrollSelfiePreviewUrl}
                           alt="Captured Agent Selfie"
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-contain bg-[#0D1117]"
                         />
                         <span className="absolute bottom-1.5 left-1.5 right-1.5 rounded-md bg-[#0D3822]/90 border border-[#116329] px-1.5 py-0.5 text-[9px] font-mono font-bold text-[#3FB950]">
-                          {enrollmentLang === 'ur_roman' ? '✓ تصویر محفوظ' : enrollmentLang === 'ar' ? '✓ تم التقاط الصورة' : '✓ SELFIE VERIFIED'}
+                          {enrollmentLang === 'ur_roman' ? '✓ مکمل چہرہ محفوظ' : enrollmentLang === 'ar' ? '✓ تم التحقق من الوجه الكامل' : '✓ FULL FACE VERIFIED'}
                         </span>
                       </>
                     ) : (
                       <div className="text-center px-3">
                         <Camera className="size-8 text-[#06B6D4] mx-auto opacity-80" />
-                        <span className="text-[9px] font-mono text-[#8B949E] block mt-1.5">
+                        <span className="text-[9px] font-mono text-[#8B949E] block mt-1.5 leading-relaxed">
                           {enrollmentLang === 'ur_roman'
-                            ? 'لائیو سیلفی کیمرہ کھولنے کے لیے یہاں کلک کریں'
+                            ? 'پورا چہرہ دکھانے کے لیے لائیو کیمرہ کھولیں'
                             : enrollmentLang === 'ar'
-                            ? 'اضغط هنا لفتح كاميرا السيلفي المباشرة'
-                            : 'OPEN LIVE SELFIE CAMERA'}
+                            ? 'افتح الكاميرا لالتقاط الوجه بالكامل'
+                            : 'OPEN LIVE SELFIE CAMERA (FULL FACE)'}
                         </span>
                       </div>
                     )}
@@ -8614,16 +8771,15 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       <>
                         <button
                           type="button"
+                          disabled={isAnalyzingSelfie}
                           onClick={captureSelfieFrame}
-                          className="min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] px-4 py-2 text-xs font-mono font-bold text-[#0D1117] transition flex items-center gap-1.5"
+                          className="min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] px-4 py-2 text-xs font-mono font-bold text-[#0D1117] transition flex items-center gap-1.5 disabled:opacity-60"
                         >
                           <Camera className="size-4" />
                           <span>
-                            {enrollmentLang === 'ur_roman'
-                              ? 'ابھی تصویر کھینچیں'
-                              : enrollmentLang === 'ar'
-                              ? 'التقاط الصورة الآن'
-                              : 'Capture Selfie Photo'}
+                            {isAnalyzingSelfie
+                              ? (enrollmentLang === 'ur_roman' ? 'چہرہ چیک ہو رہا ہے...' : enrollmentLang === 'ar' ? 'جاري التحقق من الوجه...' : 'Verifying Full Face...')
+                              : (enrollmentLang === 'ur_roman' ? 'ابھی تصویر کھینچیں' : enrollmentLang === 'ar' ? 'التقاط الصورة الآن' : 'Capture Selfie Photo')}
                           </span>
                         </button>
                         <button
@@ -9084,7 +9240,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                     </div>
                   )}
 
-                  {/* ROW 1: GUARANTOR DETAILS (Pakistan Only) */}
+                  {/* ROW 1: GUARANTOR DETAILS (Pakistan Only — Outer RTL in Urdu/Arabic, Inside Name & Phone Boxes Strictly LTR) */}
                   {isPk && (
                     <div className="rounded-2xl border border-[#9E6A03] bg-[#3B2E0B]/35 p-3.5 space-y-2.5">
                       <div className="space-y-0.5">
@@ -9110,7 +9266,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                             value={enrollGuarantorName}
                             onChange={(e) => setEnrollGuarantorName(e.target.value)}
                             placeholder="e.g. Tariq Mehmood"
-                            className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-xs text-left text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                            className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-xs text-left [direction:ltr] [unicode-bidi:isolate] placeholder:text-left text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
                           />
                         </div>
                         <div>
@@ -9119,18 +9275,19 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           </label>
                           <input
                             type="tel"
+                            inputMode="tel"
                             dir="ltr"
                             value={enrollGuarantorPhone}
                             onChange={(e) => setEnrollGuarantorPhone(e.target.value)}
                             placeholder="0300 1234567"
-                            className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-xs font-mono text-left text-[#06B6D4] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                            className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-xs font-mono text-left [direction:ltr] [unicode-bidi:isolate] placeholder:text-left text-[#06B6D4] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
                           />
                         </div>
                       </div>
                     </div>
                   )}
 
-                  {/* ROW 2: NEXT OF KIN DETAILS (Marked Optional) */}
+                  {/* ROW 2: NEXT OF KIN DETAILS (Outer RTL in Urdu/Arabic, Inside Name & Phone Boxes Strictly LTR) */}
                   <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-mono font-bold text-[#F0F6FC]">
@@ -9162,7 +9319,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           value={enrollNextOfKin}
                           onChange={(e) => setEnrollNextOfKin(e.target.value)}
                           placeholder="e.g. Shahid Tariq"
-                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs text-left text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs text-left [direction:ltr] [unicode-bidi:isolate] placeholder:text-left text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
                         />
                       </div>
                       <div>
@@ -9171,11 +9328,12 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                         </label>
                         <input
                           type="tel"
+                          inputMode="tel"
                           dir="ltr"
                           value={enrollNextOfKinPhone}
                           onChange={(e) => setEnrollNextOfKinPhone(e.target.value)}
                           placeholder={payoutCfg.mobilePlaceholder}
-                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs font-mono text-left text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
+                          className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-xs font-mono text-left [direction:ltr] [unicode-bidi:isolate] placeholder:text-left text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
                         />
                       </div>
                     </div>
@@ -9232,7 +9390,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       </span>
                     </span>
                     <span className="text-[10px] font-mono text-[#D29922] bg-[#3B2E0B] border border-[#9E6A03] px-2 py-0.5 rounded font-bold shrink-0">
-                      {detectCountryFromPhone(enrollAgentPhone, enrollAgentCity).code === 'PK' ? '40H · 50K · 2 DEALS' : '100% CASHLESS'}
+                      {detectCountryFromPhone(enrollAgentPhone, enrollAgentCity).code === 'PK' ? '48H · 50K · 2 DEALS' : '100% CASHLESS'}
                     </span>
                   </div>
 
@@ -9250,11 +9408,11 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       {detectCountryFromPhone(enrollAgentPhone, enrollAgentCity).code === 'PK' ? (
                         enrollmentLang === 'ur_roman' ? (
                           <p dir="rtl" className="text-sm text-[#F0F6FC] font-sans leading-relaxed text-right break-words [overflow-wrap:break-word]">
-                            &ldquo;میں اقرار کرتا ہوں کہ تمام وصول شدہ نقدی رقم ۴۰ گھنٹے، ۵۰,۰۰۰ روپے حد یا ۲ ڈیلز مکمل ہونے سے پہلے ورک کرافٹ کے آفیشل اکاؤنٹس میں جمع کرواؤں گا۔ اگر ان حدود میں سے کوئی بھی حد پار ہوئی تو میرا ایجنٹ آئی ڈی خودکار طور پر عارضی بند کر دیا جائے گا اور رقم جمع کرانے پر بحال ہوگا۔&rdquo;
+                            &ldquo;میں اقرار کرتا ہوں کہ تمام وصول شدہ نقدی رقم ۴۸ گھنٹے، ۵۰,۰۰۰ روپے حد یا ۲ ڈیلز مکمل ہونے سے پہلے ورک کرافٹ کے آفیشل اکاؤنٹس میں جمع کرواؤں گا۔ اگر ان حدود میں سے کوئی بھی حد پار ہوئی تو میرا ایجنٹ آئی ڈی خودکار طور پر عارضی بند کر دیا جائے گا اور رقم جمع کرانے پر بحال ہوگا۔ ورک کرافٹ کو پاکستانی قانون کے مطابق قانونی کارروائی کا حق حاصل ہے۔&rdquo;
                           </p>
                         ) : (
                           <p dir="ltr" className="text-xs text-[#F0F6FC] font-sans leading-relaxed text-left break-words [overflow-wrap:break-word]">
-                            &ldquo;I agree to remit all physical cash collected within 40 hours (or before reaching PKR 50,000 held / 2 cash deals) into WORKCRAFT Official Accounts (EasyPaisa, JazzCash, or Meezan Bank). I acknowledge that hitting PKR 50,000, 2 deals, or 40 hours automatically pauses my Agent ID until remitted and verified.&rdquo;
+                            &ldquo;I agree to remit all physical cash collected within 48 hours (or before reaching PKR 50,000 held / 2 cash deals) into WORKCRAFT Official Accounts (EasyPaisa, JazzCash, or Meezan Bank). I acknowledge that hitting PKR 50,000, 2 deals, or 48 hours automatically pauses my Agent ID until remitted and verified. WorkCraft has the right to take legal action according to Pakistani law.&rdquo;
                           </p>
                         )
                       ) : enrollmentLang === 'ar' ? (
@@ -9384,7 +9542,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                           thumbHash: enrollThumbHash || 'SHA256: 3c9f-88a1-agent-thumb-enrolled',
                           legalRemittanceAgreed: true,
                           legalTermsText: detStep4.code === 'PK'
-                            ? 'Agreed: Remit physical cash within 40h (max PKR 50,000 / 2 cash deals) to WORKCRAFT Official Accounts under Pakistani law.'
+                            ? 'Agreed: Remit physical cash within 48 hours (max PKR 50,000 / 2 cash deals) to WORKCRAFT Official Accounts. WorkCraft has the right to take legal action according to Pakistani law.'
                             : 'Agreed: 100% cashless digital policy, immediate contract termination on misconduct.',
                           guarantorName: enrollGuarantorName || undefined,
                           guarantorPhone: enrollGuarantorPhone || undefined,
@@ -9409,28 +9567,45 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
 
             {/* STEP 5: ENROLLMENT CONFIRMED & HOME SCREEN PWA INSTALL */}
             {enrollmentStep === 5 && (
-              <div className="space-y-4 text-center animate-in zoom-in-95">
+              <div
+                dir={enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'rtl' : 'ltr'}
+                className="space-y-4 text-center animate-in zoom-in-95"
+              >
                 <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-[#0D3822] border border-[#116329] text-[#3FB950]">
                   <CheckCircle2 className="size-10" />
                 </div>
 
-                <div className="space-y-1">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-[#3FB950] font-bold">
+                <div className="space-y-1.5">
+                  <span dir="ltr" className="text-[10px] font-mono uppercase tracking-wider text-[#3FB950] font-bold block">
                     DAY-1 ENROLLMENT 100% COMPLETE &amp; VERIFIED
                   </span>
-                  <h3 className="text-xl font-black text-[#F0F6FC]">
+                  <h3
+                    dir={enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'rtl' : 'ltr'}
+                    className="text-xl font-black text-[#F0F6FC]"
+                  >
                     {enrollmentLang === 'ur_roman'
                       ? 'مبارک ہو! آپ کا فیلڈ ایجنٹ اکاؤنٹ ایکٹیو ہے'
                       : enrollmentLang === 'ar'
                       ? 'تهانينا! حساب الوكيل الميداني مفعل بنجاح'
                       : 'Congratulations! Field Agent Terminal Activated'}
                   </h3>
-                  <p className="text-xs text-[#8B949E] font-sans max-w-md mx-auto">
-                    {enrollmentLang === 'ur_roman'
-                      ? `${enrollAgentName}، آپ کے بایومیٹرک اسناد، شناختی کارڈ، اور ادائیگی کا طریقہ سینٹرل سسٹم میں محفوظ کر لیا گیا ہے۔`
-                      : enrollmentLang === 'ar'
-                      ? `تم تشفير بصمتك البيومترية وبيانات هويتك وحسابك المالي بنجاح في النظام المركزي.`
-                      : `${enrollAgentName}, your credentials, biometric thumbprint hash, and automated payout rail have been encrypted into WORKCRAFT Central Cloud.`}
+                  <p
+                    dir={enrollmentLang === 'ur_roman' || enrollmentLang === 'ar' ? 'rtl' : 'ltr'}
+                    className="text-xs text-[#8B949E] font-sans max-w-md mx-auto leading-relaxed"
+                  >
+                    {enrollmentLang === 'ur_roman' ? (
+                      <>
+                        <bdi dir="ltr" className="font-semibold text-[#F0F6FC]">{enrollAgentName || 'Agent'}</bdi>
+                        ، آپ کے بایومیٹرک اسناد، شناختی کارڈ، اور ادائیگی کا طریقہ سینٹرل سسٹم میں محفوظ کر لیا گیا ہے۔
+                      </>
+                    ) : enrollmentLang === 'ar' ? (
+                      <>
+                        <bdi dir="ltr" className="font-semibold text-[#F0F6FC]">{enrollAgentName || 'Agent'}</bdi>
+                        ، تم تشفير بصمتك البيومترية وبيانات هويتك وحسابك المالي بنجاح في النظام المركزي.
+                      </>
+                    ) : (
+                      `${enrollAgentName || 'Agent'}, your credentials, biometric thumbprint hash, and automated payout rail have been encrypted into WORKCRAFT Central Cloud.`
+                    )}
                   </p>
                 </div>
 
