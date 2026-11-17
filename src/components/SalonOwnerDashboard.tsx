@@ -1266,7 +1266,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     const syncThread = async () => {
       try {
         const res = await fetch(
-          `/api/voice/threads?salonId=${encodeURIComponent(activeVoiceSalonId)}`
+          `/api/voice/threads?salonId=${encodeURIComponent(activeVoiceSalonId)}`,
+          { credentials: 'include' }
         );
         if (!res.ok) return;
         const data = (await res.json()) as { threads?: VoiceThreadItem[] };
@@ -1338,12 +1339,20 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }, 120);
   };
 
-  const handlePlayFounderMessage = (msgId: string, audioDataUrl: string | null, fallbackText: string) => {
+  const handlePlayFounderMessage = (
+    msgId: string,
+    audioDataUrl: string | null,
+    fallbackText: string,
+    localeHint: SupportedVoiceLocale = activeOwnerVoiceLocale
+  ) => {
     if (playingFounderMsgId === msgId) {
       if (founderVoiceAudioRef.current) {
         founderVoiceAudioRef.current.pause();
         founderVoiceAudioRef.current = null;
       }
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {}
       setPlayingFounderMsgId(null);
       return;
     }
@@ -1351,6 +1360,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       founderVoiceAudioRef.current.pause();
       founderVoiceAudioRef.current = null;
     }
+    try {
+      window.speechSynthesis?.cancel();
+    } catch {}
     if (audioDataUrl) {
       try {
         const audio = new Audio(audioDataUrl);
@@ -1365,6 +1377,26 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           founderVoiceAudioRef.current = null;
         };
         void audio.play();
+        return;
+      } catch {
+        setPlayingFounderMsgId(null);
+      }
+    }
+    if (fallbackText && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        const voices = window.speechSynthesis.getVoices() || [];
+        const langPrefix = localeHint.split('-')[0];
+        const matched =
+          voices.find((v) => v.lang.toLowerCase().startsWith(langPrefix)) ||
+          (langPrefix === 'ur' ? voices.find((v) => v.lang.toLowerCase().startsWith('hi')) : undefined);
+        const utter = new SpeechSynthesisUtterance(fallbackText);
+        if (matched) utter.voice = matched;
+        utter.lang = matched ? matched.lang : localeHint;
+        utter.rate = 0.96;
+        setPlayingFounderMsgId(msgId);
+        utter.onend = () => setPlayingFounderMsgId(null);
+        utter.onerror = () => setPlayingFounderMsgId(null);
+        window.speechSynthesis.speak(utter);
         return;
       } catch {
         setPlayingFounderMsgId(null);
@@ -1395,6 +1427,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       try {
         const trRes = await fetch('/api/translate-voice', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             audioBase64: ownerRecordedClip?.base64,
@@ -1430,6 +1463,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
       const msgRes = await fetch('/api/voice/threads/message', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           threadId: activeFounderVoiceThread.id,
@@ -5068,14 +5102,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                                     minute: '2-digit',
                                   })}
                                 </span>
-                                {msg.audioDataUrl && (
+                                {(msg.audioDataUrl || (isFounderMsg && displayBody)) && (
                                   <button
                                     type="button"
                                     onClick={() =>
                                       handlePlayFounderMessage(
                                         msg.id,
                                         msg.audioDataUrl ?? null,
-                                        displayBody
+                                        displayBody,
+                                        msg.targetLocale
                                       )
                                     }
                                     className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 text-[11px] font-mono font-bold text-[#F0F6FC] hover:border-[#06B6D4] flex items-center gap-1"
@@ -5086,12 +5121,21 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                                 )}
                               </div>
                             </div>
-                            <p
-                              dir={rtl ? 'rtl' : 'ltr'}
-                              className="text-sm text-[#F0F6FC] leading-relaxed font-sans"
-                            >
-                              {displayBody}
-                            </p>
+                            <div className="space-y-1">
+                              {isFounderMsg && (
+                                <span className="text-[10px] font-mono text-[#8B949E] block">
+                                  Text Message ({msg.targetLocale} · Readable if Salon is Noisy):
+                                </span>
+                              )}
+                              <p
+                                dir={rtl ? 'rtl' : 'ltr'}
+                                className={`text-sm text-[#F0F6FC] leading-relaxed font-sans ${
+                                  rtl ? 'text-right' : 'text-left'
+                                }`}
+                              >
+                                {displayBody}
+                              </p>
+                            </div>
                             {msg.audioDataUrl && (
                               <audio
                                 controls
