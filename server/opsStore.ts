@@ -40,7 +40,8 @@ export interface FinancialLedgerEntry {
     | 'CO_AGENT_HANDOFF'
     | 'MAINT_PAYMENT'
     | 'PACKAGE_UPGRADE'
-    | 'ONBOARDING_SETUP';
+    | 'ONBOARDING_SETUP'
+    | 'VIDEO_CAMPAIGN';
   salonId?: string;
   salonName: string;
   agentId?: string;
@@ -641,7 +642,7 @@ export function resolveOfficialWorkcraftDestination(method: string, currency: st
 }
 
 export function verifyAuthoritativeWorkcraftPayment(params: {
-  kind: 'SETUP' | 'MAINTENANCE' | 'UPGRADE';
+  kind: 'SETUP' | 'MAINTENANCE' | 'UPGRADE' | 'VIDEO_CAMPAIGN';
   tier?: string;
   previousTier?: string;
   currency: string;
@@ -721,6 +722,13 @@ export function verifyAuthoritativeWorkcraftPayment(params: {
     } else {
       expectedAmount = catalog[targetTier].setupFee;
     }
+  } else if (params.kind === 'VIDEO_CAMPAIGN') {
+    const isMonthly4 = String(params.tier || '').toUpperCase() === 'MONTHLY_4';
+    if (effectiveCurrency === 'PKR') {
+      expectedAmount = isMonthly4 ? 4000 : 1500;
+    } else {
+      expectedAmount = isMonthly4 ? 40 : 15;
+    }
   }
 
   if (params.kind !== 'UPGRADE' || params.previousTier) {
@@ -754,7 +762,7 @@ export function verifyAuthoritativeWorkcraftPayment(params: {
 }
 
 export function recordSalonFinancialPayment(params: {
-  type: 'MAINT_PAYMENT' | 'PACKAGE_UPGRADE' | 'ONBOARDING_SETUP';
+  type: 'MAINT_PAYMENT' | 'PACKAGE_UPGRADE' | 'ONBOARDING_SETUP' | 'VIDEO_CAMPAIGN';
   salonId: string;
   salonName: string;
   amount: number;
