@@ -40,6 +40,7 @@ export interface RetentionSettings {
 
   // Module 2: Automated 9:00 AM Birthday & Special Event Offers
   birthdayEnabled: boolean;
+  birthdayEventName?: string;
   birthdayDiscountPct: number;
   birthdayFixedDiscount: number;
   birthdayGiftService: string;
@@ -49,6 +50,7 @@ export interface RetentionSettings {
   winbackEnabled: boolean;
   winbackDays: number;
   winbackDiscountPct: number;
+  winbackFixedDiscount?: number;
   winbackAddonService: string;
   winbackMessageTemplate: string;
 
