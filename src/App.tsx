@@ -23,6 +23,7 @@ import {
   Award,
   Zap,
   Moon,
+  Volume2,
 } from 'lucide-react';
 
 import type { AuthUser } from './types/auth';
@@ -139,15 +140,25 @@ export default function App() {
     'LIVE' | 'PASSES' | 'VOICE' | 'MANAGE'
   >('LIVE');
   const [ownerHardwareAction, setOwnerHardwareAction] = useState<{
-    type: 'WAKE' | 'AUX' | 'SLEEP';
+    type: 'WAKE' | 'AUX' | 'TEST_SPEAKER';
     seq: number;
   } | null>(null);
-  const [ownerHardwareStatus, setOwnerHardwareStatus] = useState({
+  const [ownerHardwareStatus, setOwnerHardwareStatus] = useState<{
+    isWakeLockActive: boolean;
+    isLoudspeakerBoostActive: boolean;
+    isCounterSleeping: boolean;
+    overnightCount: number;
+    hasFounderVoiceReply: boolean;
+    allowedLangs: Array<'en' | 'ur' | 'ar'>;
+    ownerLang: 'en' | 'ur' | 'ar';
+  }>({
     isWakeLockActive: false,
     isLoudspeakerBoostActive: false,
     isCounterSleeping: false,
     overnightCount: 0,
     hasFounderVoiceReply: false,
+    allowedLangs: ['en', 'ur'],
+    ownerLang: 'ur',
   });
 
   const initialRoute = React.useMemo(() => getInitialRouteIntent(), []);
@@ -1052,7 +1063,7 @@ export default function App() {
                 })}
 
                 {/* Counter Hardware Controls Drawer Section (Moved off Live Floor main header) */}
-                <div className="mt-4 pt-3 border-t border-[#21262D] space-y-1.5">
+                <div className="mt-4 pt-3 border-t border-[#21262D] space-y-2">
                   <div className="px-1 text-[10px] font-mono font-bold uppercase tracking-[.2em] text-[#6E7681]">
                     {salonOwnerUiLang === 'ur'
                       ? 'کاؤنٹر کنٹرولز'
@@ -1060,93 +1071,123 @@ export default function App() {
                       ? 'أدوات الكاونتر'
                       : 'COUNTER CONTROLS'}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOwnerHardwareAction((prev) => ({
-                        type: 'WAKE',
-                        seq: (prev?.seq || 0) + 1,
-                      }));
-                    }}
-                    className={`flex w-full min-h-[42px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] font-mono font-bold transition ${
-                      ownerHardwareStatus.isWakeLockActive
-                        ? 'border-[#3FB950]/50 bg-[#1B4332]/40 text-[#3FB950]'
-                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2 truncate">
-                      <Smartphone className="size-3.5 shrink-0" />
-                      <span className="truncate">
-                        {salonOwnerUiLang === 'ur'
-                          ? 'اسکرین آن رکھیں'
-                          : salonOwnerUiLang === 'ar'
-                          ? 'إبقاء الشاشة مضاءة'
-                          : 'Keep Screen Awake'}
+
+                  {/* Unified Wake ON / OFF (24/7 WhatsApp Backend always stays live) */}
+                  <div className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOwnerHardwareAction((prev) => ({
+                          type: 'WAKE',
+                          seq: (prev?.seq || 0) + 1,
+                        }));
+                      }}
+                      className={`flex w-full min-h-[42px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] font-mono font-bold transition ${
+                        !ownerHardwareStatus.isCounterSleeping
+                          ? 'border-[#3FB950]/50 bg-[#1B4332]/40 text-[#3FB950]'
+                          : 'border-[#D29922]/50 bg-[#4A320A]/40 text-[#D29922]'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 truncate">
+                        {ownerHardwareStatus.isCounterSleeping ? (
+                          <Moon className="size-3.5 shrink-0" />
+                        ) : (
+                          <Smartphone className="size-3.5 shrink-0" />
+                        )}
+                        <span className="truncate">
+                          {salonOwnerUiLang === 'ur'
+                            ? ownerHardwareStatus.isCounterSleeping
+                              ? 'کاؤنٹر ویک: آف'
+                              : 'کاؤنٹر ویک: آن'
+                            : salonOwnerUiLang === 'ar'
+                            ? ownerHardwareStatus.isCounterSleeping
+                              ? 'تنبيه الكاونتر: متوقف'
+                              : 'تنبيه الكاونتر: مفعّل'
+                            : ownerHardwareStatus.isCounterSleeping
+                            ? 'Counter Wake: OFF'
+                            : 'Counter Wake: ON'}
+                        </span>
                       </span>
-                    </span>
-                    <span className="text-[9px] uppercase">
-                      {ownerHardwareStatus.isWakeLockActive ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOwnerHardwareAction((prev) => ({
-                        type: 'AUX',
-                        seq: (prev?.seq || 0) + 1,
-                      }));
-                    }}
-                    className={`flex w-full min-h-[42px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] font-mono font-bold transition ${
-                      ownerHardwareStatus.isLoudspeakerBoostActive
-                        ? 'border-[#D29922]/60 bg-[#4A320A]/40 text-[#D29922]'
-                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2 truncate">
-                      <Zap className="size-3.5 shrink-0" />
-                      <span className="truncate">
-                        {salonOwnerUiLang === 'ur'
-                          ? 'لاؤڈ اسپیکر بوسٹ'
-                          : salonOwnerUiLang === 'ar'
-                          ? 'مضخم السماعة AUX'
-                          : 'AUX Boost'}
+                      <span className="flex items-center gap-1.5 shrink-0">
+                        {ownerHardwareStatus.overnightCount > 0 && (
+                          <span className="rounded-full bg-[#06B6D4]/20 px-1.5 py-0.5 text-[9px] text-[#06B6D4]">
+                            {ownerHardwareStatus.overnightCount}
+                          </span>
+                        )}
+                        <span className="text-[9px] uppercase">
+                          {ownerHardwareStatus.isCounterSleeping ? 'OFF' : 'ON'}
+                        </span>
                       </span>
-                    </span>
-                    <span className="text-[9px] uppercase">
-                      {ownerHardwareStatus.isLoudspeakerBoostActive ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOwnerHardwareAction((prev) => ({
-                        type: 'SLEEP',
-                        seq: (prev?.seq || 0) + 1,
-                      }));
-                      setIsSidebarOpen(false);
-                    }}
-                    className={`flex w-full min-h-[42px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] font-mono font-bold transition ${
-                      ownerHardwareStatus.isCounterSleeping
-                        ? 'border-[#06B6D4]/60 bg-[#06B6D4]/15 text-[#06B6D4]'
-                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2 truncate">
-                      <Moon className="size-3.5 shrink-0" />
-                      <span className="truncate">
-                        {salonOwnerUiLang === 'ur'
-                          ? 'کاؤنٹر سلیپ موڈ'
-                          : salonOwnerUiLang === 'ar'
-                          ? 'وضع إغلاق الكاونتر'
-                          : 'Counter Sleep'}
-                      </span>
-                    </span>
-                    {ownerHardwareStatus.overnightCount > 0 && (
-                      <span className="rounded-full bg-[#06B6D4]/20 px-1.5 py-0.5 text-[9px] text-[#06B6D4]">
-                        {ownerHardwareStatus.overnightCount}
-                      </span>
-                    )}
-                  </button>
+                    </button>
+                    <p className="px-1 text-[10px] font-sans leading-snug text-[#8B949E]">
+                      {salonOwnerUiLang === 'ur'
+                        ? 'واٹس ایپ بوٹ 24/7 آن رہتا ہے — آف کرنے پر رات کے میسجز جمع ہو کر صبح چلتے ہیں۔'
+                        : salonOwnerUiLang === 'ar'
+                        ? 'بوت واتساب يعمل 24/7 — عند الإيقاف تُحفظ الرسائل الليلية لتشغيلها صباحاً.'
+                        : '24/7 WhatsApp Backend Live · Turning OFF quiets counter chimes & queues overnight bookings.'}
+                    </p>
+                  </div>
+
+                  {/* Loudspeaker Boost (AUX / Bluetooth) + Test Speaker + Battery Guidance */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOwnerHardwareAction((prev) => ({
+                            type: 'AUX',
+                            seq: (prev?.seq || 0) + 1,
+                          }));
+                        }}
+                        className={`flex flex-1 min-h-[42px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] font-mono font-bold transition ${
+                          ownerHardwareStatus.isLoudspeakerBoostActive
+                            ? 'border-[#D29922]/60 bg-[#4A320A]/40 text-[#D29922]'
+                            : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 truncate">
+                          <Zap className="size-3.5 shrink-0" />
+                          <span className="truncate">
+                            {salonOwnerUiLang === 'ur'
+                              ? 'لاؤڈ اسپیکر بوسٹ'
+                              : salonOwnerUiLang === 'ar'
+                              ? 'مضخم السماعة AUX'
+                              : 'AUX / BT Boost'}
+                          </span>
+                        </span>
+                        <span className="text-[9px] uppercase">
+                          {ownerHardwareStatus.isLoudspeakerBoostActive ? 'ON' : 'OFF'}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOwnerHardwareAction((prev) => ({
+                            type: 'TEST_SPEAKER',
+                            seq: (prev?.seq || 0) + 1,
+                          }));
+                        }}
+                        title="Test Speaker"
+                        className="flex min-h-[42px] items-center gap-1 rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-2.5 py-2 text-[10px] font-mono font-bold text-[#06B6D4] transition shrink-0"
+                      >
+                        <Volume2 className="size-3.5 shrink-0" />
+                        <span>
+                          {salonOwnerUiLang === 'ur'
+                            ? 'ٹیسٹ'
+                            : salonOwnerUiLang === 'ar'
+                            ? 'اختبار'
+                            : 'Test'}
+                        </span>
+                      </button>
+                    </div>
+                    <p className="px-1 text-[10px] font-sans leading-snug text-[#8B949E]">
+                      {salonOwnerUiLang === 'ur'
+                        ? 'وائرڈ AUX کیبل بلیوٹوتھ کے مقابلے میں ~50% کم بیٹری استعمال کرتی ہے؛ پیئرڈ بلیوٹوتھ اسپیکر بھی چلتا ہے۔'
+                        : salonOwnerUiLang === 'ar'
+                        ? 'كابل AUX السلكي يستهلك بطارية أقل بـ ~50% من البلوتوث؛ السماعة المقترنة بالبلوتوث تعمل أيضاً.'
+                        : 'Wired AUX uses ~50% less battery than Bluetooth; phone-paired Bluetooth speakers also work automatically.'}
+                    </p>
+                  </div>
                 </div>
               </>
             ) : (
