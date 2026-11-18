@@ -88,6 +88,8 @@ interface BookingRecord {
   canceled?: boolean;
   sourceType?: 'WHATSAPP_BOT' | 'WALK_IN_BUSY';
   chairLabel?: string;
+  reminderReplyLang?: 'en' | 'ur' | 'ar';
+  reminderReplyText?: string;
   status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED';
 }
 
@@ -160,24 +162,42 @@ function formatTimeFromMinutes(totalMins: number): string {
 
 const BARBER_SCRIPT_ALIASES: Record<string, string[]> = {
   hamza: ['hamza', 'حمزہ', 'حمزة'],
-  aslam: ['aslam', 'اسلم'],
+  aslam: ['aslam', 'اسلم', 'أسلم'],
   tariq: ['tariq', 'طارق'],
   ali: ['ali', 'علی'],
   bilal: ['bilal', 'بلال'],
+  zia: ['zia', 'زیا', 'ضیاء', 'ضياء', 'ziaulhaq'],
+  kamran: ['kamran', 'کامران', 'كامران'],
+  zeeshan: ['zeeshan', 'ذیشان', 'زيشان'],
+  usman: ['usman', 'عثمان'],
+  faisal: ['faisal', 'فیصل', 'فيصل'],
+  salman: ['salman', 'سلمان'],
+  hassan: ['hassan', 'حسن'],
+  ahmed: ['ahmed', 'احمد', 'أحمد'],
+  farhan: ['farhan', 'فرحان'],
+  nadeem: ['nadeem', 'ندیم', 'نديم'],
   ayesha: ['ayesha', 'عائشہ', 'عائشة'],
   fatima: ['fatima', 'فاطمہ', 'فاطمة'],
   hina: ['hina', 'حنا'],
   sara: ['sara', 'سارہ', 'سارة'],
 };
 
+const HONORIFIC_REGEX =
+  /\b(mr\.?|mrs\.?|ms\.?|dr\.?|ustad|master|bhai|sahab|sir|janab)\b|محترم|استاد|صاحب/gi;
+
 function normalizeSpokenHour(rawHour: number, explicitMeridiem?: string): number {
   if (explicitMeridiem) {
-    const mer = explicitMeridiem.toUpperCase();
-    if (mer.startsWith('P') && rawHour < 12) return rawHour + 12;
-    if (mer.startsWith('A') && rawHour === 12) return 0;
+    const rawMer = explicitMeridiem.trim();
+    const asciiMer = rawMer.replace(/[^a-z]/gi, '').toUpperCase();
+    if (asciiMer.startsWith('P') || rawMer.includes('م')) {
+      return rawHour < 12 ? rawHour + 12 : rawHour;
+    }
+    if (asciiMer.startsWith('A') || rawMer.includes('ص')) {
+      return rawHour === 12 ? 0 : rawHour;
+    }
     return rawHour;
   }
-  // Salon hours heuristic: 1..10 without AM/PM defaults to afternoon/evening PM (e.g. "7 to 8" -> 7:00 PM to 8:00 PM)
+  // Salon hours heuristic: 1..10 without AM/PM defaults to afternoon/evening PM (e.g. "2 to 3" -> 2:00 PM to 3:00 PM)
   if (rawHour >= 1 && rawHour <= 10) return rawHour + 12;
   return rawHour;
 }
@@ -186,6 +206,8 @@ function parseVoiceChairIntent(
   rawTranscript: string,
   barbers: string[]
 ): {
+  matched: boolean;
+  missingReason?: 'BARBER' | 'TIME' | 'BOTH';
   barberName: string;
   startTimeSlot: string;
   endTimeSlot: string;
@@ -194,25 +216,30 @@ function parseVoiceChairIntent(
   durationMins: number;
 } {
   const transcript = rawTranscript.trim();
-  const lower = transcript.toLowerCase();
+  const strippedTranscript = transcript.replace(HONORIFIC_REGEX, ' ').replace(/\s+/g, ' ').trim();
+  const lower = strippedTranscript.toLowerCase();
 
-  // 1. Match active barber from roster (supports English, Roman Urdu, Urdu script, Arabic script)
-  let matchedBarber = barbers[0] || 'Master Aslam';
+  // 1. Strict barber match against active roster (supports English, Roman Urdu, Urdu script, Arabic script)
+  let matchedBarber = '';
   for (const b of barbers) {
     const bLower = b.toLowerCase();
     const cleanedTokens = bLower
-      .replace(/\bmaster\b/g, '')
+      .replace(HONORIFIC_REGEX, ' ')
+      .replace(/\(.*?\)/g, ' ')
       .trim()
       .split(/\s+/)
-      .filter((t) => t.length >= 3);
+      .filter((t) => t.length >= 2);
     if (lower.includes(bLower)) {
       matchedBarber = b;
       break;
     }
     const tokenHit = cleanedTokens.some((tok) => {
-      if (lower.includes(tok)) return true;
+      const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp(`\\b${escaped}\\b`, 'i').test(lower)) return true;
       const aliases = BARBER_SCRIPT_ALIASES[tok];
-      return aliases ? aliases.some((al) => transcript.includes(al) || lower.includes(al)) : false;
+      return aliases
+        ? aliases.some((al) => strippedTranscript.includes(al) || lower.includes(al))
+        : false;
     });
     if (tokenHit) {
       matchedBarber = b;
@@ -220,10 +247,15 @@ function parseVoiceChairIntent(
     }
   }
 
-  // Fallback check if spoken name wasn't first word in default roster (e.g. "Hamza" matches "Hamza" or first barber if not present)
-  if (matchedBarber === (barbers[0] || 'Master Aslam')) {
+  if (!matchedBarber) {
     for (const [key, aliases] of Object.entries(BARBER_SCRIPT_ALIASES)) {
-      if (aliases.some((al) => lower.includes(al) || transcript.includes(al))) {
+      if (
+        aliases.some(
+          (al) =>
+            new RegExp(`\\b${al.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(lower) ||
+            strippedTranscript.includes(al)
+        )
+      ) {
         const foundInRoster = barbers.find((b) => b.toLowerCase().includes(key));
         if (foundInRoster) {
           matchedBarber = foundInRoster;
@@ -236,22 +268,24 @@ function parseVoiceChairIntent(
   const now = new Date();
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
-  // 2. Match explicit time range: "7 to 8", "7 se 8", "5:30 to 6:30", "7 pm to 8 pm", "7 سے 8", "من 7 إلى 8"
+  // 2. Match explicit time range: "from 2:00 p.m. to 3:00 p.m.", "7 to 8", "7 se 8", "7 سے 8", "من 7 إلى 8"
   const rangeRegex =
-    /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:to|-|–|se|tak|بجے\s*سے|سے|إلى|حتى)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
+    /(?:from\s+|من\s+)?(\d{1,2})(?::(\d{2}))?\s*(a\.?\s*m\.?|p\.?\s*m\.?|بجے|ص|م)?\s*(?:to|-|–|until|till|se|tak|بجے\s*سے|سے|إلى|حتى)\s*(\d{1,2})(?::(\d{2}))?\s*(a\.?\s*m\.?|p\.?\s*m\.?|بجے|ص|م)?/i;
   const rangeMatch = transcript.match(rangeRegex);
   if (rangeMatch) {
     const startH = normalizeSpokenHour(parseInt(rangeMatch[1], 10), rangeMatch[3] || rangeMatch[6]);
     const startM = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : 0;
-    let endH = normalizeSpokenHour(parseInt(rangeMatch[4], 10), rangeMatch[6] || rangeMatch[3]);
+    const endH = normalizeSpokenHour(parseInt(rangeMatch[4], 10), rangeMatch[6] || rangeMatch[3]);
     const endM = rangeMatch[5] ? parseInt(rangeMatch[5], 10) : 0;
-    let startMinutes = startH * 60 + startM;
+    const startMinutes = startH * 60 + startM;
     let endMinutes = endH * 60 + endM;
     if (endMinutes <= startMinutes) {
       endMinutes += 12 * 60;
     }
     const durationMins = Math.max(15, endMinutes - startMinutes);
     return {
+      matched: Boolean(matchedBarber),
+      missingReason: matchedBarber ? undefined : 'BARBER',
       barberName: matchedBarber,
       startTimeSlot: formatTimeFromMinutes(startMinutes),
       endTimeSlot: formatTimeFromMinutes(endMinutes),
@@ -262,7 +296,7 @@ function parseVoiceChairIntent(
   }
 
   // 3. Match durations: "30 minutes", "45 mins", "1 hour", "ek ghanta", "aadha ghanta", "ساعة", "نصف ساعة"
-  let durationMins = 30;
+  let durationMins = 0;
   const hourMatch = lower.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ghant[ae]|ساعة|ساعات|گھنٹہ|گھنٹے)/i);
   const minMatch = lower.match(/(\d+)\s*(?:minutes?|mins?|min|منٹ|دقيقة|دقائق)/i);
 
@@ -276,15 +310,31 @@ function parseVoiceChairIntent(
     durationMins = Math.max(10, parseInt(minMatch[1], 10));
   }
 
-  const startMinutes = nowMinutes;
-  const endMinutes = startMinutes + durationMins;
+  if (durationMins > 0) {
+    const startMinutes = nowMinutes;
+    const endMinutes = startMinutes + durationMins;
+    return {
+      matched: Boolean(matchedBarber),
+      missingReason: matchedBarber ? undefined : 'BARBER',
+      barberName: matchedBarber,
+      startTimeSlot: formatTimeFromMinutes(startMinutes),
+      endTimeSlot: formatTimeFromMinutes(endMinutes),
+      startMinutes,
+      endMinutes,
+      durationMins,
+    };
+  }
+
+  // Missing time slot/duration
   return {
+    matched: false,
+    missingReason: matchedBarber ? 'TIME' : 'BOTH',
     barberName: matchedBarber,
-    startTimeSlot: formatTimeFromMinutes(startMinutes),
-    endTimeSlot: formatTimeFromMinutes(endMinutes),
-    startMinutes,
-    endMinutes,
-    durationMins,
+    startTimeSlot: '',
+    endTimeSlot: '',
+    startMinutes: nowMinutes,
+    endMinutes: nowMinutes,
+    durationMins: 0,
   };
 }
 
@@ -318,6 +368,7 @@ interface VoiceEventLog {
   ownerVoiceLang: VoiceLang;
   summary: string;
   spokenText: string;
+  originalClientNote?: string;
   time: string;
   isUrgent: boolean;
 }
@@ -712,15 +763,27 @@ const REGION_CONFIGS: Record<
 };
 
 export const SERVICE_TRANSLATIONS: Record<string, { ur: string; ar: string }> = {
-  'Master Haircut & Skin Fade': { ur: 'ماسٹر ہیر کٹ اور سکن فید', ar: 'قص شعر متطور وتدرج دقيق' },
+  'Master Haircut & Skin Fade': { ur: 'ماسٹر ہیئر کٹ اور سکن فیڈ', ar: 'قص شعر متطور وتدرج دقيق' },
   'Royal Beard Sculpt & Ozone Steam': { ur: 'رائل بیئرڈ ڈیزائن اور اوزون اسٹیم', ar: 'تحديد وتشذيب اللحية مع البخار الملكي' },
+  'Classic Beard Trim & Sculpt': { ur: 'کلاسک داڑھی ٹرم اور سیٹنگ', ar: 'تشذيب وتحديد اللحية الكلاسيكي' },
+  'Hot Towel Steam Shave': { ur: 'ہاٹ ٹاول اسٹیم شیو', ar: 'حلاقة بالمنشفة الساخنة والبخار' },
+  'Hair Color & Camo': { ur: 'ہیئر کلر اور کیمو', ar: 'صبغة وتلوين الشعر' },
+  'Charcoal Deep Detox Facial': { ur: 'چارکول ڈیپ ڈیٹوکس فیشل', ar: 'تنظيف عميق للبشرة بالفحم' },
   'Charcoal Detox Facial & Scrub': { ur: 'چارکول ڈیٹوکس فیشل اور اسکرب', ar: 'تنظيف بشرة بالفحم وسنفرة عميقة' },
+  'Keratin Hair Protein': { ur: 'کیراٹین ہیئر پروٹین', ar: 'بروتين الكيراتين للشعر' },
+  'Herbal Mint Head Massage': { ur: 'ہربل منٹ ہیڈ مساج', ar: 'مساج الرأس بالنعناع والأعشاب' },
+  'Groom Signature Package': { ur: 'دولہا سگنیچر پیکیج', ar: 'باقة العريس المميزة' },
+  'Haircut + Beard Styling Combo': { ur: 'ہیئر کٹ + داڑھی اسٹائلنگ کومبو', ar: 'قص شعر وتصفيف اللحية' },
   'Executive Groom Styling & Wash': { ur: 'ایگزیکٹو گرومنگ اور ہیئر واش', ar: 'تصفيف وغسيل الشعر للرجال' },
   'Head Massage & Herbal Oil Treatment': { ur: 'سر کا مساج اور ہربل آئل ٹریٹمنٹ', ar: 'مساج الرأس مع الزيوت الطبيعية' },
   'Signature Party Makeup & Styling': { ur: 'سگنیچر پارٹی میک اپ اور اسٹائلنگ', ar: 'مكياج سهرة مميز وتصفيف' },
   'Barat / Walima Bridal Package': { ur: 'بارات / ولیمہ برائیڈل پیکیج', ar: 'باقة العروس الكاملة للزفاف' },
   'Hydra-Facial & Skin Polish': { ur: 'ہائیڈرا فیشل اور اسکن پالش', ar: 'هيدرافيشل وصنفرة وتفتيح البشرة' },
   'Keratin Hair Protein Treatment': { ur: 'کیراٹین ہیئر پروٹین ٹریٹمنٹ', ar: 'علاج بروتين الكيراتين للشعر' },
+  'Keratin Hair Rebonding / Smoothing': { ur: 'کیراٹین ہیئر ریبانڈنگ / اسموتھنگ', ar: 'فرد وتنعيم الشعر بالكيراتين' },
+  'Mani-Pedi Classic Spa': { ur: 'مینی پیڈی کلاسک اسپا', ar: 'سبا مانيكير وباديكير كلاسيكي' },
+  'Full Face Threading & Waxing': { ur: 'فل فیس تھریڈنگ اور ویکسنگ', ar: 'إزالة شعر الوجه بالفتلة والشمع' },
+  'Deep Conditioning Hair Spa': { ur: 'ڈیپ کنڈیشننگ ہیئر اسپا', ar: 'حمام كريم وعناية عميقة للشعر' },
   'Full Mani-Pedi & Paraffin Wax': { ur: 'مکمل مینی پیڈی اور پیرافین ویکس', ar: 'مانيكير وباديكير مع شمع البارافين' },
 };
 
@@ -834,6 +897,58 @@ export const OWNER_UI_I18N: Record<
     addBarberBtn: string;
     addStylistBtn: string;
     saveHoursBtn: string;
+    walkInHelper: string;
+    passesHelper: string;
+    bridalHelper: string;
+    founderHelpTab: string;
+    handsFreeAlertsTab: string;
+    lockedCategoryBadge: string;
+    lockedCategoryDescMens: string;
+    lockedCategoryDescLadies: string;
+    staffDesc: string;
+    saveChangesBtn: string;
+    cancelBtn: string;
+    barberNamePlaceholder: string;
+    chairPlaceholder: string;
+    addStaffNamePlaceholder: string;
+    barberPerfTitle: string;
+    barberPerfKicker: string;
+    allChairsCombined: string;
+    clientRatingLabel: string;
+    repeatRateLabel: string;
+    mostRequestedServicesLabel: string;
+    servicesRatesTitle: string;
+    servicesRatesKicker: string;
+    servicesRatesDesc: string;
+    addServiceBtn: string;
+    closeFormBtn: string;
+    saveAndSyncBtn: string;
+    serviceNamePlaceholder: string;
+    minsPlaceholder: string;
+    activeLabel: string;
+    minUnit: string;
+    localizedLabelPrefix: string;
+    salonHoursTitle: string;
+    salonHoursKicker: string;
+    salonHoursDesc: string;
+    monThuLabel: string;
+    fridayLabel: string;
+    satSunLabel: string;
+    openLabel: string;
+    closedLabel: string;
+    openingTimeLabel: string;
+    closingTimeLabel: string;
+    openShortLabel: string;
+    closeShortLabel: string;
+    prayerBreakStartLabel: string;
+    prayerBreakEndLabel: string;
+    chairLockConfirmTitle: string;
+    chairLockConfirmBtn: string;
+    chairLockCancelBtn: string;
+    testDubaiArBtn: string;
+    urReplySampleBtn: string;
+    arReplySampleBtn: string;
+    playClientReplyBtn: string;
   }
 > = {
   en: {
@@ -866,12 +981,12 @@ export const OWNER_UI_I18N: Record<
     markHandled: 'Mark Handled ✓',
     quickChairLock: 'Quick Chair Lock · Instant Voice & 2-Tap Pills',
     quickChairSub:
-      'Tap or hold the mic to speak (e.g. "Hamza 30 minutes"), or use silent 2-tap duration pills to mark walk-in chairs busy automatically.',
-    holdOrTapSpeakBtn: 'Tap or Hold to Speak Lock (30s)',
-    transcribingLock: 'Transcribing Voice Lock...',
-    tapStopLock: 'Tap to Lock Now',
-    voicePlaceholder: 'Say or type e.g. "Hamza 7 to 8 PM" or "Aslam 30 minutes"',
-    parseAndLockBtn: 'Parse & Lock Chair',
+      'Tap or hold the Chair Lock Mic to speak both barber name and time (e.g. "Zia 2:00 PM to 3:00 PM"), or use silent 2-tap pills.',
+    holdOrTapSpeakBtn: 'Chair Lock Mic · Tap or Hold (30s)',
+    transcribingLock: 'Transcribing Chair Lock...',
+    tapStopLock: 'Tap to Check & Lock',
+    voicePlaceholder: 'Say or type e.g. "Aslam 2:00 PM to 3:00 PM" or "Tariq 30 minutes"',
+    parseAndLockBtn: 'Check & Lock Chair',
     freeNow: 'FREE NOW',
     busy: 'BUSY',
     tapAgain30: 'Tap Again: Confirm +30m',
@@ -913,7 +1028,7 @@ export const OWNER_UI_I18N: Record<
     adv24hDesc: "Sent automatically day prior in client's locked language",
     arr2h: '2-Hour Chair Arrival Ping',
     arr2hDesc: 'Confirms arrival or announces 15m late replies aloud',
-    voiceSupportTitle: 'Voice Support with Founder',
+    voiceSupportTitle: 'Founder Voice Help',
     voiceSupportSub:
       'Speak or type in Urdu, Arabic, or English. Your note translates cleanly for the Founder while preserving your original voice, and Founder replies play aloud in your language.',
     recordVoiceNoteTitle: 'Hold or Tap to Record Voice Support Note',
@@ -935,12 +1050,72 @@ export const OWNER_UI_I18N: Record<
     salonHours: 'Salon Hours',
     automationRewards: 'Automation & Rewards',
     windowQrPoster: 'Window QR Poster',
-    salonProfileModeLabel: 'Salon Category Profile (Persisted on WhatsApp & Posters)',
+    salonProfileModeLabel: 'Locked Onboarding Category',
     mensSalonBtn: "Men's Salon",
     ladiesParlorBtn: 'Ladies Parlor',
     addBarberBtn: 'Add Barber',
     addStylistBtn: 'Add Stylist',
     saveHoursBtn: 'Save Salon Hours',
+    walkInHelper:
+      'Manual walk-in waiting list during rush hour: track guests without WhatsApp bookings & auto-notify their turn.',
+    passesHelper:
+      'Issue 4-visit or 5-session prepaid bundles to lock repeat cashflow upfront and deduct visits 1-by-1.',
+    bridalHelper:
+      'Track high-value wedding, bridal, or groom bookings, advance deposits, home visits, and remaining balances.',
+    founderHelpTab: 'Founder Voice Help',
+    handsFreeAlertsTab: 'Hands-Free Voice Alerts',
+    lockedCategoryBadge: 'Locked From Onboarding',
+    lockedCategoryDescMens:
+      "Men's Salon & Barbershop mode is locked from onboarding across WhatsApp rate cards, floor chairs, and posters.",
+    lockedCategoryDescLadies:
+      'Ladies Beauty Parlor mode is locked from onboarding with Bridal Tracker & Female-Only Cabin policy active.',
+    staffDesc:
+      "Manage your barbers and their assigned floor chairs. Updates feed live into Today's Schedule, Walk-In seating, and WhatsApp booking slots.",
+    saveChangesBtn: 'Save Changes ✓',
+    cancelBtn: 'Cancel',
+    barberNamePlaceholder: 'Barber name',
+    chairPlaceholder: 'Chair assignment (e.g. Chair #1)',
+    addStaffNamePlaceholder: 'Barber / Stylist Name (e.g. Master Kamran)',
+    barberPerfTitle: 'Barber Performance & Top Services Breakdown',
+    barberPerfKicker: 'CHAIR RETENTION · POPULAR SERVICES PER BARBER',
+    allChairsCombined: 'All Chairs Combined',
+    clientRatingLabel: 'Client Rating',
+    repeatRateLabel: 'Repeat Client Rate',
+    mostRequestedServicesLabel: 'Most Requested Services',
+    servicesRatesTitle: 'Services & Rates',
+    servicesRatesKicker: 'SERVICE NAMES · DURATIONS · PRICING',
+    servicesRatesDesc:
+      'Edit service titles, durations (mins), and rates. Newly added services auto-translate cleanly into Urdu & Arabic.',
+    addServiceBtn: 'Add Service',
+    closeFormBtn: 'Close Form',
+    saveAndSyncBtn: 'Save & Sync ✓',
+    serviceNamePlaceholder: 'Service Name',
+    minsPlaceholder: 'Mins',
+    activeLabel: 'Active',
+    minUnit: 'min',
+    localizedLabelPrefix: 'Menu Label',
+    salonHoursTitle: 'Salon Hours',
+    salonHoursKicker: 'OPENING & CLOSING SCHEDULE · FRIDAY JUMMAH BREAK',
+    salonHoursDesc:
+      'Configure your weekly opening and closing times. The WhatsApp concierge automatically quotes these hours to customers asking when you are open.',
+    monThuLabel: 'Monday – Thursday',
+    fridayLabel: 'Friday (Jummah Schedule)',
+    satSunLabel: 'Saturday & Sunday',
+    openLabel: 'Open',
+    closedLabel: 'Closed',
+    openingTimeLabel: 'Opening Time',
+    closingTimeLabel: 'Closing Time',
+    openShortLabel: 'Open',
+    closeShortLabel: 'Close',
+    prayerBreakStartLabel: 'Prayer Break Start',
+    prayerBreakEndLabel: 'Prayer Break End',
+    chairLockConfirmTitle: 'Voice Chair Lock Check · Locking Automatically',
+    chairLockConfirmBtn: 'Confirm Now ✓',
+    chairLockCancelBtn: 'Cancel ✕',
+    testDubaiArBtn: '🔊 Test: Dubai AR Client ➔ Urdu/English',
+    urReplySampleBtn: '🔊 Listen Urdu Reply Sample',
+    arReplySampleBtn: '🔊 Listen Arabic Reply Sample',
+    playClientReplyBtn: 'Play Client Reply',
   },
   ur: {
     whatsappConnected: 'واٹس ایپ گیٹ وے · فعال',
@@ -970,14 +1145,14 @@ export const OWNER_UI_I18N: Record<
     hideProof: 'ثبوت چھپائیں',
     verifyDeposit: 'ڈپازٹ تصدیق کریں ✓',
     markHandled: 'ہینڈل ہو گیا ✓',
-    quickChairLock: 'فوری چیئر لاک · آواز اور 2-ٹیپ بٹن',
+    quickChairLock: 'فوری چیئر لاک · چیئر لاک مائیک اور 2-ٹیپ بٹن',
     quickChairSub:
-      'بولنے کے لیے مائیک دبائیں یا ٹیپ کریں (مثلاً "حمزہ 30 منٹ") یا بغیر آواز 2-ٹیپ سے واک ان چیئر مصروف کریں۔',
-    holdOrTapSpeakBtn: 'بول کر چیئر لاک کریں (30s)',
-    transcribingLock: 'آواز سمجھی جا رہی ہے...',
-    tapStopLock: 'لاک کرنے کے لیے ٹیپ کریں',
-    voicePlaceholder: 'بولیں یا لکھیں مثلاً "Hamza 7 to 8 PM" یا "Aslam 30 minutes"',
-    parseAndLockBtn: 'چیئر لاک کریں',
+      'چیئر لاک مائیک پر باربر کا نام اور وقت دونوں بولیں (مثلاً "Aslam 2:00 PM to 3:00 PM") — سسٹم بول کر 3 سیکنڈ میں کنفرم کرے گا۔',
+    holdOrTapSpeakBtn: 'چیئر لاک مائیک · بول کر لاک کریں (30s)',
+    transcribingLock: 'چیئر لاک آواز سمجھی جا رہی ہے...',
+    tapStopLock: 'چیک اور لاک کرنے کے لیے ٹیپ کریں',
+    voicePlaceholder: 'بولیں یا لکھیں مثلاً "Aslam 2:00 PM to 3:00 PM" یا "Tariq 30 minutes"',
+    parseAndLockBtn: 'چیک اور لاک کریں',
     freeNow: 'فارغ ہے',
     busy: 'مصروف',
     tapAgain30: 'دوبارہ دبائیں: +30 منٹ',
@@ -1019,7 +1194,7 @@ export const OWNER_UI_I18N: Record<
     adv24hDesc: 'ایک دن پہلے گاہک کی زبان میں خودکار بھیجا جاتا ہے',
     arr2h: '2 گھنٹے پہلے آمد کی یاددہانی',
     arr2hDesc: 'آمد کی تصدیق یا 15 منٹ تاخیر آواز میں سناتا ہے',
-    voiceSupportTitle: 'فاؤنڈر کے ساتھ وائس سپورٹ',
+    voiceSupportTitle: 'فاؤنڈر وائس سپورٹ',
     voiceSupportSub:
       'اردو، عربی یا انگریزی میں بولیں یا لکھیں۔ آپ کا پیغام اصل آواز کے ساتھ فاؤنڈر کو ترجمہ ہو کر جائے گا اور جواب آپ کی زبان میں سنایا جائے گا۔',
     recordVoiceNoteTitle: 'وائس نوٹ ریکارڈ کرنے کے لیے دبائیں یا ٹیپ کریں',
@@ -1041,12 +1216,72 @@ export const OWNER_UI_I18N: Record<
     salonHours: 'سیلون کے اوقات',
     automationRewards: 'آٹومیشن اور ریوارڈز',
     windowQrPoster: 'ونڈو QR پوسٹر',
-    salonProfileModeLabel: 'سیلون کیٹیگری پروفائل (واٹس ایپ اور پوسٹرز پر محفوظ)',
+    salonProfileModeLabel: 'آن بورڈنگ سے لاک کیٹیگری',
     mensSalonBtn: 'مینز سیلون',
     ladiesParlorBtn: 'لیڈیز پارلر',
     addBarberBtn: 'باربر شامل کریں',
     addStylistBtn: 'اسٹائلسٹ شامل کریں',
     saveHoursBtn: 'اوقات محفوظ کریں',
+    walkInHelper:
+      'رش کے اوقات میں بغیر واٹس ایپ بکنگ آنے والے واک اِن گاہکوں کی دستی قطار اور باری کی اطلاع کے لیے۔',
+    passesHelper:
+      'مستقل گاہکوں سے ایڈوانس رقم لے کر 4 یا 5 سیشنز کے پری پیڈ پاس جاری کرنے اور ہر وزٹ پر کٹوتی کے لیے۔',
+    bridalHelper:
+      'شادی، برائیڈل یا دولہا پیکجز کی ایڈوانس رقم، بقایا بیلنس اور ہوم سروس تاریخوں کا مکمل ریکارڈ۔',
+    founderHelpTab: 'فاؤنڈر وائس سپورٹ',
+    handsFreeAlertsTab: 'خودکار وائس الرٹس',
+    lockedCategoryBadge: 'آن بورڈنگ سے محفوظ',
+    lockedCategoryDescMens:
+      'مینز سیلون اور باربر شاپ موڈ آن بورڈنگ سے واٹس ایپ مینیو، چیئر لاک اور پوسٹرز پر فعال ہے۔',
+    lockedCategoryDescLadies:
+      'لیڈیز بیوٹی پارلر موڈ برائیڈل ٹریکر اور صرف خواتین پرائیویٹ کیبن پالیسی کے ساتھ فعال ہے۔',
+    staffDesc:
+      'اپنے باربرز اور ان کی مقررہ کرسیاں مینج کریں۔ تبدیلیاں لائیو شیڈول، واک ان اور واٹس ایپ بکنگز میں فوری اپڈیٹ ہوتی ہیں۔',
+    saveChangesBtn: 'تبدیلیاں محفوظ کریں ✓',
+    cancelBtn: 'منسوخ کریں',
+    barberNamePlaceholder: 'باربر کا نام',
+    chairPlaceholder: 'کرسی نمبر (مثلاً Chair #1)',
+    addStaffNamePlaceholder: 'باربر / اسٹائلسٹ کا نام (مثلاً Master Kamran)',
+    barberPerfTitle: 'باربر کارکردگی اور ٹاپ سروسز کی تفصیل',
+    barberPerfKicker: 'کرسی ریٹینشن · فی باربر مقبول سروسز',
+    allChairsCombined: 'تمام کرسیاں مشترکہ',
+    clientRatingLabel: 'کلائنٹ ریٹنگ',
+    repeatRateLabel: 'دوبارہ آنے والے گاہک',
+    mostRequestedServicesLabel: 'سب سے زیادہ طلب کی جانے والی سروسز',
+    servicesRatesTitle: 'سروسز اور ریٹس',
+    servicesRatesKicker: 'سروس کے نام · دورانیہ · قیمتیں',
+    servicesRatesDesc:
+      'سروس کے نام، منٹس اور قیمتیں تبدیل کریں۔ نئی شامل کردہ سروس خودکار اردو اور عربی میں ترجمہ ہو جاتی ہے۔',
+    addServiceBtn: 'سروس شامل کریں',
+    closeFormBtn: 'فارم بند کریں',
+    saveAndSyncBtn: 'محفوظ اور سنک کریں ✓',
+    serviceNamePlaceholder: 'سروس کا نام',
+    minsPlaceholder: 'منٹس',
+    activeLabel: 'فعال',
+    minUnit: 'منٹ',
+    localizedLabelPrefix: 'اردو نام',
+    salonHoursTitle: 'سیلون کے اوقات',
+    salonHoursKicker: 'کھلنے اور بند ہونے کے اوقات · جمعہ نماز وقفہ',
+    salonHoursDesc:
+      'ہفتہ وار کھلنے اور بند ہونے کے اوقات ترتیب دیں۔ واٹس ایپ بوٹ گاہکوں کو خودکار یہی اوقات بتاتا ہے۔',
+    monThuLabel: 'پیر تا جمعرات',
+    fridayLabel: 'جمعہ (نماز جمعہ شیڈول)',
+    satSunLabel: 'ہفتہ اور اتوار',
+    openLabel: 'کھلا ہے',
+    closedLabel: 'بند ہے',
+    openingTimeLabel: 'کھلنے کا وقت',
+    closingTimeLabel: 'بند ہونے کا وقت',
+    openShortLabel: 'کھلنا',
+    closeShortLabel: 'بند ہونا',
+    prayerBreakStartLabel: 'نماز وقفہ شروع',
+    prayerBreakEndLabel: 'نماز وقفہ ختم',
+    chairLockConfirmTitle: 'آواز چیئر لاک تصدیق · خودکار لاک ہو رہا ہے',
+    chairLockConfirmBtn: 'ابھی کنفرم کریں ✓',
+    chairLockCancelBtn: 'منسوخ کریں ✕',
+    testDubaiArBtn: '🔊 ٹیسٹ: دبئی عربی کلائنٹ ➔ اردو/انگریزی',
+    urReplySampleBtn: '🔊 اردو کلائنٹ جواب سنیں',
+    arReplySampleBtn: '🔊 عربی کلائنٹ جواب سنیں',
+    playClientReplyBtn: 'کلائنٹ کا جواب سنیں',
   },
   ar: {
     whatsappConnected: 'بوابة واتساب · متصل',
@@ -1076,14 +1311,14 @@ export const OWNER_UI_I18N: Record<
     hideProof: 'إخفاء الإثبات',
     verifyDeposit: 'تأكيد العربون ✓',
     markHandled: 'تمت المعالجة ✓',
-    quickChairLock: 'قفل الكرسي السريع · بالصوت أو بنقرتين',
+    quickChairLock: 'قفل الكرسي السريع · ميكروفون الكرسي وأزرار المدة',
     quickChairSub:
-      'اضغط أو ثبت الميكروفون للتحدث (مثال: "Hamza 30 minutes") أو استخدم أزرار المدة لقفل كرسي الزبون الحضوري فوراً.',
-    holdOrTapSpeakBtn: 'اضغط أو ثبت للتحدث والقفل (30ث)',
-    transcribingLock: 'جاري تحويل الصوت...',
-    tapStopLock: 'اضغط للإيقاف والقفل',
-    voicePlaceholder: 'قل أو اكتب مثال: "Hamza 7 to 8 PM" أو "Aslam 30 minutes"',
-    parseAndLockBtn: 'تحليل وقفل الكرسي',
+      'تحدث باسم الحلاق والوقت معاً عبر ميكروفون قفل الكرسي (مثال: "Aslam 2:00 PM to 3:00 PM") — يتم التحقق والنطق خلال 3 ثوانٍ.',
+    holdOrTapSpeakBtn: 'ميكروفون قفل الكرسي · تحدث للقفل (30ث)',
+    transcribingLock: 'جاري تحويل صوت الكرسي...',
+    tapStopLock: 'اضغط للتحقق والقفل',
+    voicePlaceholder: 'قل أو اكتب مثال: "Aslam 2:00 PM to 3:00 PM" أو "Tariq 30 minutes"',
+    parseAndLockBtn: 'تحقق واقفل الكرسي',
     freeNow: 'متاح الآن',
     busy: 'مشغول',
     tapAgain30: 'اضغط مجدداً: تأكيد +30د',
@@ -1125,7 +1360,7 @@ export const OWNER_UI_I18N: Record<
     adv24hDesc: 'يُرسل تلقائياً قبل الموعد بيوم بلغة العميل المسجلة',
     arr2h: 'تأكيد الوصول قبل ساعتين',
     arr2hDesc: 'يؤكد الحضور أو يذيع رد التأخير 15 دقيقة صوتياً',
-    voiceSupportTitle: 'الدعم الصوتي المباشر مع المؤسس',
+    voiceSupportTitle: 'الدعم الصوتي مع المؤسس',
     voiceSupportSub:
       'تحدث أو اكتب بالعربية أو الأردية أو الإنجليزية. تُترجم رسالتك للمؤسس مع حفظ صوتك الأصلي ويصلك الرد صوتياً بلغتك.',
     recordVoiceNoteTitle: 'اضغط أو انقر لتسجيل رسالة صوتية للمؤسس',
@@ -1147,12 +1382,72 @@ export const OWNER_UI_I18N: Record<
     salonHours: 'ساعات العمل',
     automationRewards: 'الأتمتة والمكافآت',
     windowQrPoster: 'ملصق QR للواجهة',
-    salonProfileModeLabel: 'فئة الصالون (محفوظة في واتساب والملصقات)',
+    salonProfileModeLabel: 'فئة الصالون المعتمدة من التسجيل',
     mensSalonBtn: 'صالون رجالي',
     ladiesParlorBtn: 'صالون نسائي',
     addBarberBtn: 'إضافة حلاق',
     addStylistBtn: 'إضافة خبيرة',
     saveHoursBtn: 'حفظ ساعات العمل',
+    walkInHelper:
+      'قائمة انتظار يدوية للزبائن الحضوريين في أوقات الذروة دون حجز مسبق لإدارة الدور وتنبيههم.',
+    passesHelper:
+      'إصدار باقات مدفوعة مسبقاً من 4 أو 5 جلسات لتحصيل العائد مقدماً وخصم كل زيارة تلقائياً.',
+    bridalHelper:
+      'متابعة حجوزات الزفاف والعرائس والفرسان، العربون المدفوع، الرصيد المتبقي، والخدمات المنزلية.',
+    founderHelpTab: 'الدعم الصوتي مع المؤسس',
+    handsFreeAlertsTab: 'سجل التنبيهات الصوتية',
+    lockedCategoryBadge: 'مقفل من التسجيل',
+    lockedCategoryDescMens:
+      'وضع صالون الحلاقة الرجالي مقفل من الإعداد الأولي على قائمة واتساب والكراسي والملصقات.',
+    lockedCategoryDescLadies:
+      'وضع صالون التجميل النسائي مقفل مع متابعة العرائس وسياسة الغرف الخاصة للسيدات.',
+    staffDesc:
+      'إدارة الحلاقين والكراسي المخصصة لهم. تنعكس التحديثات مباشرة على جدول اليوم وقائمة الحضور وحجوزات واتساب.',
+    saveChangesBtn: 'حفظ التعديلات ✓',
+    cancelBtn: 'إلغاء',
+    barberNamePlaceholder: 'اسم الحلاق',
+    chairPlaceholder: 'تخصيص الكرسي (مثال: Chair #1)',
+    addStaffNamePlaceholder: 'اسم الحلاق / الخبيرة (مثال: Master Kamran)',
+    barberPerfTitle: 'أداء الحلاقين وتفاصيل الخدمات الأكثر طلباً',
+    barberPerfKicker: 'احتفاظ الكراسي · الخدمات الأكثر طلباً لكل حلاق',
+    allChairsCombined: 'جميع الكراسي معاً',
+    clientRatingLabel: 'تقييم العملاء',
+    repeatRateLabel: 'نسبة تكرار العملاء',
+    mostRequestedServicesLabel: 'الخدمات الأكثر طلباً',
+    servicesRatesTitle: 'الخدمات والأسعار',
+    servicesRatesKicker: 'أسماء الخدمات · المدة · الأسعار',
+    servicesRatesDesc:
+      'عدّل أسماء الخدمات والمدة (بالدقائق) والأسعار. تُترجم الخدمات المضافة حديثاً تلقائياً للأردية والعربية.',
+    addServiceBtn: 'إضافة خدمة',
+    closeFormBtn: 'إغلاق النموذج',
+    saveAndSyncBtn: 'حفظ ومزامنة ✓',
+    serviceNamePlaceholder: 'اسم الخدمة',
+    minsPlaceholder: 'دقائق',
+    activeLabel: 'مفعلة',
+    minUnit: 'دقيقة',
+    localizedLabelPrefix: 'الاسم بالعربية',
+    salonHoursTitle: 'ساعات العمل',
+    salonHoursKicker: 'جدول الفتح والإغلاق · استراحة صلاة الجمعة',
+    salonHoursDesc:
+      'اضبط أوقات الفتح والإغلاق الأسبوعية. يرد مساعد واتساب بهذه الساعات تلقائياً على استفسارات العملاء.',
+    monThuLabel: 'الإثنين – الخميس',
+    fridayLabel: 'الجمعة (جدول صلاة الجمعة)',
+    satSunLabel: 'السبت والأحد',
+    openLabel: 'مفتوح',
+    closedLabel: 'مغلق',
+    openingTimeLabel: 'وقت الفتح',
+    closingTimeLabel: 'وقت الإغلاق',
+    openShortLabel: 'فتح',
+    closeShortLabel: 'إغلاق',
+    prayerBreakStartLabel: 'بداية استراحة الصلاة',
+    prayerBreakEndLabel: 'نهاية استراحة الصلاة',
+    chairLockConfirmTitle: 'التحقق من قفل الكرسي · سيتم القفل تلقائياً',
+    chairLockConfirmBtn: 'تأكيد الآن ✓',
+    chairLockCancelBtn: 'إلغاء ✕',
+    testDubaiArBtn: '🔊 اختبار: عميل دبي بالعربية ➔ أردو/إنجليزي',
+    urReplySampleBtn: '🔊 استمع لرد العميل بالأردية',
+    arReplySampleBtn: '🔊 استمع لرد العميل بالعربية',
+    playClientReplyBtn: 'تشغيل رد العميل',
   },
 };
 
@@ -1703,10 +1998,13 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [showProofLedgerDrawer, setShowProofLedgerDrawer] = useState(false);
   const [isTestingLoudAlert, setIsTestingLoudAlert] = useState(false);
 
-  // Stylist / Barber Top Services Breakdown Selection
+  // Stylist / Barber Top Services Breakdown Selection & Separated Voice Sub-Tab
   const [selectedBarberForServices, setSelectedBarberForServices] = useState<string>('ALL');
+  const [voiceSubTab, setVoiceSubTab] = useState<'FOUNDER_HELP' | 'HANDS_FREE_ALERTS'>('FOUNDER_HELP');
+  const [serviceTranslationsVersion, setServiceTranslationsVersion] = useState(0);
+  const [isTranslatingCustomService, setIsTranslatingCustomService] = useState(false);
 
-  // $0.00 Zero-Cost Browser Voice Chair Blocker + 2-Tap Quick Duration Pills + MediaRecorder Fallback
+  // $0.00 Zero-Cost Browser Voice Chair Blocker + 2-Tap Quick Duration Pills + MediaRecorder Fallback + 3s Spoken Check
   const [isListeningMic, setIsListeningMic] = useState(false);
   const [isTranscribingChairMic, setIsTranscribingChairMic] = useState(false);
   const [micElapsedSecs, setMicElapsedSecs] = useState(0);
@@ -1715,6 +2013,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     barber: string;
     durationMins: number;
   } | null>(null);
+  const [pendingVoiceChairLock, setPendingVoiceChairLock] = useState<{
+    barberName: string;
+    startTimeSlot: string;
+    endTimeSlot: string;
+    startMinutes: number;
+    endMinutes: number;
+    durationMins: number;
+    transcript: string;
+    secondsLeft: number;
+  } | null>(null);
+  const [chairLockMissingWarning, setChairLockMissingWarning] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const micTimerRef = useRef<number | null>(null);
   const latestTranscriptRef = useRef<string>('');
@@ -1821,6 +2130,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   );
 
   const scrollToFounderVoiceSupport = () => {
+    setVoiceSubTab('FOUNDER_HELP');
     setSectionMode('VOICE');
     window.setTimeout(() => {
       founderVoiceCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2165,7 +2475,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       ownerName: currentSalon.owner,
       whatsappPhone: currentSalon.phone,
     });
-    fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/concierge-state?${params.toString()}`)
+    fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/concierge-state?${params.toString()}`, {
+      credentials: 'include',
+    })
       .then((res) => (res.ok ? res.json() : null))
       .then((data: SalonConciergeStateResponse | null) => {
         if (!cancelled && data) {
@@ -2229,35 +2541,6 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [pkgSessions, setPkgSessions] = useState('5');
   const [pkgPrice, setPkgPrice] = useState('10000');
   const [isSavingOpsCard, setIsSavingOpsCard] = useState(false);
-
-  const handleUpdateSalonCategory = async (nextCategory: 'MENS' | 'LADIES') => {
-    setPersistedCategory(nextCategory);
-    try {
-      localStorage.setItem('wcl_salon_category', nextCategory);
-    } catch {}
-    try {
-      const res = await fetch(
-        `/api/salons/${encodeURIComponent(currentSalon.id)}/retention-settings`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ salonCategory: nextCategory }),
-        }
-      );
-      if (res.ok) {
-        const nextState = (await res.json()) as SalonConciergeStateResponse;
-        setConciergeState(nextState);
-      }
-      setMaintToast(
-        nextCategory === 'LADIES'
-          ? '✓ Switched to Ladies Beauty Parlor Mode (Female-Only Privacy & Bridal Tracker active).'
-          : '✓ Switched to Men’s Salon & Barbershop Mode.'
-      );
-      setTimeout(() => setMaintToast(null), 4000);
-    } catch {
-      setMaintToast('Updated category locally.');
-    }
-  };
 
   const handleAddWalkIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3180,6 +3463,36 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         sourceType: 'WHATSAPP_BOT',
         status: 'COMPLETED',
       },
+      {
+        id: 'BK-105',
+        clientName: 'فہد منصور · Fahad Mansoor',
+        barberName: 'Master Aslam',
+        phone: '+92 301 5544332',
+        service: 'ماسٹر ہیئر کٹ اور اسکن فیڈ · Master Haircut & Skin Fade',
+        price: 1200,
+        timeSlot: '06:30 PM',
+        durationMins: 40,
+        scheduledEndMs: now + 135 * 60 * 1000,
+        sourceType: 'WHATSAPP_BOT',
+        reminderReplyLang: 'ur',
+        reminderReplyText: 'جی ہاں، میں شام ساڑھے چھ بجے ماسٹر اسلم کے پاس آ رہا ہوں۔',
+        status: 'CONFIRMED',
+      },
+      {
+        id: 'BK-106',
+        clientName: 'خالد المهيري · Khalid Al-Muhairi',
+        barberName: 'Tariq Mehmood',
+        phone: '+971 50 4411223',
+        service: 'قص شعر وتحديد اللحية · Haircut & Beard Sculpt',
+        price: 1500,
+        timeSlot: '07:15 PM',
+        durationMins: 45,
+        scheduledEndMs: now + 180 * 60 * 1000,
+        sourceType: 'WHATSAPP_BOT',
+        reminderReplyLang: 'ar',
+        reminderReplyText: 'نعم سأحضر الساعة 7:15 مساءً مع الحلاق طارق، شكراً لكم.',
+        status: 'CONFIRMED',
+      },
     ];
   });
 
@@ -3397,7 +3710,36 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setTimeout(() => setMaintToast(null), 4000);
   };
 
-  // Hands-Free Loudspeaker Engine (Sleep-Window Aware + Strictly Localized ur-PK / ar-SA / en-US)
+  const translateClientRemarkForOwner = (
+    rawBody: string,
+    clientLang: ClientChatLang,
+    targetOwnerLang: VoiceLang
+  ): string => {
+    const clean = rawBody.trim();
+    if (!clean) return '';
+    if (clientLang === targetOwnerLang) return clean;
+    if (clientLang === 'ar') {
+      if (targetOwnerLang === 'ur') {
+        const hasCashNote = /عند الوصول|نقداً|كاش/.test(clean);
+        const hasLateNote = /تأخر|دقيقة|سأتأخر/.test(clean);
+        if (hasLateNote) return 'گاہک نے اطلاع دی ہے کہ وہ پندرہ منٹ تاخیر سے پہنچیں گے۔';
+        return hasCashNote
+          ? 'گاہک نے عربی میں بکنگ کی تصدیق کی ہے اور کاؤنٹر پر نقد ادائیگی کریں گے۔'
+          : 'دبئی کے عربی گاہک نے ہیئر کٹ اور داڑھی کے سروس سلاٹ کی تصدیق کی ہے۔';
+      }
+      if (targetOwnerLang === 'en') {
+        const hasCashNote = /عند الوصول|نقداً|كاش/.test(clean);
+        const hasLateNote = /تأخر|دقيقة|سأتأخر/.test(clean);
+        if (hasLateNote) return 'Client noted in Arabic they will arrive 15 minutes late.';
+        return hasCashNote
+          ? 'Client confirmed the Arabic booking and noted they will pay on arrival.'
+          : 'Arabic client confirmed haircut and beard grooming slot.';
+      }
+    }
+    return clean;
+  };
+
+  // Hands-Free Loudspeaker Engine (Sleep-Window Aware + Strictly Localized ur-PK / ar-SA / en-US + AR->UR/EN Bridge)
   const announceInboundEventLoudly = (params: {
     eventType:
       | 'APPOINTMENT_CONFIRMED'
@@ -3415,50 +3757,73 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     servicesText: string;
     timeSlot: string;
     rawBody: string;
+    overrideOwnerLang?: VoiceLang;
   }) => {
-    const { eventType, clientName, clientPhone, clientLang, barberName, servicesText, timeSlot, rawBody } =
-      params;
+    const {
+      eventType,
+      clientName,
+      clientPhone,
+      clientLang,
+      barberName,
+      servicesText,
+      timeSlot,
+      rawBody,
+      overrideOwnerLang,
+    } = params;
+    const effectiveOwnerLang: VoiceLang = overrideOwnerLang || ownerLang;
     const isUrgent =
       eventType === 'REMINDER_REPLY_LATE' ||
       eventType === 'REMINDER_REPLY_RESCHEDULE' ||
       eventType === 'URGENT_BRIDAL_GROOM';
 
+    const localizedServiceText =
+      effectiveOwnerLang === 'ur' || effectiveOwnerLang === 'ar'
+        ? getLocalizedServiceName(servicesText, effectiveOwnerLang)
+        : servicesText;
+    const translatedRemark = translateClientRemarkForOwner(rawBody, clientLang, effectiveOwnerLang);
+    const crossLangPrefix =
+      clientLang === 'ar' && effectiveOwnerLang !== 'ar'
+        ? effectiveOwnerLang === 'ur'
+          ? 'عربی سے اردو ترجمہ! '
+          : 'Arabic booking translated! '
+        : '';
+
     const speechByLang: Record<VoiceLang, string> = {
       en:
         eventType === 'URGENT_BRIDAL_GROOM'
-          ? `Urgent Bridal or Groom alert! ${clientName} booked ${servicesText} with ${barberName} at ${timeSlot}.`
+          ? `${crossLangPrefix}Urgent Bridal or Groom alert! ${clientName} booked ${localizedServiceText} with ${barberName} at ${timeSlot}.`
           : eventType === 'BARBER_BUSY_REROUTED'
-          ? `Busy reroute sent! ${clientName} asked for ${barberName} at ${timeSlot}, and WhatsApp bot offered free alternative barbers.`
+          ? `${crossLangPrefix}Busy reroute sent! ${clientName} asked for ${barberName} at ${timeSlot}, and WhatsApp bot offered free alternative barbers.`
           : eventType === 'PRICE_MENU_SENT'
-          ? `Price list sent on WhatsApp to ${clientName}.`
+          ? `${crossLangPrefix}Price list sent on WhatsApp to ${clientName}.`
           : eventType === 'RESCHEDULE_CONFIRMED'
-          ? `Reschedule confirmed! ${clientName} picked ${timeSlot} with ${barberName}.`
+          ? `${crossLangPrefix}Reschedule confirmed! ${clientName} picked ${timeSlot} with ${barberName}.`
           : eventType === 'APPOINTMENT_CONFIRMED'
-          ? `Attention! Appointment confirmed. ${clientName} wants barber ${barberName}. Services: ${servicesText}, for ${timeSlot}.`
+          ? `${crossLangPrefix}Attention! Appointment confirmed. ${clientName} wants barber ${barberName}. Services: ${localizedServiceText}, for ${timeSlot}. ${translatedRemark}`
           : eventType === 'REMINDER_REPLY_CONFIRMED'
-          ? `Reminder reply! ${clientName} confirmed coming at ${timeSlot} with barber ${barberName}.`
+          ? `${crossLangPrefix}Reminder reply! ${clientName} confirmed coming at ${timeSlot} with barber ${barberName}.`
           : eventType === 'REMINDER_REPLY_LATE'
-          ? `Urgent arrival update! ${clientName} replied they are running 15 minutes late for ${timeSlot} with ${barberName}.`
-          : `Urgent schedule update! ${clientName} cannot make ${timeSlot} and requested to reschedule.`,
+          ? `${crossLangPrefix}Urgent arrival update! ${clientName} replied they are running 15 minutes late for ${timeSlot} with ${barberName}.`
+          : `${crossLangPrefix}Urgent schedule update! ${clientName} cannot make ${timeSlot} and requested to reschedule.`,
       ur:
         eventType === 'URGENT_BRIDAL_GROOM'
-          ? `اہم برائیڈل یا گروم الرٹ! ${clientName} نے ${barberName} کے ساتھ ${timeSlot} پر ${servicesText} کی بکنگ کی ہے۔`
+          ? `${crossLangPrefix}اہم برائیڈل یا گروم الرٹ! ${clientName} نے ${barberName} کے ساتھ ${timeSlot} پر ${localizedServiceText} کی بکنگ کی ہے۔`
           : eventType === 'BARBER_BUSY_REROUTED'
-          ? `خودکار ری راؤٹ! ${clientName} نے ${timeSlot} پر ${barberName} مانگا، بوٹ نے متبادل خالی باربرز بھیج دیے ہیں۔`
+          ? `${crossLangPrefix}خودکار ری راؤٹ! ${clientName} نے ${timeSlot} پر ${barberName} مانگا، بوٹ نے متبادل خالی باربرز بھیج دیے ہیں۔`
           : eventType === 'PRICE_MENU_SENT'
-          ? `${clientName} کو واٹس ایپ پر ریٹ لسٹ اور سروس مینو بھیج دیا گیا ہے۔`
+          ? `${crossLangPrefix}${clientName} کو واٹس ایپ پر ریٹ لسٹ اور سروس مینو بھیج دیا گیا ہے۔`
           : eventType === 'RESCHEDULE_CONFIRMED'
-          ? `نیا وقت کنفرم! ${clientName} نے ${barberName} کے ساتھ ${timeSlot} کا نیا سلاٹ منتخب کر لیا ہے۔`
+          ? `${crossLangPrefix}نیا وقت کنفرم! ${clientName} نے ${barberName} کے ساتھ ${timeSlot} کا نیا سلاٹ منتخب کر لیا ہے۔`
           : eventType === 'APPOINTMENT_CONFIRMED'
-          ? `توجہ فرمائیں! ${clientName} کی اپائنٹمنٹ باربر ${barberName} کے ساتھ ${timeSlot} پر کنفرم ہو گئی ہے۔ سروسز: ${servicesText}۔`
+          ? `${crossLangPrefix}توجہ فرمائیں! ${clientName} کی اپائنٹمنٹ باربر ${barberName} کے ساتھ ${timeSlot} پر کنفرم ہو گئی ہے۔ سروسز: ${localizedServiceText}۔ ${translatedRemark}`
           : eventType === 'REMINDER_REPLY_CONFIRMED'
-          ? `ریمائنڈر کا جواب! ${clientName} نے ${timeSlot} پر باربر ${barberName} کے پاس آنے کی تصدیق کر دی ہے۔`
+          ? `${crossLangPrefix}ریمائنڈر کا جواب! ${clientName} نے ${timeSlot} پر باربر ${barberName} کے پاس آنے کی تصدیق کر دی ہے۔`
           : eventType === 'REMINDER_REPLY_LATE'
-          ? `ضروری اطلاع! ${clientName} نے ریمائنڈر پر جواب دیا ہے کہ وہ ${timeSlot} پر پندرہ منٹ دیر سے پہنچیں گے۔`
-          : `اہم اطلاع! ${clientName} آج ${timeSlot} پر نہیں آ سکیں گے اور نیا وقت مانگا ہے۔`,
+          ? `${crossLangPrefix}ضروری اطلاع! ${clientName} نے ریمائنڈر پر جواب دیا ہے کہ وہ ${timeSlot} پر پندرہ منٹ دیر سے پہنچیں گے۔`
+          : `${crossLangPrefix}اہم اطلاع! ${clientName} آج ${timeSlot} پر نہیں آ سکیں گے اور نیا وقت مانگا ہے۔`,
       ar:
         eventType === 'URGENT_BRIDAL_GROOM'
-          ? `تنبيه حجز زفاف عاجل! حجز ${clientName} باقة ${servicesText} مع الحلاق ${barberName} الساعة ${timeSlot}.`
+          ? `تنبيه حجز زفاف عاجل! حجز ${clientName} باقة ${localizedServiceText} مع الحلاق ${barberName} الساعة ${timeSlot}.`
           : eventType === 'BARBER_BUSY_REROUTED'
           ? `تحويل تلقائي! طلب ${clientName} الحلاق ${barberName} الساعة ${timeSlot} وتم إرسال الحلاقين المتاحين.`
           : eventType === 'PRICE_MENU_SENT'
@@ -3466,7 +3831,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           : eventType === 'RESCHEDULE_CONFIRMED'
           ? `تم تأكيد إعادة الجدولة! اختار ${clientName} الموعد الجديد ${timeSlot} مع ${barberName}.`
           : eventType === 'APPOINTMENT_CONFIRMED'
-          ? `تنبيه! تم تأكيد موعد جديد. ${clientName} يريد الحلاق ${barberName}. الخدمات: ${servicesText} الساعة ${timeSlot}.`
+          ? `تنبيه! تم تأكيد موعد جديد. ${clientName} يريد الحلاق ${barberName}. الخدمات: ${localizedServiceText} الساعة ${timeSlot}.`
           : eventType === 'REMINDER_REPLY_CONFIRMED'
           ? `رد التذكير! أكد ${clientName} حضوره الساعة ${timeSlot} مع الحلاق ${barberName}.`
           : eventType === 'REMINDER_REPLY_LATE'
@@ -3474,7 +3839,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           : `تنبيه جدول عاجل! طلب ${clientName} تأجيل موعد ${timeSlot}.`,
     };
 
-    const spokenText = speechByLang[ownerLang];
+    const spokenText = speechByLang[effectiveOwnerLang];
     const logType: VoiceEventLog['type'] =
       eventType === 'APPOINTMENT_CONFIRMED' ||
       eventType === 'RESCHEDULE_CONFIRMED' ||
@@ -3507,9 +3872,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         type: logType,
         clientName,
         clientLang,
-        ownerVoiceLang: ownerLang,
+        ownerVoiceLang: effectiveOwnerLang,
         summary: summaryLabel,
         spokenText,
+        originalClientNote: clientLang !== effectiveOwnerLang ? rawBody : undefined,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isUrgent,
       },
@@ -3562,7 +3928,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }
 
     if (voiceFilter === 'ALL' || isUrgent || eventType === 'APPOINTMENT_CONFIRMED') {
-      speakHandsFree(spokenText, ownerLang);
+      speakHandsFree(spokenText, effectiveOwnerLang);
     }
   };
 
@@ -3731,7 +4097,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   useEffect(() => {
     if (isFounderInspector) return;
     const interval = setInterval(() => {
-      fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/concierge-state`)
+      fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/concierge-state`, {
+        credentials: 'include',
+      })
         .then((res) => (res.ok ? res.json() : null))
         .then((data: SalonConciergeStateResponse | null) => {
           if (data) processIncomingConciergeState(data);
@@ -3767,10 +4135,34 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   });
 
   const handleTriggerSimulatedVoiceWebhook = async (
-    kind: 'CONFIRMATION' | 'REMINDER_LATE' | 'REMINDER_COMING' | 'BRIDAL_URGENT'
+    kind: 'CONFIRMATION' | 'REMINDER_LATE' | 'REMINDER_COMING' | 'BRIDAL_URGENT' | 'DUBAI_AR_CLIENT'
   ) => {
     setIsTestingLoudAlert(true);
     try {
+      if (kind === 'DUBAI_AR_CLIENT') {
+        const arabicRaw =
+          'مرحباً، أؤكد حجز قص شعر وتحديد لحية الساعة 8:00 مساءً مع الحلاق طارق وسأدفع عند الوصول';
+        const targetLangForAsianOwner: VoiceLang = ownerLang === 'en' ? 'en' : 'ur';
+        announceInboundEventLoudly({
+          eventType: 'APPOINTMENT_CONFIRMED',
+          clientName: 'طارق المنصور (Tariq Al-Mansoor · Dubai)',
+          clientPhone: '+971 50 8923411',
+          clientLang: 'ar',
+          barberName: barbersList[1] || barbersList[0] || 'Tariq Mehmood',
+          servicesText: 'Master Haircut & Skin Fade',
+          timeSlot: '08:00 PM',
+          rawBody: arabicRaw,
+          overrideOwnerLang: targetLangForAsianOwner,
+        });
+        setMaintToast(
+          targetLangForAsianOwner === 'ur'
+            ? '🇦🇪 ➔ 🇵🇰 دبئی عربی بکنگ کو اردو میں ترجمہ کر کے اونچی آواز میں چلا دیا گیا۔'
+            : '🇦🇪 ➔ 🇬🇧 Dubai Arabic booking translated cleanly and announced aloud in English.'
+        );
+        setTimeout(() => setMaintToast(null), 5000);
+        return;
+      }
+
       const payload =
         kind === 'BRIDAL_URGENT'
           ? {
@@ -3805,6 +4197,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         `/api/salons/${encodeURIComponent(currentSalon.id)}/concierge/simulate`,
         {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }
@@ -4042,6 +4435,85 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }, 4000);
   };
 
+  const handleValidatedChairLockInput = (phrase: string) => {
+    const clean = phrase.trim();
+    if (!clean) return;
+    setChairLockMissingWarning(null);
+    const intent = parseVoiceChairIntent(clean, barbersList);
+    if (!intent.matched) {
+      const rosterNames = barbersList.join(', ');
+      const warnByLang: Record<VoiceLang, string> = {
+        en:
+          intent.missingReason === 'BARBER'
+            ? `Could not match barber/stylist name in "${clean}". Active roster: ${rosterNames}.`
+            : intent.missingReason === 'TIME'
+            ? `Caught barber (${intent.barberName}), but missed time slot or duration (e.g. "2:00 PM to 3:00 PM" or "30 minutes").`
+            : `Please say BOTH barber name and time slot (e.g. "Aslam 2:00 PM to 3:00 PM").`,
+        ur:
+          intent.missingReason === 'BARBER'
+            ? `"${clean}" میں باربر کا نام نہیں ملا۔ موجودہ اسٹاف: ${rosterNames}۔`
+            : intent.missingReason === 'TIME'
+            ? `باربر (${intent.barberName}) کی شناخت ہو گئی، مگر وقت یا دورانیہ نہیں ملا (مثلاً "2:00 PM to 3:00 PM" یا "30 minutes")۔`
+            : `براہِ کرم باربر کا نام اور وقت دونوں بولیں (مثلاً "Aslam 2:00 PM to 3:00 PM")۔`,
+        ar:
+          intent.missingReason === 'BARBER'
+            ? `تعذر مطابقة اسم الحلاق في "${clean}". القائمة الحالية: ${rosterNames}.`
+            : intent.missingReason === 'TIME'
+            ? `تم التعرف على الحلاق (${intent.barberName}) ولكن لم يتم التقاط الوقت أو المدة (مثال: "2:00 PM to 3:00 PM").`
+            : `يرجى ذكر اسم الحلاق والوقت معاً (مثال: "Aslam 2:00 PM to 3:00 PM").`,
+      };
+      const warningMsg = warnByLang[ownerLang];
+      setChairLockMissingWarning(warningMsg);
+      setVoiceTranscript(clean);
+      speakHandsFree(warningMsg, ownerLang);
+      return;
+    }
+
+    const previewMsg: Record<VoiceLang, string> = {
+      en: `Locking ${intent.barberName} from ${intent.startTimeSlot} to ${intent.endTimeSlot} in 3 seconds. Tap cancel if incorrect.`,
+      ur: `${intent.barberName} کی کرسی ${intent.startTimeSlot} سے ${intent.endTimeSlot} تک 3 سیکنڈ میں لاک ہو رہی ہے۔ غلط ہو تو کینسل دبائیں۔`,
+      ar: `سيتم قفل كرسي ${intent.barberName} من ${intent.startTimeSlot} إلى ${intent.endTimeSlot} خلال 3 ثوانٍ. اضغط إلغاء للتعديل.`,
+    };
+    speakHandsFree(previewMsg[ownerLang], ownerLang);
+    setPendingVoiceChairLock({
+      barberName: intent.barberName,
+      startTimeSlot: intent.startTimeSlot,
+      endTimeSlot: intent.endTimeSlot,
+      startMinutes: intent.startMinutes,
+      endMinutes: intent.endMinutes,
+      durationMins: intent.durationMins,
+      transcript: clean,
+      secondsLeft: 3,
+    });
+    setVoiceTranscript('');
+  };
+
+  useEffect(() => {
+    if (!pendingVoiceChairLock) return;
+    if (pendingVoiceChairLock.secondsLeft <= 0) {
+      const snapshot = pendingVoiceChairLock;
+      setPendingVoiceChairLock(null);
+      void executeChairLock({
+        barberName: snapshot.barberName,
+        startTimeSlot: snapshot.startTimeSlot,
+        endTimeSlot: snapshot.endTimeSlot,
+        startMinutes: snapshot.startMinutes,
+        endMinutes: snapshot.endMinutes,
+        durationMins: snapshot.durationMins,
+        source: 'VOICE',
+        transcript: snapshot.transcript,
+        silent: true,
+      });
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setPendingVoiceChairLock((curr) =>
+        curr ? { ...curr, secondsLeft: curr.secondsLeft - 1 } : null
+      );
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [pendingVoiceChairLock]);
+
   const stopHoldToSpeakMic = () => {
     if (micTimerRef.current) {
       window.clearInterval(micTimerRef.current);
@@ -4061,13 +4533,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     const captured = latestTranscriptRef.current.trim();
     if (captured) {
       latestTranscriptRef.current = '';
-      const intent = parseVoiceChairIntent(captured, barbersList);
-      executeChairLock({
-        ...intent,
-        source: 'VOICE',
-        transcript: captured,
-        silent: false,
-      });
+      handleValidatedChairLockInput(captured);
     }
   };
 
@@ -4125,13 +4591,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             if (res.ok && data.transcript?.trim()) {
               const phrase = data.transcript.trim();
               setVoiceTranscript(phrase);
-              const intent = parseVoiceChairIntent(phrase, barbersList);
-              executeChairLock({
-                ...intent,
-                source: 'VOICE',
-                transcript: phrase,
-                silent: false,
-              });
+              handleValidatedChairLockInput(phrase);
             } else {
               setMaintToast(data.error || 'Could not recognize voice command. Try typing or use +30m/+1h pills.');
               setTimeout(() => setMaintToast(null), 5000);
@@ -4291,6 +4751,76 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       repeatRate: '64% Repeat',
       clientLove: 'Specialist for high-ticket coloring, hair dyes, and chemical hair care',
     },
+  };
+
+  const getLocalizedBarberStats = (
+    barberOption: string,
+    lang: VoiceLang,
+    bookingCount: number,
+    chairName: string
+  ) => {
+    const base = BARBER_SERVICE_STATS[barberOption];
+    if (lang === 'en') {
+      return (
+        base || {
+          topServices: [
+            '1. Master Haircut & Skin Fade (52%)',
+            '2. Classic Beard Trim & Sculpt (31%)',
+            '3. Charcoal Detox Facial (17%)',
+          ],
+          favRate: '95% Positive Rating',
+          repeatRate: `${Math.min(88, 66 + bookingCount * 4)}% Repeat Retention`,
+          clientLove: `${barberOption} (${chairName}) holds strong repeat demand across regular grooming appointments.`,
+        }
+      );
+    }
+    const pct = Math.min(88, 66 + bookingCount * 4);
+    if (lang === 'ur') {
+      if (barberOption === 'ALL') {
+        return {
+          topServices: [
+            '1. سکن فیڈ ہیئر کٹ (48%)',
+            '2. داڑھی کی سیٹنگ اور شیپ (31%)',
+            '3. چارکول ڈیٹوکس فیشل (21%)',
+          ],
+          favRate: '94% مثبت ریٹنگ',
+          repeatRate: '68% مستقل گاہک',
+          clientLove: 'تمام کرسیوں پر سکن فیڈ اور داڑھی کومبو سب سے زیادہ بک ہونے والی سروس ہے۔',
+        };
+      }
+      return {
+        topServices: [
+          `1. ${getLocalizedServiceName('Master Haircut & Skin Fade', 'ur')} (52%)`,
+          `2. ${getLocalizedServiceName('Classic Beard Trim & Sculpt', 'ur')} (31%)`,
+          `3. ${getLocalizedServiceName('Charcoal Deep Detox Facial', 'ur')} (17%)`,
+        ],
+        favRate: '95% مثبت ریٹنگ',
+        repeatRate: `${pct}% مستقل گاہک`,
+        clientLove: `${barberOption} (${chairName}) کے پاس باقاعدہ آنے والے گاہکوں کی مضبوط مانگ ہے۔`,
+      };
+    }
+    if (barberOption === 'ALL') {
+      return {
+        topServices: [
+          '1. قص شعر وتدرج سكين فيد (48%)',
+          '2. تحديد وتشذيب اللحية (31%)',
+          '3. تنظيف بشرة عميق بالفحم (21%)',
+        ],
+        favRate: '94% تقييم إيجابي',
+        repeatRate: '68% عودة العملاء',
+        clientLove: 'باقة قص الشعر مع تشذيب اللحية هي الخدمة الأكثر طلباً على جميع الكراسي.',
+      };
+    }
+    return {
+      topServices: [
+        `1. ${getLocalizedServiceName('Master Haircut & Skin Fade', 'ar')} (52%)`,
+        `2. ${getLocalizedServiceName('Classic Beard Trim & Sculpt', 'ar')} (31%)`,
+        `3. ${getLocalizedServiceName('Charcoal Deep Detox Facial', 'ar')} (17%)`,
+      ],
+      favRate: '95% تقييم إيجابي',
+      repeatRate: `${pct}% عودة العملاء`,
+      clientLove: `يحظى ${barberOption} (${chairName}) بطلب متكرر ومرتفع من العملاء الدائمين.`,
+    };
   };
 
   // Query 1 (New): Founder-to-Salon-Owner Official Message rendered strictly in Owner's Onboarding / Preferred Language
@@ -5172,19 +5702,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               </button>
             </div>
 
-            {/* Live Transcript / $0.00 Local JS Intent Parser Input Bar */}
+            {/* Live Transcript / 2-Part Validated Intent Parser Input Bar */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!voiceTranscript.trim()) return;
-                const intent = parseVoiceChairIntent(voiceTranscript, barbersList);
-                executeChairLock({
-                  ...intent,
-                  source: 'VOICE',
-                  transcript: voiceTranscript.trim(),
-                  silent: false,
-                });
-                setVoiceTranscript('');
+                handleValidatedChairLockInput(voiceTranscript);
               }}
               className="flex flex-col sm:flex-row gap-2"
             >
@@ -5192,7 +5715,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 type="text"
                 dir="ltr"
                 value={voiceTranscript}
-                onChange={(e) => setVoiceTranscript(e.target.value)}
+                onChange={(e) => {
+                  setVoiceTranscript(e.target.value);
+                  if (chairLockMissingWarning) setChairLockMissingWarning(null);
+                }}
                 placeholder={ui.voicePlaceholder}
                 className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder:text-[#484F58] focus:border-[#06B6D4] focus:outline-none"
               />
@@ -5203,6 +5729,89 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 {ui.parseAndLockBtn}
               </button>
             </form>
+
+            {chairLockMissingWarning && (
+              <div
+                role="alert"
+                className="rounded-xl border border-[#F85149] bg-[#4C1C1D]/70 p-3 flex items-start justify-between gap-3"
+              >
+                <div className="flex items-start gap-2 min-w-0">
+                  <AlertTriangle className="size-4 text-[#F85149] shrink-0 mt-0.5" />
+                  <p className="text-xs font-sans text-[#F0F6FC]">{chairLockMissingWarning}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setChairLockMissingWarning(null)}
+                  className="text-[#8B949E] hover:text-[#F0F6FC] shrink-0"
+                  aria-label="Dismiss chair lock warning"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+            )}
+
+            {pendingVoiceChairLock && (
+              <div
+                role="status"
+                className="rounded-xl border border-[#D29922] bg-[#3B2E0B]/80 p-3.5 space-y-2.5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-mono font-bold text-[#D29922]">
+                    {ui.chairLockConfirmTitle}
+                  </span>
+                  <span
+                    dir="ltr"
+                    className="rounded-md bg-[#0D1117] border border-[#D29922] px-2.5 py-0.5 text-xs font-mono font-black text-[#D29922] tabular-nums"
+                  >
+                    {pendingVoiceChairLock.secondsLeft}s
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-[#F0F6FC]">
+                  <span className="font-bold">{pendingVoiceChairLock.barberName}</span>
+                  <span className="text-[#8B949E]">·</span>
+                  <span dir="ltr" className="font-mono text-[#06B6D4]">
+                    {pendingVoiceChairLock.startTimeSlot} – {pendingVoiceChairLock.endTimeSlot} ({pendingVoiceChairLock.durationMins} min)
+                  </span>
+                </div>
+                <p dir="ltr" className="text-[11px] font-mono text-[#8B949E] truncate">
+                  &ldquo;{pendingVoiceChairLock.transcript}&rdquo;
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const snapshot = pendingVoiceChairLock;
+                      setPendingVoiceChairLock(null);
+                      void executeChairLock({
+                        barberName: snapshot.barberName,
+                        startTimeSlot: snapshot.startTimeSlot,
+                        endTimeSlot: snapshot.endTimeSlot,
+                        startMinutes: snapshot.startMinutes,
+                        endMinutes: snapshot.endMinutes,
+                        durationMins: snapshot.durationMins,
+                        source: 'VOICE',
+                        transcript: snapshot.transcript,
+                        silent: true,
+                      });
+                    }}
+                    className="min-h-[42px] rounded-xl bg-[#3FB950] hover:bg-[#4ec960] text-[#0D1117] px-3.5 py-1.5 text-xs font-mono font-black transition"
+                  >
+                    {ui.chairLockConfirmBtn}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const prevPhrase = pendingVoiceChairLock.transcript;
+                      setPendingVoiceChairLock(null);
+                      setVoiceTranscript(prevPhrase);
+                    }}
+                    className="min-h-[42px] rounded-xl border border-[#F85149] bg-[#0D1117] hover:bg-[#4C1C1D] text-[#F85149] px-3.5 py-1.5 text-xs font-mono font-bold transition"
+                  >
+                    {ui.chairLockCancelBtn}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Barber Chair Cards with 2-Tap Silent Quick Duration Pills (+30m / +1h) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -5286,22 +5895,45 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             dir={isOwnerRtl ? 'rtl' : 'ltr'}
             className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-4"
           >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#30363D] pb-3.5">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Calendar className="size-4 text-[#06B6D4]" />
-                  <h2 className="text-base sm:text-lg font-black text-[#F0F6FC]">
-                    {ui.todayScheduleTitle}
-                  </h2>
+            <div className="flex flex-col gap-3 border-b border-[#30363D] pb-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Calendar className="size-4 text-[#06B6D4]" />
+                    <h2 className="text-base sm:text-lg font-black text-[#F0F6FC]">
+                      {ui.todayScheduleTitle}
+                    </h2>
+                  </div>
+                  <p className="text-xs text-[#8B949E] font-mono mt-0.5 tabular-nums">
+                    {sortedBookings.length} scheduled ·{' '}
+                    {sortedBookings.filter((b) => b.status === 'COMPLETED').length} completed · Auto-done +15m after end
+                  </p>
                 </div>
-                <p className="text-xs text-[#8B949E] font-mono mt-0.5 tabular-nums">
-                  {sortedBookings.length} scheduled ·{' '}
-                  {sortedBookings.filter((b) => b.status === 'COMPLETED').length} completed · Auto-done +15m after end
-                </p>
+                <span className="rounded-lg border border-[#30363D] bg-[#0D1117] px-3 py-1.5 text-[11px] font-mono text-[#8B949E] self-start sm:self-auto">
+                  {ui.unflaggedClear}
+                </span>
               </div>
-              <span className="rounded-lg border border-[#30363D] bg-[#0D1117] px-3 py-1.5 text-[11px] font-mono text-[#8B949E]">
-                {ui.unflaggedClear}
-              </span>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    speakHandsFree('جی ہاں، میں شام ساڑھے چھ بجے ماسٹر اسلم کے پاس آ رہا ہوں۔', 'ur', true)
+                  }
+                  className="min-h-[40px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950] transition"
+                >
+                  {ui.urReplySampleBtn}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    speakHandsFree('نعم سأحضر الساعة 7:15 مساءً مع الحلاق طارق، شكراً لكم.', 'ar', true)
+                  }
+                  className="min-h-[40px] rounded-xl border border-[#1F6FEB] bg-[#0D2138] hover:bg-[#132e4d] px-3 py-1.5 text-xs font-mono font-bold text-[#58A6FF] transition"
+                >
+                  {ui.arReplySampleBtn}
+                </button>
+              </div>
             </div>
 
             <div className="space-y-2.5">
@@ -5366,10 +5998,40 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-[#8B949E] font-sans">{booking.service}</p>
+                        <p className="text-xs text-[#8B949E] font-sans">
+                          {ownerLang !== 'en' ? getLocalizedServiceName(booking.service, ownerLang) : booking.service}
+                        </p>
                         <p className="text-[11px] font-mono text-[#6E7681]" dir="ltr">
                           {booking.phone}
                         </p>
+                        {booking.reminderReplyText && booking.reminderReplyLang && (
+                          <div className="mt-1.5 rounded-lg border border-[#30363D] bg-[#161B22] p-2 flex flex-wrap items-center justify-between gap-2">
+                            <p
+                              dir={
+                                booking.reminderReplyLang === 'ur' || booking.reminderReplyLang === 'ar'
+                                  ? 'rtl'
+                                  : 'ltr'
+                              }
+                              className="text-xs text-[#F0F6FC] font-sans break-words [overflow-wrap:break-word]"
+                            >
+                              &ldquo;{booking.reminderReplyText}&rdquo;
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                speakHandsFree(
+                                  booking.reminderReplyText!,
+                                  booking.reminderReplyLang!,
+                                  true
+                                )
+                              }
+                              className="min-h-[34px] inline-flex items-center gap-1 rounded-lg border border-[#06B6D4]/50 bg-[#0D1117] hover:border-[#06B6D4] px-2.5 py-1 text-[11px] font-mono font-bold text-[#06B6D4] shrink-0 transition"
+                            >
+                              <Volume2 className="size-3.5" />
+                              <span>{ui.playClientReplyBtn}</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -5491,6 +6153,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   <span>{showWalkInForm && isWalkInExpanded ? ui.closeBtn : ui.addWalkIn}</span>
                 </button>
               </div>
+              <p className="text-xs text-[#8B949E] font-sans">{ui.walkInHelper}</p>
 
               {isWalkInExpanded && (
                 <div className="space-y-3 pt-2 border-t border-[#21262D]">
@@ -5626,6 +6289,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   <span>{showPackageForm ? ui.closeBtn : ui.issuePass}</span>
                 </button>
               </div>
+              <p className="text-xs text-[#8B949E] font-sans">{ui.passesHelper}</p>
 
               {showPackageForm && (
                 <form
@@ -5749,6 +6413,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   <span>{showBridalForm ? ui.closeBtn : ui.addBridalEvent}</span>
                 </button>
               </div>
+              <p className="text-xs text-[#8B949E] font-sans">{ui.bridalHelper}</p>
 
               {showBridalForm && (
                 <form
@@ -5882,257 +6547,310 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* VIEW 3: DEDICATED "VOICE HELP" SECTION (FOUNDER SUPPORT + VOICE LOG)      */}
+      {/* VIEW 3: DEDICATED "VOICE HELP" SECTION (SEPARATED SUPPORT VS ALERTS)      */}
       {/* ========================================================================= */}
       {currentSectionMode === 'VOICE' && (
         <div className="space-y-4" dir={isOwnerRtl ? 'rtl' : 'ltr'}>
-          {/* Compact Matte Obsidian "Voice Support with Founder" Card */}
-          <div ref={founderVoiceCardRef}>
-            <PortalCard
-              title={ui.voiceSupportTitle}
-              kicker={`DIRECT FOUNDER VOICE DESK · #${activeFounderVoiceThread.serialNumber} · ${activeOwnerVoiceLocale}`}
+          {/* Sub-Tab Switcher separating Founder Voice Support vs Hands-Free Alerts */}
+          <div className="grid grid-cols-2 gap-1.5 p-1.5 rounded-2xl border border-[#30363D] bg-[#161B22]">
+            <button
+              type="button"
+              onClick={() => setVoiceSubTab('FOUNDER_HELP')}
+              className={`min-h-[48px] flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-mono font-bold transition border ${
+                voiceSubTab === 'FOUNDER_HELP'
+                  ? 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
+                  : 'border-transparent bg-transparent text-[#8B949E] hover:bg-[#21262D] hover:text-[#F0F6FC]'
+              }`}
             >
-              <div className="space-y-3">
-                <p className="text-xs text-[#8B949E] font-sans">
-                  {ui.voiceSupportSub}
-                </p>
-
-                <VoiceRecorder
-                  ref={founderVoiceRecorderRef}
-                  compact
-                  title={ui.recordVoiceNoteTitle}
-                  subtitle={ui.recordVoiceNoteSub}
-                  onRecordingChange={setIsOwnerRecordingVoice}
-                  onRecorded={(clip) => {
-                    setOwnerRecordedClip(clip);
-                    setFounderVoiceError(null);
-                  }}
-                />
-
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    dir="ltr"
-                    value={ownerVoiceDraft}
-                    onChange={(e) => setOwnerVoiceDraft(e.target.value)}
-                    placeholder={ui.voiceDraftPlaceholder}
-                    className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder-[#6E7681] focus:border-[#06B6D4] focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void handleSendOwnerVoiceToFounder()}
-                    disabled={isSendingFounderVoice}
-                    className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 px-4 py-2 text-xs font-mono font-bold uppercase text-[#0D1117] transition flex items-center justify-center gap-2 shrink-0"
-                  >
-                    <Send className="size-4" />
-                    <span>
-                      {isSendingFounderVoice
-                        ? ui.sending
-                        : isOwnerRecordingVoice
-                        ? ownerLang === 'ur'
-                          ? 'روکیں اور فاؤنڈر کو بھیجیں'
-                          : ownerLang === 'ar'
-                          ? 'إيقاف وإرسال للمؤسس'
-                          : 'Stop & Send to Founder'
-                        : ui.sendToFounder}
-                    </span>
-                  </button>
-                </div>
-
-                {founderVoiceError && (
-                  <p className="text-xs font-mono text-[#F85149]">{founderVoiceError}</p>
-                )}
-
-                {activeFounderVoiceThread.messages.length > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-[#21262D]">
-                    <p className="text-[10px] font-mono uppercase text-[#8B949E]">
-                      {ui.recentSupportTitle} ({activeFounderVoiceThread.messages.length})
-                    </p>
-                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                      {activeFounderVoiceThread.messages.slice(-4).map((msg) => {
-                        const isFounderMsg = msg.senderRole === 'FOUNDER';
-                        const isPlaying = playingFounderMsgId === msg.id;
-                        const displayBody = isFounderMsg
-                          ? msg.translatedText || msg.originalText
-                          : msg.originalText;
-                        const rtl =
-                          (isFounderMsg ? msg.targetLocale : activeOwnerVoiceLocale) !== 'en-US';
-                        return (
-                          <div
-                            key={msg.id}
-                            className={`rounded-xl border p-3 space-y-2 ${
-                              isFounderMsg
-                                ? 'border-[#06B6D4]/40 bg-[#0D1117]'
-                                : 'border-[#30363D] bg-[#0D1117]'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span
-                                className={`text-[10px] font-mono font-bold uppercase ${
-                                  isFounderMsg ? 'text-[#06B6D4]' : 'text-[#D29922]'
-                                }`}
-                              >
-                                {isFounderMsg ? 'Founder Reply (Translated Voice)' : `${currentSalon.owner} (You)`}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-mono text-[#6E7681]">
-                                  {new Date(msg.createdAtMs).toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
-                                </span>
-                                {(msg.audioDataUrl || (isFounderMsg && displayBody)) && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handlePlayFounderMessage(
-                                        msg.id,
-                                        msg.audioDataUrl ?? null,
-                                        displayBody,
-                                        msg.targetLocale
-                                      )
-                                    }
-                                    className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 text-[11px] font-mono font-bold text-[#F0F6FC] hover:border-[#06B6D4] flex items-center gap-1"
-                                  >
-                                    {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-                                    <span>{isPlaying ? ui.stopVoice : ui.playVoice}</span>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              {isFounderMsg && (
-                                <span className="text-[10px] font-mono text-[#8B949E] block">
-                                  Text Message ({msg.targetLocale} · Readable if Salon is Noisy):
-                                </span>
-                              )}
-                              <p
-                                dir={rtl ? 'rtl' : 'ltr'}
-                                className={`text-sm text-[#F0F6FC] leading-relaxed font-sans ${
-                                  rtl ? 'text-right' : 'text-left'
-                                }`}
-                              >
-                                {displayBody}
-                              </p>
-                            </div>
-                            {msg.audioDataUrl && (
-                              <audio
-                                controls
-                                preload="none"
-                                src={msg.audioDataUrl}
-                                className="w-full h-9"
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </PortalCard>
+              <Mic className="size-4 shrink-0" />
+              <span className="truncate">{ui.founderHelpTab}</span>
+              {hasFounderVoiceReply && (
+                <span className="size-2 rounded-full bg-[#3FB950] shrink-0" aria-label="Founder replied" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setVoiceSubTab('HANDS_FREE_ALERTS')}
+              className={`min-h-[48px] flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-mono font-bold transition border ${
+                voiceSubTab === 'HANDS_FREE_ALERTS'
+                  ? 'border-[#D29922] bg-[#0D1117] text-[#D29922]'
+                  : 'border-transparent bg-transparent text-[#8B949E] hover:bg-[#21262D] hover:text-[#F0F6FC]'
+              }`}
+            >
+              <Volume2 className="size-4 shrink-0" />
+              <span className="truncate">
+                {ui.handsFreeAlertsTab} ({voiceLogs.length})
+              </span>
+            </button>
           </div>
 
-          {/* Hands-Free Voice Concierge & Neural Announcement Log */}
-          <PortalCard
-            title={`${ui.voiceLogsHeading} (${voiceLogs.length})`}
-            kicker={ui.voiceLogsSub}
-          >
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setVoiceFilter('ALL')}
-                    className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono font-bold transition ${
-                      voiceFilter === 'ALL'
-                        ? 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
-                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
-                    }`}
-                  >
-                    {ui.allAlertsBtn}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVoiceFilter('URGENT_ONLY')}
-                    className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono font-bold transition ${
-                      voiceFilter === 'URGENT_ONLY'
-                        ? 'border-[#D29922] bg-[#3B2E0B] text-[#D29922]'
-                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
-                    }`}
-                  >
-                    {ui.urgentOnlyBtn}
-                  </button>
-                </div>
+          {/* Sub-Tab 1: Matte Obsidian "Voice Support with Founder" Card */}
+          {voiceSubTab === 'FOUNDER_HELP' && (
+            <div ref={founderVoiceCardRef}>
+              <PortalCard
+                title={ui.voiceSupportTitle}
+                kicker={`DIRECT FOUNDER VOICE DESK · #${activeFounderVoiceThread.serialNumber} · ${activeOwnerVoiceLocale}`}
+              >
+                <div className="space-y-3">
+                  <p className="text-xs text-[#8B949E] font-sans">
+                    {ui.voiceSupportSub}
+                  </p>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={isTestingLoudAlert}
-                    onClick={() => handleTriggerSimulatedVoiceWebhook('CONFIRMATION')}
-                    className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950] transition disabled:opacity-50"
-                  >
-                    🔊 Test: Ali Confirmed Hamza 4:30 PM
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isTestingLoudAlert}
-                    onClick={() => handleTriggerSimulatedVoiceWebhook('REMINDER_LATE')}
-                    className="min-h-[44px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-3 py-1.5 text-xs font-mono font-bold text-[#D29922] transition disabled:opacity-50"
-                  >
-                    🔊 Test: Reminder Reply (15m Late)
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isTestingLoudAlert}
-                    onClick={() => handleTriggerSimulatedVoiceWebhook('BRIDAL_URGENT')}
-                    className="min-h-[44px] rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#5e2223] px-3 py-1.5 text-xs font-mono font-bold text-[#F85149] transition disabled:opacity-50"
-                  >
-                    🔊 Test: Urgent Bridal/Groom Alert
-                  </button>
-                </div>
-              </div>
+                  <VoiceRecorder
+                    ref={founderVoiceRecorderRef}
+                    compact
+                    title={ui.recordVoiceNoteTitle}
+                    subtitle={ui.recordVoiceNoteSub}
+                    onRecordingChange={setIsOwnerRecordingVoice}
+                    onRecorded={(clip) => {
+                      setOwnerRecordedClip(clip);
+                      setFounderVoiceError(null);
+                    }}
+                  />
 
-              <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-                {voiceLogs
-                  .filter((v) => voiceFilter === 'ALL' || v.isUrgent)
-                  .map((log) => (
-                    <div
-                      key={log.id}
-                      className={`rounded-xl border p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                        log.isUrgent
-                          ? 'border-[#9E6A03] bg-[#3B2E0B]/40'
-                          : 'border-[#30363D] bg-[#0D1117]'
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={ownerVoiceDraft}
+                      onChange={(e) => setOwnerVoiceDraft(e.target.value)}
+                      placeholder={ui.voiceDraftPlaceholder}
+                      className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder-[#6E7681] focus:border-[#06B6D4] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleSendOwnerVoiceToFounder()}
+                      disabled={isSendingFounderVoice}
+                      className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 px-4 py-2 text-xs font-mono font-bold uppercase text-[#0D1117] transition flex items-center justify-center gap-2 shrink-0"
+                    >
+                      <Send className="size-4" />
+                      <span>
+                        {isSendingFounderVoice
+                          ? ui.sending
+                          : isOwnerRecordingVoice
+                          ? ownerLang === 'ur'
+                            ? 'روکیں اور فاؤنڈر کو بھیجیں'
+                            : ownerLang === 'ar'
+                            ? 'إيقاف وإرسال للمؤسس'
+                            : 'Stop & Send to Founder'
+                          : ui.sendToFounder}
+                      </span>
+                    </button>
+                  </div>
+
+                  {founderVoiceError && (
+                    <p className="text-xs font-mono text-[#F85149]">{founderVoiceError}</p>
+                  )}
+
+                  {activeFounderVoiceThread.messages.length > 0 && (
+                    <div className="space-y-2 pt-2 border-t border-[#21262D]">
+                      <p className="text-[10px] font-mono uppercase text-[#8B949E]">
+                        {ui.recentSupportTitle} ({activeFounderVoiceThread.messages.length})
+                      </p>
+                      <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                        {activeFounderVoiceThread.messages.slice(-4).map((msg) => {
+                          const isFounderMsg = msg.senderRole === 'FOUNDER';
+                          const isPlaying = playingFounderMsgId === msg.id;
+                          const displayBody = isFounderMsg
+                            ? msg.translatedText || msg.originalText
+                            : msg.originalText;
+                          const rtl =
+                            (isFounderMsg ? msg.targetLocale : activeOwnerVoiceLocale) !== 'en-US';
+                          return (
+                            <div
+                              key={msg.id}
+                              className={`rounded-xl border p-3 space-y-2 ${
+                                isFounderMsg
+                                  ? 'border-[#06B6D4]/40 bg-[#0D1117]'
+                                  : 'border-[#30363D] bg-[#0D1117]'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span
+                                  className={`text-[10px] font-mono font-bold uppercase ${
+                                    isFounderMsg ? 'text-[#06B6D4]' : 'text-[#D29922]'
+                                  }`}
+                                >
+                                  {isFounderMsg ? 'Founder Reply (Translated Voice)' : `${currentSalon.owner} (You)`}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-mono text-[#6E7681]">
+                                    {new Date(msg.createdAtMs).toLocaleTimeString([], {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </span>
+                                  {(msg.audioDataUrl || (isFounderMsg && displayBody)) && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handlePlayFounderMessage(
+                                          msg.id,
+                                          msg.audioDataUrl ?? null,
+                                          displayBody,
+                                          msg.targetLocale
+                                        )
+                                      }
+                                      className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 text-[11px] font-mono font-bold text-[#F0F6FC] hover:border-[#06B6D4] flex items-center gap-1"
+                                    >
+                                      {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+                                      <span>{isPlaying ? ui.stopVoice : ui.playVoice}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                {isFounderMsg && (
+                                  <span className="text-[10px] font-mono text-[#8B949E] block">
+                                    Text Message ({msg.targetLocale} · Readable if Salon is Noisy):
+                                  </span>
+                                )}
+                                <p
+                                  dir={rtl ? 'rtl' : 'ltr'}
+                                  className={`text-sm text-[#F0F6FC] leading-relaxed font-sans ${
+                                    rtl ? 'text-right' : 'text-left'
+                                  }`}
+                                >
+                                  {displayBody}
+                                </p>
+                              </div>
+                              {msg.audioDataUrl && (
+                                <audio
+                                  controls
+                                  preload="none"
+                                  src={msg.audioDataUrl}
+                                  className="w-full h-9"
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </PortalCard>
+            </div>
+          )}
+
+          {/* Sub-Tab 2: Hands-Free Voice Concierge & Neural Announcement Log */}
+          {voiceSubTab === 'HANDS_FREE_ALERTS' && (
+            <PortalCard
+              title={`${ui.voiceLogsHeading} (${voiceLogs.length})`}
+              kicker={ui.voiceLogsSub}
+            >
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setVoiceFilter('ALL')}
+                      className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono font-bold transition ${
+                        voiceFilter === 'ALL'
+                          ? 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
+                          : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
                       }`}
                     >
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded bg-[#161B22] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono font-bold text-[#06B6D4]">
-                            {log.clientLang.toUpperCase()} ➔ {log.ownerVoiceLang.toUpperCase()} VOICE
-                          </span>
-                          <span className="text-[11px] font-mono text-[#8B949E]">{log.time}</span>
-                        </div>
-                        <p className="text-xs font-bold text-[#F0F6FC]">{log.summary}</p>
-                        <p
-                          dir={log.ownerVoiceLang === 'ur' || log.ownerVoiceLang === 'ar' ? 'rtl' : 'ltr'}
-                          className="text-xs text-[#8B949E] font-sans break-words [overflow-wrap:break-word]"
-                        >
-                          &ldquo;{log.spokenText}&rdquo;
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => speakHandsFree(log.spokenText, log.ownerVoiceLang, true)}
-                        className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] shrink-0 flex items-center gap-1.5 transition"
+                      {ui.allAlertsBtn}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVoiceFilter('URGENT_ONLY')}
+                      className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono font-bold transition ${
+                        voiceFilter === 'URGENT_ONLY'
+                          ? 'border-[#D29922] bg-[#3B2E0B] text-[#D29922]'
+                          : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
+                      }`}
+                    >
+                      {ui.urgentOnlyBtn}
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isTestingLoudAlert}
+                      onClick={() => handleTriggerSimulatedVoiceWebhook('DUBAI_AR_CLIENT')}
+                      className="min-h-[44px] rounded-xl border border-[#06B6D4] bg-[#0D2138] hover:bg-[#132e4d] px-3 py-1.5 text-xs font-mono font-bold text-[#06B6D4] transition disabled:opacity-50"
+                    >
+                      {ui.testDubaiArBtn}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isTestingLoudAlert}
+                      onClick={() => handleTriggerSimulatedVoiceWebhook('CONFIRMATION')}
+                      className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950] transition disabled:opacity-50"
+                    >
+                      🔊 Test: Ali Confirmed Hamza 4:30 PM
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isTestingLoudAlert}
+                      onClick={() => handleTriggerSimulatedVoiceWebhook('REMINDER_LATE')}
+                      className="min-h-[44px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-3 py-1.5 text-xs font-mono font-bold text-[#D29922] transition disabled:opacity-50"
+                    >
+                      🔊 Test: Reminder Reply (15m Late)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isTestingLoudAlert}
+                      onClick={() => handleTriggerSimulatedVoiceWebhook('BRIDAL_URGENT')}
+                      className="min-h-[44px] rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#5e2223] px-3 py-1.5 text-xs font-mono font-bold text-[#F85149] transition disabled:opacity-50"
+                    >
+                      🔊 Test: Urgent Bridal/Groom Alert
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                  {voiceLogs
+                    .filter((v) => voiceFilter === 'ALL' || v.isUrgent)
+                    .map((log) => (
+                      <div
+                        key={log.id}
+                        className={`rounded-xl border p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                          log.isUrgent
+                            ? 'border-[#9E6A03] bg-[#3B2E0B]/40'
+                            : 'border-[#30363D] bg-[#0D1117]'
+                        }`}
                       >
-                        <Volume2 className="size-4" />
-                        <span>{ui.replayBtn}</span>
-                      </button>
-                    </div>
-                  ))}
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded bg-[#161B22] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono font-bold text-[#06B6D4]">
+                              {log.clientLang.toUpperCase()} ➔ {log.ownerVoiceLang.toUpperCase()} VOICE
+                            </span>
+                            <span className="text-[11px] font-mono text-[#8B949E]">{log.time}</span>
+                          </div>
+                          <p className="text-xs font-bold text-[#F0F6FC]">{log.summary}</p>
+                          {log.originalClientNote && (
+                            <p
+                              dir={log.clientLang === 'ur' || log.clientLang === 'ar' ? 'rtl' : 'ltr'}
+                              className="text-[11px] text-[#06B6D4] font-sans break-words [overflow-wrap:break-word]"
+                            >
+                              {log.clientLang.toUpperCase()}: &ldquo;{log.originalClientNote}&rdquo;
+                            </p>
+                          )}
+                          <p
+                            dir={log.ownerVoiceLang === 'ur' || log.ownerVoiceLang === 'ar' ? 'rtl' : 'ltr'}
+                            className="text-xs text-[#8B949E] font-sans break-words [overflow-wrap:break-word]"
+                          >
+                            &ldquo;{log.spokenText}&rdquo;
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => speakHandsFree(log.spokenText, log.ownerVoiceLang, true)}
+                          className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] shrink-0 flex items-center gap-1.5 transition"
+                        >
+                          <Volume2 className="size-4" />
+                          <span>{ui.replayBtn}</span>
+                        </button>
+                      </div>
+                    ))}
+                </div>
               </div>
-            </div>
-          </PortalCard>
+            </PortalCard>
+          )}
         </div>
       )}
 
@@ -6171,52 +6889,50 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             })}
           </div>
 
-          {/* 1. STAFF & BARBERS / STYLISTS + SHOP CATEGORY MODE SELECTOR */}
+          {/* 1. STAFF & BARBERS / STYLISTS + READ-ONLY LOCKED ONBOARDING CATEGORY BADGE */}
           {manageSubSection === 'STAFF' && (
             <div className="space-y-4">
               <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-mono font-bold uppercase text-[#06B6D4]">
-                    {ui.salonProfileModeLabel}
-                  </p>
-                  <p className="text-xs text-[#8B949E] font-sans mt-0.5">
-                    {isLadies
-                      ? 'Ladies Beauty Parlor Mode active: Bridal Advance Tracker & Female-Only privacy badge enabled.'
-                      : 'Men’s Salon & Barbershop Mode active: Barber chairs, beard combos & express walk-in ETA enabled.'}
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ShieldCheck className="size-4 text-[#06B6D4] shrink-0" />
+                    <p className="text-xs font-mono font-bold uppercase text-[#06B6D4]">
+                      {ui.salonProfileModeLabel}
+                    </p>
+                    <span className="rounded-md border border-[#116329] bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
+                      {ui.lockedCategoryBadge}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#8B949E] font-sans">
+                    {isLadies ? ui.lockedCategoryDescLadies : ui.lockedCategoryDescMens}
                   </p>
                 </div>
-                <div className="grid grid-cols-2 gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => void handleUpdateSalonCategory('MENS')}
-                    className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-xs font-mono font-bold transition ${
-                      !isLadies
-                        ? 'border-[#06B6D4] bg-[#06B6D4] text-[#0D1117]'
-                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
-                    }`}
-                  >
-                    {ui.mensSalonBtn}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleUpdateSalonCategory('LADIES')}
-                    className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-xs font-mono font-bold transition ${
-                      isLadies
-                        ? 'border-[#D29922] bg-[#D29922] text-[#0D1117]'
-                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
-                    }`}
-                  >
-                    {ui.ladiesParlorBtn}
-                  </button>
-                </div>
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-mono font-bold shrink-0 ${
+                    isLadies
+                      ? 'border-[#D29922] bg-[#3B2E0B] text-[#D29922]'
+                      : 'border-[#06B6D4] bg-[#0D2138] text-[#06B6D4]'
+                  }`}
+                >
+                  <Lock className="size-3.5 shrink-0" />
+                  <span>{isLadies ? ui.ladiesParlorBtn : ui.mensSalonBtn}</span>
+                </span>
               </div>
             <PortalCard
               title={isLadies ? ui.staffStylists : ui.staffBarbers}
-              kicker={isLadies ? 'STYLIST ROSTER & PRIVATE CABIN STATIONS' : 'BARBER ROSTER & CHAIR ASSIGNMENTS'}
+              kicker={
+                ownerLang === 'ur'
+                  ? 'اسٹاف روسٹر · کرسیوں کی تقسیم'
+                  : ownerLang === 'ar'
+                  ? 'قائمة الموظفين · توزيع الكراسي'
+                  : isLadies
+                  ? 'STYLIST ROSTER & PRIVATE CABIN STATIONS'
+                  : 'BARBER ROSTER & CHAIR ASSIGNMENTS'
+              }
             >
               <div className="space-y-4">
                 <p className="text-xs text-[#8B949E] font-sans">
-                  Manage your barbers and their assigned floor chairs. Updates feed live into Today&apos;s Schedule, Walk-In seating, and WhatsApp booking slots.
+                  {ui.staffDesc}
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -6236,7 +6952,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                               value={editingBarberName}
                               onChange={(e) => setEditingBarberName(e.target.value)}
                               className="w-full min-h-[48px] rounded-xl border border-[#06B6D4] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] focus:outline-none"
-                              placeholder="Barber name"
+                              placeholder={ui.barberNamePlaceholder}
                               autoFocus
                             />
                             <input
@@ -6245,7 +6961,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                               value={editingBarberChair}
                               onChange={(e) => setEditingBarberChair(e.target.value)}
                               className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#D29922] focus:outline-none focus:border-[#06B6D4]"
-                              placeholder="Chair assignment (e.g. Chair #1)"
+                              placeholder={ui.chairPlaceholder}
                             />
                             <div className="flex items-center gap-2">
                               <button
@@ -6253,7 +6969,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                                 onClick={() => handleSaveEditBarber(bIdx)}
                                 className="flex-1 min-h-[48px] rounded-xl bg-[#06B6D4] text-[#0D1117] text-xs font-mono font-bold hover:bg-[#22D3EE] transition"
                               >
-                                Save Changes ✓
+                                {ui.saveChangesBtn}
                               </button>
                               <button
                                 type="button"
@@ -6264,7 +6980,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                                 }}
                                 className="min-h-[48px] px-3 rounded-xl border border-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] text-xs font-mono"
                               >
-                                Cancel
+                                {ui.cancelBtn}
                               </button>
                             </div>
                           </div>
@@ -6276,7 +6992,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                               </span>
                               <div className="min-w-0">
                                 <p className="text-sm font-bold text-[#F0F6FC] truncate">{barber}</p>
-                                <span className="text-xs font-mono text-[#06B6D4] block truncate">
+                                <span className="text-xs font-mono text-[#06B6D4] block truncate" dir="ltr">
                                   {assignedChair}
                                 </span>
                               </div>
@@ -6320,7 +7036,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     dir="ltr"
                     value={newBarberDashboardInput}
                     onChange={(e) => setNewBarberDashboardInput(e.target.value)}
-                    placeholder="Barber / Stylist Name (e.g. Master Kamran)"
+                    placeholder={ui.addStaffNamePlaceholder}
                     className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder:text-[#484F58] focus:outline-none focus:border-[#06B6D4]"
                   />
                   <input
@@ -6344,8 +7060,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
             {/* Barber Performance & Top Services Breakdown */}
             <PortalCard
-              title="Barber Performance & Top Services Breakdown"
-              kicker="CHAIR RETENTION · POPULAR SERVICES PER BARBER"
+              title={ui.barberPerfTitle}
+              kicker={ui.barberPerfKicker}
             >
               <div className="space-y-4">
                 <div className="flex flex-wrap gap-2">
@@ -6362,36 +7078,29 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
                         }`}
                       >
-                        {barberOption === 'ALL' ? 'All Chairs Combined' : barberOption}
+                        {barberOption === 'ALL' ? ui.allChairsCombined : barberOption}
                       </button>
                     );
                   })}
                 </div>
 
                 {(() => {
-                  const directStats = BARBER_SERVICE_STATS[selectedBarberForServices];
                   const barberBookings = bookings.filter(
                     (b) => selectedBarberForServices === 'ALL' || b.barberName === selectedBarberForServices
                   );
-                  const stats = directStats || {
-                    topServices: [
-                      '1. Master Haircut & Skin Fade (52%)',
-                      '2. Classic Beard Trim & Sculpt (31%)',
-                      '3. Charcoal Detox Facial (17%)',
-                    ],
-                    favRate: '95% Positive Rating',
-                    repeatRate: `${Math.min(88, 66 + barberBookings.length * 4)}% Repeat Retention`,
-                    clientLove: `${selectedBarberForServices} (${
-                      barberChairs[selectedBarberForServices] || 'Floor Chair'
-                    }) holds strong repeat demand across regular grooming appointments.`,
-                  };
+                  const stats = getLocalizedBarberStats(
+                    selectedBarberForServices,
+                    ownerLang,
+                    barberBookings.length,
+                    barberChairs[selectedBarberForServices] || 'Floor Chair'
+                  );
 
                   return (
                     <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-3">
                           <span className="text-[10px] font-mono uppercase text-[#8B949E] block">
-                            Client Rating
+                            {ui.clientRatingLabel}
                           </span>
                           <p className="text-sm font-black font-mono text-[#3FB950] mt-0.5 flex items-center gap-1.5">
                             <Award className="size-4 shrink-0" />
@@ -6400,7 +7109,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         </div>
                         <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3">
                           <span className="text-[10px] font-mono uppercase text-[#8B949E] block">
-                            Repeat Client Rate
+                            {ui.repeatRateLabel}
                           </span>
                           <p className="text-sm font-black font-mono text-[#D29922] mt-0.5 flex items-center gap-1.5">
                             <TrendingUp className="size-4 shrink-0" />
@@ -6411,7 +7120,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
                       <div className="space-y-1.5">
                         <span className="text-[11px] font-mono font-bold uppercase text-[#06B6D4] block">
-                          Most Requested Services
+                          {ui.mostRequestedServicesLabel}
                         </span>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           {stats.topServices.map((svc) => (
@@ -6434,16 +7143,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           </div>
           )}
 
-          {/* 2. SERVICES & RATES (Edit Service Names, Durations, and Pricing) */}
+          {/* 2. SERVICES & RATES (Edit Service Names, Durations, and Pricing + Auto-Translate) */}
           {manageSubSection === 'SERVICES' && (
             <PortalCard
-              title="Services & Rates"
-              kicker="SERVICE NAMES · DURATIONS · PRICING"
+              title={ui.servicesRatesTitle}
+              kicker={ui.servicesRatesKicker}
             >
               <div className="space-y-4">
+                {void serviceTranslationsVersion}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <p className="text-xs font-sans text-[#8B949E]">
-                    Edit service titles, durations (mins), and rates ({regionConfig.currency}). Changes reflect immediately on your WhatsApp menu.
+                    {ui.servicesRatesDesc} ({regionConfig.currency})
                   </p>
                   <button
                     type="button"
@@ -6451,28 +7161,54 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     className="min-h-[48px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase transition shrink-0"
                   >
                     <Plus className="size-4" />
-                    <span>{isAddingCustom ? 'Close Form' : 'Add Service'}</span>
+                    <span>{isAddingCustom ? ui.closeFormBtn : ui.addServiceBtn}</span>
                   </button>
                 </div>
 
                 {isAddingCustom && (
                   <form
-                    onSubmit={(e) => {
+                    onSubmit={async (e) => {
                       e.preventDefault();
-                      if (!customServiceName.trim()) return;
+                      if (!customServiceName.trim() || isTranslatingCustomService) return;
+                      const cleanName = customServiceName.trim();
                       const newSvc = {
                         id: `custom_${Date.now()}`,
-                        name: customServiceName.trim(),
+                        name: cleanName,
                         durationMins: parseInt(customServiceDuration, 10) || 35,
                         price: parseInt(customServicePrice, 10) || 1000,
                         active: true,
                       };
+                      setIsTranslatingCustomService(true);
                       setServices((prev) => [...prev, newSvc]);
+                      try {
+                        const trRes = await fetch('/api/translate-service', {
+                          method: 'POST',
+                          credentials: 'include',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ text: cleanName, targetLang: ownerLang }),
+                        });
+                        if (trRes.ok) {
+                          const trData = (await trRes.json()) as {
+                            translations?: { en?: string; ur?: string; ar?: string };
+                          };
+                          if (trData.translations) {
+                            SERVICE_TRANSLATIONS[cleanName] = {
+                              ur: trData.translations.ur || cleanName,
+                              ar: trData.translations.ar || cleanName,
+                            };
+                            setServiceTranslationsVersion((v) => v + 1);
+                          }
+                        }
+                      } catch {
+                        // Safe offline fallback retains user service name
+                      } finally {
+                        setIsTranslatingCustomService(false);
+                      }
                       setCustomServiceName('');
                       setCustomServiceDuration('35');
                       setCustomServicePrice('1500');
                       setIsAddingCustom(false);
-                      setMaintToast(`✓ Service "${newSvc.name}" added.`);
+                      setMaintToast(`✓ Service "${newSvc.name}" added & translated.`);
                       setTimeout(() => setMaintToast(null), 4000);
                     }}
                     className="p-4 rounded-2xl border border-[#9E6A03] bg-[#0D1117] space-y-3"
@@ -6482,7 +7218,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         type="text"
                         dir="ltr"
                         required
-                        placeholder="Service Name"
+                        placeholder={ui.serviceNamePlaceholder}
                         value={customServiceName}
                         onChange={(e) => setCustomServiceName(e.target.value)}
                         className="sm:col-span-2 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder:text-[#484F58]"
@@ -6492,7 +7228,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         dir="ltr"
                         required
                         min={5}
-                        placeholder="Mins"
+                        placeholder={ui.minsPlaceholder}
                         value={customServiceDuration}
                         onChange={(e) => setCustomServiceDuration(e.target.value)}
                         className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#06B6D4] placeholder:text-[#484F58]"
@@ -6501,7 +7237,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         type="number"
                         dir="ltr"
                         required
-                        placeholder={`Price (${regionConfig.currency})`}
+                        placeholder={`${regionConfig.currency}`}
                         value={customServicePrice}
                         onChange={(e) => setCustomServicePrice(e.target.value)}
                         className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] placeholder:text-[#484F58]"
@@ -6510,72 +7246,87 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     <div className="flex justify-end">
                       <button
                         type="submit"
-                        className="min-h-[48px] px-5 py-2 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] text-xs font-mono font-bold uppercase"
+                        disabled={isTranslatingCustomService}
+                        className="min-h-[48px] px-5 py-2 rounded-xl bg-[#D29922] hover:bg-[#e0b252] disabled:opacity-60 text-[#0D1117] text-xs font-mono font-bold uppercase"
                       >
-                        Save &amp; Sync ✓
+                        {isTranslatingCustomService ? ui.sending : ui.saveAndSyncBtn}
                       </button>
                     </div>
                   </form>
                 )}
 
                 <div className="space-y-2.5">
-                  {services.map((item) => (
-                    <div
-                      key={item.id}
-                      className={`rounded-xl border p-3.5 grid grid-cols-1 md:grid-cols-[auto_1fr_auto_auto] items-center gap-3 transition ${
-                        item.active
-                          ? 'border-[#30363D] bg-[#0D1117]'
-                          : 'border-[#21262D] bg-[#0D1117] opacity-60'
-                      }`}
-                    >
-                      <label className="inline-flex items-center gap-2 cursor-pointer min-h-[48px]">
-                        <input
-                          type="checkbox"
-                          checked={item.active}
-                          onChange={() => handleToggleService(item.id)}
-                          className="size-4 accent-[#06B6D4] rounded shrink-0"
-                        />
-                        <span className="text-xs font-mono text-[#8B949E] md:hidden">Active</span>
-                      </label>
+                  {services.map((item) => {
+                    const localizedServiceTitle = getLocalizedServiceName(item.name, ownerLang);
+                    return (
+                      <div
+                        key={item.id}
+                        className={`rounded-xl border p-3.5 grid grid-cols-1 md:grid-cols-[auto_1fr_auto_auto] items-center gap-3 transition ${
+                          item.active
+                            ? 'border-[#30363D] bg-[#0D1117]'
+                            : 'border-[#21262D] bg-[#0D1117] opacity-60'
+                        }`}
+                      >
+                        <label className="inline-flex items-center gap-2 cursor-pointer min-h-[48px]">
+                          <input
+                            type="checkbox"
+                            checked={item.active}
+                            onChange={() => handleToggleService(item.id)}
+                            className="size-4 accent-[#06B6D4] rounded shrink-0"
+                          />
+                          <span className="text-xs font-mono text-[#8B949E] md:hidden">
+                            {ui.activeLabel}
+                          </span>
+                        </label>
 
-                      <input
-                        type="text"
-                        dir="ltr"
-                        value={item.name}
-                        onChange={(e) => handleUpdateServiceName(item.id, e.target.value)}
-                        className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
-                      />
+                        <div className="space-y-1 min-w-0">
+                          <input
+                            type="text"
+                            dir="ltr"
+                            value={item.name}
+                            onChange={(e) => handleUpdateServiceName(item.id, e.target.value)}
+                            className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
+                          />
+                          {ownerLang !== 'en' && (
+                            <p dir="rtl" className="text-xs font-sans text-[#06B6D4] px-1">
+                              {ui.localizedLabelPrefix}: {localizedServiceTitle}
+                            </p>
+                          )}
+                        </div>
 
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="number"
-                          dir="ltr"
-                          min={5}
-                          value={item.durationMins}
-                          onChange={(e) =>
-                            handleUpdateServiceDuration(item.id, parseInt(e.target.value, 10) || 15)
-                          }
-                          className="w-20 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#06B6D4] focus:outline-none focus:border-[#06B6D4]"
-                        />
-                        <span className="text-xs font-mono text-[#8B949E] shrink-0">min</span>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            dir="ltr"
+                            min={5}
+                            value={item.durationMins}
+                            onChange={(e) =>
+                              handleUpdateServiceDuration(item.id, parseInt(e.target.value, 10) || 15)
+                            }
+                            className="w-20 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#06B6D4] focus:outline-none focus:border-[#06B6D4]"
+                          />
+                          <span className="text-xs font-mono text-[#8B949E] shrink-0">
+                            {ui.minUnit}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-mono text-[#8B949E] shrink-0">
+                            {regionConfig.currency}
+                          </span>
+                          <input
+                            type="number"
+                            dir="ltr"
+                            value={item.price}
+                            onChange={(e) =>
+                              handleUpdatePrice(item.id, parseInt(e.target.value, 10) || 0)
+                            }
+                            className="w-28 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] focus:outline-none focus:border-[#06B6D4]"
+                          />
+                        </div>
                       </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-mono text-[#8B949E] shrink-0">
-                          {regionConfig.currency}
-                        </span>
-                        <input
-                          type="number"
-                          dir="ltr"
-                          value={item.price}
-                          onChange={(e) =>
-                            handleUpdatePrice(item.id, parseInt(e.target.value, 10) || 0)
-                          }
-                          className="w-28 min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] focus:outline-none focus:border-[#06B6D4]"
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </PortalCard>
@@ -6584,18 +7335,18 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           {/* 3. SALON HOURS (Editable Opening/Closing Days & Times) */}
           {manageSubSection === 'HOURS' && (
             <PortalCard
-              title="Salon Hours"
-              kicker="OPENING & CLOSING SCHEDULE · FRIDAY JUMMAH BREAK"
+              title={ui.salonHoursTitle}
+              kicker={ui.salonHoursKicker}
             >
               <form onSubmit={handleSaveSalonHours} className="space-y-4">
                 <p className="text-xs text-[#8B949E] font-sans">
-                  Configure your weekly opening and closing times. The WhatsApp concierge automatically quotes these hours to customers asking when you are open.
+                  {ui.salonHoursDesc}
                 </p>
 
                 {/* Monday - Thursday */}
                 <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-bold text-[#F0F6FC]">Monday – Thursday</span>
+                    <span className="text-sm font-bold text-[#F0F6FC]">{ui.monThuLabel}</span>
                     <label className="inline-flex items-center gap-2 text-xs font-mono text-[#8B949E] cursor-pointer min-h-[48px]">
                       <input
                         type="checkbox"
@@ -6605,13 +7356,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         }
                         className="size-4 accent-[#06B6D4]"
                       />
-                      <span>{salonHours.monThuClosed ? 'Closed' : 'Open'}</span>
+                      <span>{salonHours.monThuClosed ? ui.closedLabel : ui.openLabel}</span>
                     </label>
                   </div>
                   {!salonHours.monThuClosed && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <label className="space-y-1 block">
-                        <span className="text-[11px] font-mono text-[#8B949E]">Opening Time</span>
+                        <span className="text-[11px] font-mono text-[#8B949E]">
+                          {ui.openingTimeLabel}
+                        </span>
                         <input
                           type="text"
                           dir="ltr"
@@ -6623,7 +7376,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         />
                       </label>
                       <label className="space-y-1 block">
-                        <span className="text-[11px] font-mono text-[#8B949E]">Closing Time</span>
+                        <span className="text-[11px] font-mono text-[#8B949E]">
+                          {ui.closingTimeLabel}
+                        </span>
                         <input
                           type="text"
                           dir="ltr"
@@ -6641,7 +7396,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 {/* Friday */}
                 <div className="rounded-xl border border-[#9E6A03] bg-[#0D1117] p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-bold text-[#D29922]">Friday (Jummah Schedule)</span>
+                    <span className="text-sm font-bold text-[#D29922]">{ui.fridayLabel}</span>
                     <label className="inline-flex items-center gap-2 text-xs font-mono text-[#8B949E] cursor-pointer min-h-[48px]">
                       <input
                         type="checkbox"
@@ -6651,13 +7406,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         }
                         className="size-4 accent-[#D29922]"
                       />
-                      <span>{salonHours.fridayClosed ? 'Closed' : 'Open'}</span>
+                      <span>{salonHours.fridayClosed ? ui.closedLabel : ui.openLabel}</span>
                     </label>
                   </div>
                   {!salonHours.fridayClosed && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                       <label className="space-y-1 block">
-                        <span className="text-[11px] font-mono text-[#8B949E]">Open</span>
+                        <span className="text-[11px] font-mono text-[#8B949E]">
+                          {ui.openShortLabel}
+                        </span>
                         <input
                           type="text"
                           dir="ltr"
@@ -6669,7 +7426,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         />
                       </label>
                       <label className="space-y-1 block">
-                        <span className="text-[11px] font-mono text-[#8B949E]">Close</span>
+                        <span className="text-[11px] font-mono text-[#8B949E]">
+                          {ui.closeShortLabel}
+                        </span>
                         <input
                           type="text"
                           dir="ltr"
@@ -6681,7 +7440,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         />
                       </label>
                       <label className="space-y-1 block">
-                        <span className="text-[11px] font-mono text-[#D29922]">Prayer Break Start</span>
+                        <span className="text-[11px] font-mono text-[#D29922]">
+                          {ui.prayerBreakStartLabel}
+                        </span>
                         <input
                           type="text"
                           dir="ltr"
@@ -6696,7 +7457,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         />
                       </label>
                       <label className="space-y-1 block">
-                        <span className="text-[11px] font-mono text-[#D29922]">Prayer Break End</span>
+                        <span className="text-[11px] font-mono text-[#D29922]">
+                          {ui.prayerBreakEndLabel}
+                        </span>
                         <input
                           type="text"
                           dir="ltr"
@@ -6717,7 +7480,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 {/* Saturday & Sunday */}
                 <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-bold text-[#F0F6FC]">Saturday &amp; Sunday</span>
+                    <span className="text-sm font-bold text-[#F0F6FC]">{ui.satSunLabel}</span>
                     <label className="inline-flex items-center gap-2 text-xs font-mono text-[#8B949E] cursor-pointer min-h-[48px]">
                       <input
                         type="checkbox"
@@ -6727,13 +7490,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         }
                         className="size-4 accent-[#3FB950]"
                       />
-                      <span>{salonHours.satSunClosed ? 'Closed' : 'Open'}</span>
+                      <span>{salonHours.satSunClosed ? ui.closedLabel : ui.openLabel}</span>
                     </label>
                   </div>
                   {!salonHours.satSunClosed && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <label className="space-y-1 block">
-                        <span className="text-[11px] font-mono text-[#8B949E]">Opening Time</span>
+                        <span className="text-[11px] font-mono text-[#8B949E]">
+                          {ui.openingTimeLabel}
+                        </span>
                         <input
                           type="text"
                           dir="ltr"
@@ -6745,7 +7510,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         />
                       </label>
                       <label className="space-y-1 block">
-                        <span className="text-[11px] font-mono text-[#8B949E]">Closing Time</span>
+                        <span className="text-[11px] font-mono text-[#8B949E]">
+                          {ui.closingTimeLabel}
+                        </span>
                         <input
                           type="text"
                           dir="ltr"
@@ -6781,6 +7548,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 salonName={currentSalon.name}
                 ownerName={currentSalon.owner}
                 salonPhone={currentSalon.phone}
+                ownerLang={ownerLang}
                 packageTier={packageTier}
                 conciergeState={conciergeState}
                 onStateUpdated={processIncomingConciergeState}
