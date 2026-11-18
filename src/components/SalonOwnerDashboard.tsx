@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Smartphone,
   Scissors,
@@ -1548,7 +1548,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   }, [selectedSalonName, salonsState, onboardedData, lockedSalonId]);
 
   const currentSalon = salonsState.find((s) => s.id === selectedSalonId) || salonsState[0];
-  const allowedLangs = getAllowedDashboardLangs(currentSalon.phone, currentSalon.location);
+  const allowedLangs = useMemo(
+    () => getAllowedDashboardLangs(currentSalon.phone, currentSalon.location),
+    [currentSalon.phone, currentSalon.location]
+  );
+  const allowedLangsKey = allowedLangs.join(',');
   const regionConfig = getRegionFromPhone(currentSalon.phone, currentSalon.location);
   const currentPackage =
     regionConfig.packages.find((p) => p.id === currentSalon.planId) || regionConfig.packages[0];
@@ -2761,7 +2765,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   }, [isFounderInspector]);
 
   // Sync live counter controls to Hamburger Sidebar & handle unified Wake ON/OFF + AUX + Speaker Test actions
+  const lastHardwareSyncKeyRef = useRef<string>('');
   useEffect(() => {
+    const syncKey = `${isWakeLockActive}|${isLoudspeakerBoostActive}|${isCounterSleeping}|${overnightQueue.length}|${hasFounderVoiceReply}|${allowedLangsKey}|${ownerLang}`;
+    if (lastHardwareSyncKeyRef.current === syncKey) return;
+    lastHardwareSyncKeyRef.current = syncKey;
     onHardwareStatusSync?.({
       isWakeLockActive,
       isLoudspeakerBoostActive,
@@ -2778,6 +2786,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     overnightQueue.length,
     hasFounderVoiceReply,
     allowedLangs,
+    allowedLangsKey,
     ownerLang,
     onHardwareStatusSync,
   ]);
