@@ -56,11 +56,12 @@ export interface BroadcastLog {
   timestamp: string;
   recipientName: string;
   recipientPhone: string;
-  status: 'sent' | 'rate_limited' | 'skipped_optout';
+  status: 'sent' | 'rate_limited' | 'skipped_optout' | 'auto_resolved' | 'skipped_failed';
   delaySeconds: number;
   personalizedText?: string;
   languageRoute?: string;
   languageFlag?: string;
+  errorReason?: string;
 }
 
 export interface BroadcastCampaign {
