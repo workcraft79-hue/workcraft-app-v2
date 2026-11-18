@@ -775,6 +775,7 @@ export const OWNER_UI_I18N: Record<
     reviewQueued: string;
     walkInQueueTitle: string;
     addWalkIn: string;
+    noWalkIns: string;
     closeBtn: string;
     queueGuest: string;
     callNext: string;
@@ -783,12 +784,16 @@ export const OWNER_UI_I18N: Record<
     createPass: string;
     useSession: string;
     completedTick: string;
+    noPackages: string;
     bridalTrackerTitle: string;
     bridalLadiesTitle: string;
+    femaleOnlyBadge: string;
     addBridalEvent: string;
     saveBridalAdvance: string;
     markSettled: string;
     fullSettled: string;
+    passesEvents: string;
+    voiceHelp: string;
     topServicesTitle: string;
     mostRequested: string;
     remindersTitle: string;
@@ -798,6 +803,16 @@ export const OWNER_UI_I18N: Record<
     arr2h: string;
     arr2hDesc: string;
     voiceSupportTitle: string;
+    voiceSupportSub: string;
+    recordVoiceNoteTitle: string;
+    recordVoiceNoteSub: string;
+    voiceDraftPlaceholder: string;
+    recentSupportTitle: string;
+    voiceLogsHeading: string;
+    voiceLogsSub: string;
+    allAlertsBtn: string;
+    urgentOnlyBtn: string;
+    replayBtn: string;
     sendToFounder: string;
     sending: string;
     playVoice: string;
@@ -808,11 +823,19 @@ export const OWNER_UI_I18N: Record<
     salonHours: string;
     automationRewards: string;
     windowQrPoster: string;
+    salonProfileModeLabel: string;
+    mensSalonBtn: string;
+    ladiesParlorBtn: string;
+    addBarberBtn: string;
+    addStylistBtn: string;
+    saveHoursBtn: string;
   }
 > = {
   en: {
     whatsappConnected: 'WhatsApp Gateway · Connected',
     liveFloor: 'Live Floor',
+    passesEvents: 'Passes & Events',
+    voiceHelp: 'Voice Help',
     manage: 'Manage',
     counterSleep: 'Counter Sleep',
     keepCounterAwake: 'Keep Counter Awake',
@@ -860,6 +883,7 @@ export const OWNER_UI_I18N: Record<
     reviewQueued: 'T+2h Review Queued',
     walkInQueueTitle: 'Live Walk-In Queue & ETA',
     addWalkIn: 'Add Walk-In',
+    noWalkIns: 'No waiting walk-in guests right now. Tap + Add Walk-In during rush hour to track ETAs automatically.',
     closeBtn: 'Close',
     queueGuest: 'Queue Guest ✓',
     callNext: 'Call Next',
@@ -868,8 +892,10 @@ export const OWNER_UI_I18N: Record<
     createPass: 'Create Prepaid Pass ✓',
     useSession: 'Use 1 Session',
     completedTick: 'Completed ✓',
+    noPackages: 'No prepaid session bundles yet. Offer 4-visit or 5-session packages to lock repeat upfront cashflow.',
     bridalTrackerTitle: 'Bridal / Groom Event Advance Tracker',
     bridalLadiesTitle: 'Bridal Suite & Female-Only Event Advance Tracker',
+    femaleOnlyBadge: '✓ Female-Only Private Cabin Policy Active across WhatsApp Rate Menu & Bookings',
     addBridalEvent: 'Add Bridal / Event',
     saveBridalAdvance: 'Save Bridal Advance ✓',
     markSettled: 'Mark Settled ✓',
@@ -883,6 +909,17 @@ export const OWNER_UI_I18N: Record<
     arr2h: '2-Hour Chair Arrival Ping',
     arr2hDesc: 'Confirms arrival or announces 15m late replies aloud',
     voiceSupportTitle: 'Voice Support with Founder',
+    voiceSupportSub:
+      'Speak or type in Urdu, Arabic, or English. Your note translates cleanly for the Founder while preserving your original voice, and Founder replies play aloud in your language.',
+    recordVoiceNoteTitle: 'Hold or Tap to Record Voice Support Note',
+    recordVoiceNoteSub: 'Light Opus clip (~150 KB, auto-purged after 7 days)',
+    voiceDraftPlaceholder: 'Type a question for the Founder (or send your recorded voice)...',
+    recentSupportTitle: 'Recent Support Messages',
+    voiceLogsHeading: 'Hands-Free Voice Alerts & Translation Log',
+    voiceLogsSub: 'Announces incoming confirmations & reminder replies aloud in pure human neural voice',
+    allAlertsBtn: 'All Alerts',
+    urgentOnlyBtn: 'Urgent Only',
+    replayBtn: 'Replay',
     sendToFounder: 'Send to Founder',
     sending: 'Sending...',
     playVoice: 'Play Voice',
@@ -893,10 +930,18 @@ export const OWNER_UI_I18N: Record<
     salonHours: 'Salon Hours',
     automationRewards: 'Automation & Rewards',
     windowQrPoster: 'Window QR Poster',
+    salonProfileModeLabel: 'Salon Category Profile (Persisted on WhatsApp & Posters)',
+    mensSalonBtn: "Men's Salon",
+    ladiesParlorBtn: 'Ladies Parlor',
+    addBarberBtn: 'Add Barber',
+    addStylistBtn: 'Add Stylist',
+    saveHoursBtn: 'Save Salon Hours',
   },
   ur: {
     whatsappConnected: 'واٹس ایپ گیٹ وے · فعال',
     liveFloor: 'لائیو فلور',
+    passesEvents: 'پاسز اور ایونٹس',
+    voiceHelp: 'وائس سپورٹ',
     manage: 'مینج کریں',
     counterSleep: 'کاؤنٹر سلیپ',
     keepCounterAwake: 'کاؤنٹر بیدار کریں',
@@ -944,6 +989,7 @@ export const OWNER_UI_I18N: Record<
     reviewQueued: '2 گھنٹے بعد ریویو شیڈول',
     walkInQueueTitle: 'لائیو واک ان قطار اور وقت',
     addWalkIn: 'واک ان شامل کریں',
+    noWalkIns: 'ابھی کوئی واک ان گاہک انتظار میں نہیں۔ رش کے وقت ٹریک کرنے کے لیے + واک ان شامل کریں دبائیں۔',
     closeBtn: 'بند کریں',
     queueGuest: 'قطار میں شامل کریں ✓',
     callNext: 'اگلا گاہک بلائیں',
@@ -952,8 +998,10 @@ export const OWNER_UI_I18N: Record<
     createPass: 'پری پیڈ پاس بنائیں ✓',
     useSession: '1 سیشن استعمال کریں',
     completedTick: 'مکمل ✓',
+    noPackages: 'ابھی کوئی پری پیڈ سیشن پیکج نہیں۔ مستقل گاہکوں کے لیے 4 یا 5 سیشن پاس بنائیں۔',
     bridalTrackerTitle: 'برائیڈل / گروم ایونٹ ایڈوانس ٹریکر',
     bridalLadiesTitle: 'برائیڈل سوئٹ اور لیڈیز ایونٹ ایڈوانس',
+    femaleOnlyBadge: '✓ صرف خواتین کے لیے پرائیویٹ کیبن پالیسی واٹس ایپ مینیو اور بکنگز پر فعال ہے',
     addBridalEvent: 'نیا ایونٹ شامل کریں',
     saveBridalAdvance: 'ایڈوانس محفوظ کریں ✓',
     markSettled: 'مکمل ادا شدہ ✓',
@@ -967,6 +1015,17 @@ export const OWNER_UI_I18N: Record<
     arr2h: '2 گھنٹے پہلے آمد کی یاددہانی',
     arr2hDesc: 'آمد کی تصدیق یا 15 منٹ تاخیر آواز میں سناتا ہے',
     voiceSupportTitle: 'فاؤنڈر کے ساتھ وائس سپورٹ',
+    voiceSupportSub:
+      'اردو، عربی یا انگریزی میں بولیں یا لکھیں۔ آپ کا پیغام اصل آواز کے ساتھ فاؤنڈر کو ترجمہ ہو کر جائے گا اور جواب آپ کی زبان میں سنایا جائے گا۔',
+    recordVoiceNoteTitle: 'وائس نوٹ ریکارڈ کرنے کے لیے دبائیں یا ٹیپ کریں',
+    recordVoiceNoteSub: 'ہلکا Opus کلپ (~150 KB، 7 دن بعد خودکار حذف)',
+    voiceDraftPlaceholder: 'فاؤنڈر کے لیے سوال لکھیں (یا صرف آواز بھیجیں)...',
+    recentSupportTitle: 'حالیہ سپورٹ پیغامات',
+    voiceLogsHeading: 'خودکار وائس الرٹس اور ترجمہ لاگ',
+    voiceLogsSub: 'آنے والی بکنگز اور ریمائنڈرز خالص انسانی آواز میں اونچا سناتا ہے',
+    allAlertsBtn: 'تمام الرٹس',
+    urgentOnlyBtn: 'صرف فوری',
+    replayBtn: 'دوبارہ سنیں',
     sendToFounder: 'فاؤنڈر کو بھیجیں',
     sending: 'بھیجا جا رہا ہے...',
     playVoice: 'آواز چلائیں',
@@ -977,10 +1036,18 @@ export const OWNER_UI_I18N: Record<
     salonHours: 'سیلون کے اوقات',
     automationRewards: 'آٹومیشن اور ریوارڈز',
     windowQrPoster: 'ونڈو QR پوسٹر',
+    salonProfileModeLabel: 'سیلون کیٹیگری پروفائل (واٹس ایپ اور پوسٹرز پر محفوظ)',
+    mensSalonBtn: 'مینز سیلون',
+    ladiesParlorBtn: 'لیڈیز پارلر',
+    addBarberBtn: 'باربر شامل کریں',
+    addStylistBtn: 'اسٹائلسٹ شامل کریں',
+    saveHoursBtn: 'اوقات محفوظ کریں',
   },
   ar: {
     whatsappConnected: 'بوابة واتساب · متصل',
     liveFloor: 'الصالة المباشرة',
+    passesEvents: 'الباقات والمناسبات',
+    voiceHelp: 'الدعم الصوتي',
     manage: 'الإدارة',
     counterSleep: 'وضع السكون',
     keepCounterAwake: 'إيقاظ الكاونتر',
@@ -1028,6 +1095,7 @@ export const OWNER_UI_I18N: Record<
     reviewQueued: 'طلب تقييم بعد ساعتين',
     walkInQueueTitle: 'قائمة انتظار الحضور المباشر',
     addWalkIn: 'إضافة حضور',
+    noWalkIns: 'لا يوجد زبائن انتظار حالياً. اضغط + إضافة حضور في أوقات الذروة لمتابعة وقت الانتظار.',
     closeBtn: 'إغلاق',
     queueGuest: 'إضافة للانتظار ✓',
     callNext: 'استدعاء التالي',
@@ -1036,8 +1104,10 @@ export const OWNER_UI_I18N: Record<
     createPass: 'إنشاء الباقة ✓',
     useSession: 'خصم جلسة واحدة',
     completedTick: 'مكتمل ✓',
+    noPackages: 'لا توجد باقات جلسات مسبقة بعد. قدّم باقات 4 أو 5 جلسات لتعزيز التدفق النقدي.',
     bridalTrackerTitle: 'متابعة عربون مناسبات العرائس والفرسان',
     bridalLadiesTitle: 'متابعة عربون باقات العرائس والمناسبات',
+    femaleOnlyBadge: '✓ سياسة الغرف الخاصة للسيدات مفعلة على قائمة واتساب والحجوزات',
     addBridalEvent: 'إضافة مناسبة',
     saveBridalAdvance: 'حفظ العربون ✓',
     markSettled: 'تمت التصفية ✓',
@@ -1051,6 +1121,17 @@ export const OWNER_UI_I18N: Record<
     arr2h: 'تأكيد الوصول قبل ساعتين',
     arr2hDesc: 'يؤكد الحضور أو يذيع رد التأخير 15 دقيقة صوتياً',
     voiceSupportTitle: 'الدعم الصوتي المباشر مع المؤسس',
+    voiceSupportSub:
+      'تحدث أو اكتب بالعربية أو الأردية أو الإنجليزية. تُترجم رسالتك للمؤسس مع حفظ صوتك الأصلي ويصلك الرد صوتياً بلغتك.',
+    recordVoiceNoteTitle: 'اضغط أو انقر لتسجيل رسالة صوتية للمؤسس',
+    recordVoiceNoteSub: 'مقطع صوتي خفيف (~150 KB، يُحذف تلقائياً بعد 7 أيام)',
+    voiceDraftPlaceholder: 'اكتب سؤالك للمؤسس (أو أرسل التسجيل الصوتي)...',
+    recentSupportTitle: 'رسائل الدعم الأخيرة',
+    voiceLogsHeading: 'سجل التنبيهات الصوتية والترجمة',
+    voiceLogsSub: 'يذيع تأكيدات الحجز والردود بصوت بشري طبيعي نقي',
+    allAlertsBtn: 'جميع التنبيهات',
+    urgentOnlyBtn: 'العاجلة فقط',
+    replayBtn: 'إعادة التشغيل',
     sendToFounder: 'إرسال للمؤسس',
     sending: 'جاري الإرسال...',
     playVoice: 'تشغيل الصوت',
@@ -1061,6 +1142,12 @@ export const OWNER_UI_I18N: Record<
     salonHours: 'ساعات العمل',
     automationRewards: 'الأتمتة والمكافآت',
     windowQrPoster: 'ملصق QR للواجهة',
+    salonProfileModeLabel: 'فئة الصالون (محفوظة في واتساب والملصقات)',
+    mensSalonBtn: 'صالون رجالي',
+    ladiesParlorBtn: 'صالون نسائي',
+    addBarberBtn: 'إضافة حلاق',
+    addStylistBtn: 'إضافة خبيرة',
+    saveHoursBtn: 'حفظ ساعات العمل',
   },
 };
 
@@ -1306,9 +1393,17 @@ interface SalonOwnerDashboardProps {
   salonCategory?: 'MENS' | 'LADIES';
   onboardedData?: OnboardedSalonPayload | null;
   isFounderInspector?: boolean;
-  sectionMode?: 'LIVE' | 'MANAGE';
-  onSectionModeChange?: (mode: 'LIVE' | 'MANAGE') => void;
+  sectionMode?: 'LIVE' | 'PASSES' | 'VOICE' | 'MANAGE';
+  onSectionModeChange?: (mode: 'LIVE' | 'PASSES' | 'VOICE' | 'MANAGE') => void;
   onOwnerLangChange?: (lang: 'en' | 'ur' | 'ar') => void;
+  externalHardwareAction?: { type: 'WAKE' | 'AUX' | 'SLEEP'; seq: number } | null;
+  onHardwareStatusSync?: (status: {
+    isWakeLockActive: boolean;
+    isLoudspeakerBoostActive: boolean;
+    isCounterSleeping: boolean;
+    overnightCount: number;
+    hasFounderVoiceReply: boolean;
+  }) => void;
   onOpenSimulator?: () => void;
   onClose?: () => void;
   voiceThreads?: VoiceThreadItem[];
@@ -1319,13 +1414,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   selectedSalonName,
   lockedSalonId,
   authUser,
-  onLogout,
+  onLogout: _onLogout,
   salonCategory,
   onboardedData,
   isFounderInspector = false,
   sectionMode,
   onSectionModeChange,
   onOwnerLangChange,
+  externalHardwareAction,
+  onHardwareStatusSync,
   onClose,
   voiceThreads,
   onVoiceThreadsUpdated,
@@ -1433,10 +1530,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     (p) => p.setupFee > currentPackage.setupFee
   );
 
-  // Consolidated Two-Mode Architecture: LIVE (Daily Operations) vs MANAGE (Shop Setup & Rules)
-  const [internalSectionMode, setInternalSectionMode] = useState<'LIVE' | 'MANAGE'>('LIVE');
+  // Four-Mode Architecture: LIVE (Daily Floor) | PASSES (Prepaid & Bridal) | VOICE (Founder Voice Help & Log) | MANAGE (Rules & Setup)
+  const [internalSectionMode, setInternalSectionMode] = useState<'LIVE' | 'PASSES' | 'VOICE' | 'MANAGE'>('LIVE');
   const currentSectionMode = sectionMode ?? internalSectionMode;
-  const setSectionMode = (mode: 'LIVE' | 'MANAGE') => {
+  const setSectionMode = (mode: 'LIVE' | 'PASSES' | 'VOICE' | 'MANAGE') => {
     setInternalSectionMode(mode);
     onSectionModeChange?.(mode);
   };
@@ -1691,13 +1788,13 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   );
 
   const scrollToFounderVoiceSupport = () => {
-    setSectionMode('MANAGE');
+    setSectionMode('VOICE');
     window.setTimeout(() => {
       founderVoiceCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 120);
   };
 
-  const handlePlayFounderMessage = (
+  const handlePlayFounderMessage = async (
     msgId: string,
     audioDataUrl: string | null,
     fallbackText: string,
@@ -1734,33 +1831,79 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           setPlayingFounderMsgId(null);
           founderVoiceAudioRef.current = null;
         };
-        void audio.play();
+        await audio.play();
         return;
       } catch {
         setPlayingFounderMsgId(null);
       }
     }
-    if (fallbackText && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+
+    const playBrowserFallback = () => {
+      if (fallbackText && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          const voices = window.speechSynthesis.getVoices() || [];
+          const langPrefix = localeHint.split('-')[0];
+          const matched =
+            voices.find((v) => v.lang.toLowerCase().startsWith(langPrefix)) ||
+            (langPrefix === 'ur' ? voices.find((v) => v.lang.toLowerCase().startsWith('hi')) : undefined);
+          const utter = new SpeechSynthesisUtterance(fallbackText);
+          if (matched) utter.voice = matched;
+          utter.lang = matched ? matched.lang : localeHint;
+          utter.rate = 0.96;
+          setPlayingFounderMsgId(msgId);
+          utter.onend = () => setPlayingFounderMsgId(null);
+          utter.onerror = () => setPlayingFounderMsgId(null);
+          window.speechSynthesis.speak(utter);
+          return;
+        } catch {
+          setPlayingFounderMsgId(null);
+        }
+      }
+      setFounderVoiceError(fallbackText ? `Text ready above: "${fallbackText}"` : 'Audio clip expired after 7-day retention.');
+    };
+
+    if (fallbackText.trim()) {
+      const cacheKey = `${localeHint}::${fallbackText}`;
+      setPlayingFounderMsgId(msgId);
       try {
-        const voices = window.speechSynthesis.getVoices() || [];
-        const langPrefix = localeHint.split('-')[0];
-        const matched =
-          voices.find((v) => v.lang.toLowerCase().startsWith(langPrefix)) ||
-          (langPrefix === 'ur' ? voices.find((v) => v.lang.toLowerCase().startsWith('hi')) : undefined);
-        const utter = new SpeechSynthesisUtterance(fallbackText);
-        if (matched) utter.voice = matched;
-        utter.lang = matched ? matched.lang : localeHint;
-        utter.rate = 0.96;
-        setPlayingFounderMsgId(msgId);
-        utter.onend = () => setPlayingFounderMsgId(null);
-        utter.onerror = () => setPlayingFounderMsgId(null);
-        window.speechSynthesis.speak(utter);
-        return;
+        let neuralUrl = ttsAudioCacheRef.current.get(cacheKey);
+        if (!neuralUrl) {
+          const ttsRes = await fetch('/api/voice/tts', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: fallbackText, locale: localeHint }),
+          });
+          if (ttsRes.ok) {
+            const ttsData = (await ttsRes.json()) as {
+              audioBase64?: string;
+              audioMimeType?: string;
+            };
+            if (ttsData.audioBase64) {
+              neuralUrl = `data:${ttsData.audioMimeType || 'audio/mpeg'};base64,${ttsData.audioBase64}`;
+              ttsAudioCacheRef.current.set(cacheKey, neuralUrl);
+            }
+          }
+        }
+        if (neuralUrl) {
+          const audio = new Audio(neuralUrl);
+          founderVoiceAudioRef.current = audio;
+          audio.onended = () => {
+            setPlayingFounderMsgId(null);
+            founderVoiceAudioRef.current = null;
+          };
+          audio.onerror = () => {
+            founderVoiceAudioRef.current = null;
+            playBrowserFallback();
+          };
+          await audio.play();
+          return;
+        }
       } catch {
-        setPlayingFounderMsgId(null);
+        // fallback cleanly below
       }
     }
-    setFounderVoiceError(fallbackText ? `Text ready above: "${fallbackText}"` : 'Audio clip expired after 7-day retention.');
+    playBrowserFallback();
   };
 
   const handleSendOwnerVoiceToFounder = async () => {
@@ -1776,12 +1919,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       let resolvedTranscript = ownerVoiceDraft.trim();
       let resolvedReplyText = ownerVoiceDraft.trim();
       let resolvedAudioDataUrl: string | null = null;
+      let translationNotice: string | null = null;
 
       let resolvedDetectedLang = ownerLang === 'ur' ? 'Urdu' : ownerLang === 'ar' ? 'Arabic' : 'English';
       if (ownerRecordedClip?.base64) {
         resolvedAudioDataUrl = `data:${ownerRecordedClip.mimeType};base64,${ownerRecordedClip.base64}`;
       }
 
+      // Translate Owner voice/text into Founder-readable English ('en-US') while preserving original words in originalText
       try {
         const trRes = await fetch('/api/translate-voice', {
           method: 'POST',
@@ -1791,25 +1936,39 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             audioBase64: ownerRecordedClip?.base64,
             audioMimeType: ownerRecordedClip?.mimeType,
             text: ownerVoiceDraft.trim() || undefined,
-            targetLocale: activeOwnerVoiceLocale,
+            targetLocale: 'en-US',
+            targetDialect: 'Founder English',
           }),
         });
-        if (trRes.ok) {
-          const trData = (await trRes.json()) as {
-            transcript?: string;
-            translatedText?: string;
-            detectedInputLanguage?: string;
-            detectedLanguage?: string;
-          };
-          if (trData.transcript) resolvedTranscript = trData.transcript;
-          if (trData.translatedText) resolvedReplyText = trData.translatedText;
+        const trData = (await trRes.json().catch(() => ({}))) as {
+          transcript?: string;
+          translatedText?: string;
+          detectedInputLanguage?: string;
+          detectedLanguage?: string;
+          translationError?: string;
+          error?: string;
+        };
+        if (trRes.ok && trData.translatedText?.trim()) {
+          if (trData.transcript?.trim()) resolvedTranscript = trData.transcript.trim();
+          resolvedReplyText = trData.translatedText.trim();
           if (trData.detectedInputLanguage || trData.detectedLanguage) {
             resolvedDetectedLang =
               trData.detectedInputLanguage || trData.detectedLanguage || resolvedDetectedLang;
           }
+        } else {
+          translationNotice =
+            trData.error ||
+            trData.translationError ||
+            `Voice translation unavailable (HTTP ${trRes.status}).`;
         }
       } catch {
-        // Proceed smoothly if offline
+        translationNotice = 'Translation server unreachable right now.';
+      }
+
+      if (translationNotice && ownerRecordedClip && !ownerVoiceDraft.trim()) {
+        setFounderVoiceError(
+          `${translationNotice} Your audio clip was saved — type a quick note or retry so the Founder sees translated text.`
+        );
       }
 
       if (!resolvedTranscript) {
@@ -2531,6 +2690,46 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       window.removeEventListener('touchstart', autoEngageWake);
     };
   }, [isFounderInspector]);
+
+  // Sync live counter controls to Hamburger Sidebar & handle Hamburger hardware toggle actions
+  useEffect(() => {
+    onHardwareStatusSync?.({
+      isWakeLockActive,
+      isLoudspeakerBoostActive,
+      isCounterSleeping,
+      overnightCount: overnightQueue.length,
+      hasFounderVoiceReply,
+    });
+  }, [
+    isWakeLockActive,
+    isLoudspeakerBoostActive,
+    isCounterSleeping,
+    overnightQueue.length,
+    hasFounderVoiceReply,
+    onHardwareStatusSync,
+  ]);
+
+  const lastHandledHardwareSeqRef = useRef<number>(0);
+  useEffect(() => {
+    if (!externalHardwareAction || externalHardwareAction.seq === lastHandledHardwareSeqRef.current) {
+      return;
+    }
+    lastHandledHardwareSeqRef.current = externalHardwareAction.seq;
+    if (externalHardwareAction.type === 'WAKE') {
+      void toggleScreenWakeLock();
+    } else if (externalHardwareAction.type === 'AUX') {
+      const next = !isLoudspeakerBoostActive;
+      setIsLoudspeakerBoostActive(next);
+      setMaintToast(
+        next
+          ? '📢 Bluetooth/AUX Boost ON: Multi-tone wake chime + pre-speech buffer active.'
+          : '📢 Loudspeaker Boost set to normal volume.'
+      );
+      setTimeout(() => setMaintToast(null), 3500);
+    } else if (externalHardwareAction.type === 'SLEEP') {
+      void handleToggleCounterSleep();
+    }
+  });
 
   const [salonContacts] = useState<Contact[]>(() => {
     const all = generate214Contacts();
@@ -4275,7 +4474,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
-            {/* Desktop Mode Switcher (Hidden on Mobile where fixed Bottom Nav handles Live / Manage) */}
+            {/* Desktop Mode Switcher (4 Clean Tabs matching Mobile Bottom Bar) */}
             <div className="hidden lg:inline-flex items-center rounded-xl border border-[#30363D] bg-[#0D1117] p-1 gap-1">
               <button
                 type="button"
@@ -4288,6 +4487,33 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               >
                 <Scissors className="size-3.5" />
                 <span>{ui.liveFloor}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSectionMode('PASSES')}
+                className={`min-h-[36px] rounded-lg px-3 py-1 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                  currentSectionMode === 'PASSES'
+                    ? 'bg-[#06B6D4] text-[#0D1117]'
+                    : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                }`}
+              >
+                <Award className="size-3.5" />
+                <span>{ui.passesEvents}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSectionMode('VOICE')}
+                className={`relative min-h-[36px] rounded-lg px-3 py-1 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                  currentSectionMode === 'VOICE'
+                    ? 'bg-[#06B6D4] text-[#0D1117]'
+                    : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                }`}
+              >
+                <Mic className="size-3.5" />
+                <span>{ui.voiceHelp}</span>
+                {hasFounderVoiceReply && currentSectionMode !== 'VOICE' && (
+                  <span className="size-2 rounded-full bg-[#3FB950]" aria-hidden="true" />
+                )}
               </button>
               <button
                 type="button"
@@ -4308,18 +4534,18 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               aria-label="Owner Voice Language"
               value={ownerLang}
               onChange={(e) => setOwnerLang(e.target.value as VoiceLang)}
-              className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-2.5 text-sm font-mono font-bold text-[#06B6D4] focus:border-[#06B6D4] focus:outline-none"
+              className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-2.5 text-sm font-mono font-bold text-[#06B6D4] focus:border-[#06B6D4] focus:outline-none"
             >
               <option value="ur">اردو (ur-PK)</option>
               <option value="ar">العربية (ar-SA)</option>
               <option value="en">English (en-US)</option>
             </select>
 
-            {/* Counter Sleep / Keep Counter Awake Toggle */}
+            {/* Counter Sleep / Keep Counter Awake Quick Toggle */}
             <button
               type="button"
               onClick={handleToggleCounterSleep}
-              className={`min-h-[48px] rounded-xl border px-3 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+              className={`min-h-[44px] rounded-xl border px-3 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
                 isCounterSleeping
                   ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
                   : 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
@@ -4333,7 +4559,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               {isCounterSleeping ? (
                 <>
                   <Sun className="size-4 shrink-0" />
-                  <span>{ui.keepCounterAwake}</span>
+                  <span className="hidden sm:inline">{ui.keepCounterAwake}</span>
                   {overnightQueue.length > 0 && (
                     <span className="rounded bg-[#0D1117] px-1.5 py-0.5 text-[10px] text-[#D29922]">
                       {overnightQueue.length}
@@ -4343,52 +4569,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               ) : (
                 <>
                   <Moon className="size-4 shrink-0" />
-                  <span>{ui.counterSleep}</span>
+                  <span className="hidden sm:inline">{ui.counterSleep}</span>
                 </>
               )}
             </button>
 
             <button
               type="button"
-              onClick={toggleScreenWakeLock}
-              className={`min-h-[48px] rounded-xl border px-2.5 text-[11px] font-mono font-bold transition flex items-center gap-1.5 ${
-                isWakeLockActive
-                  ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
-                  : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
-              }`}
-              title="Keep shop screen awake for hands-free announcements"
-            >
-              <Zap className="size-3.5 shrink-0" />
-              <span className="hidden sm:inline">{isWakeLockActive ? ui.wakeOn : ui.wakeOff}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                const next = !isLoudspeakerBoostActive;
-                setIsLoudspeakerBoostActive(next);
-                setMaintToast(
-                  next
-                    ? '📢 Bluetooth/AUX Boost ON: Multi-tone wake chime + pre-speech buffer active.'
-                    : '📢 Loudspeaker Boost set to normal volume.'
-                );
-                setTimeout(() => setMaintToast(null), 3500);
-              }}
-              className={`min-h-[48px] rounded-xl border px-2.5 text-[11px] font-mono font-bold transition flex items-center gap-1.5 ${
-                isLoudspeakerBoostActive
-                  ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
-                  : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
-              }`}
-              title="Boost chime & Bluetooth speaker clarity for noisy salon hours"
-            >
-              <BellRing className="size-3.5 shrink-0" />
-              <span className="hidden sm:inline">{isLoudspeakerBoostActive ? ui.auxBoost : ui.boost}</span>
-            </button>
-
-            <button
-              type="button"
               onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
-              className={`min-h-[48px] min-w-[48px] rounded-xl border px-2.5 grid place-items-center transition ${
+              className={`min-h-[44px] min-w-[44px] rounded-xl border px-2 grid place-items-center transition ${
                 isVoiceEnabled
                   ? 'border-[#30363D] bg-[#0D1117] text-[#06B6D4]'
                   : 'border-[#30363D] bg-[#0D1117] text-[#6E7681]'
@@ -4403,7 +4592,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               <button
                 type="button"
                 onClick={handleUnlockMobileAudio}
-                className="min-h-[48px] rounded-xl border border-[#06B6D4] bg-[#06B6D4]/15 hover:bg-[#06B6D4]/25 px-3 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5"
+                className="min-h-[44px] rounded-xl border border-[#06B6D4] bg-[#06B6D4]/15 hover:bg-[#06B6D4]/25 px-3 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5"
                 title="Tap once on mobile so loud chimes & spoken alerts play automatically"
               >
                 <Volume2 className="size-4 shrink-0" />
@@ -4414,9 +4603,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             <button
               type="button"
               onClick={scrollToFounderVoiceSupport}
-              className="relative min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-2.5 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5"
-              title="Voice Support with Founder"
-              aria-label="Voice Support with Founder"
+              className="relative min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-2.5 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5"
+              title={ui.voiceSupportTitle}
+              aria-label={ui.voiceSupportTitle}
             >
               <Mic className="size-4 shrink-0" />
               <span className="hidden sm:inline">{ui.founder}</span>
@@ -4425,23 +4614,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               )}
             </button>
 
-            {onLogout && (
-              <button
-                type="button"
-                onClick={onLogout}
-                className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#F85149] px-3 text-xs font-mono font-bold text-[#8B949E] hover:text-[#F85149] transition flex items-center gap-1.5"
-                title="Sign out"
-              >
-                <LogOut className="size-3.5" />
-                <span className="hidden sm:inline">{ui.logOut}</span>
-              </button>
-            )}
-
             {onClose && (
               <button
                 type="button"
                 onClick={onClose}
-                className="min-h-[48px] min-w-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] grid place-items-center transition"
+                className="min-h-[44px] min-w-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] grid place-items-center transition"
                 title="Close Portal"
               >
                 <X className="size-4" />
@@ -5161,9 +5338,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             </div>
           </section>
 
-          {/* 3B. WALK-IN WAITLIST QUEUE ETA + PREPAID MULTI-SESSION PACKAGES + BRIDAL ADVANCE TRACKER */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" dir={isOwnerRtl ? 'rtl' : 'ltr'}>
-            {/* Live Walk-In Waitlist Queue ETA */}
+          {/* 3B. LIVE WALK-IN WAITLIST QUEUE ETA (Daily Rush-Hour Operations) */}
+          <div dir={isOwnerRtl ? 'rtl' : 'ltr'}>
             <section
               aria-label="Live Walk-In Waitlist Queue"
               className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3"
@@ -5232,7 +5408,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     disabled={isSavingOpsCard}
                     className="w-full min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-black uppercase transition"
                   >
-                    Queue Guest ✓
+                    {ui.queueGuest}
                   </button>
                 </form>
               )}
@@ -5240,7 +5416,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               <div className="space-y-2">
                 {(conciergeState?.walkInQueue || []).filter((w) => w.status !== 'SEATED').length === 0 ? (
                   <p className="text-xs text-[#8B949E] font-sans rounded-xl border border-[#30363D] bg-[#0D1117] p-3">
-                    No waiting walk-in guests right now. Tap <strong className="text-[#06B6D4]">+ Add Walk-In</strong> during rush hour to track ETAs automatically.
+                    {ui.noWalkIns}
                   </p>
                 ) : (
                   (conciergeState?.walkInQueue || [])
@@ -5254,11 +5430,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm font-bold text-[#F0F6FC]">{guest.clientName}</span>
                             <span className="rounded bg-[#3B2E0B] border border-[#9E6A03] px-2 py-0.5 text-[10px] font-mono font-bold text-[#D29922]">
-                              ~{guest.etaMinutes} min wait
+                              ~{guest.etaMinutes} min
                             </span>
                           </div>
                           <p className="text-xs text-[#8B949E] font-sans truncate">
-                            {guest.service} · {isLadies ? 'Stylist' : 'Barber'}: {guest.assignedStaff}
+                            {guest.service} · {guest.assignedStaff}
                           </p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
@@ -5268,7 +5444,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                               onClick={() => void handleUpdateWalkInStatus(guest.id, 'NOTIFIED')}
                               className="min-h-[40px] rounded-xl border border-[#06B6D4] bg-[#161B22] px-3 py-1.5 text-[11px] font-mono font-bold text-[#06B6D4]"
                             >
-                              Call Next
+                              {ui.callNext}
                             </button>
                           )}
                           <button
@@ -5276,7 +5452,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             onClick={() => void handleUpdateWalkInStatus(guest.id, 'SEATED')}
                             className="min-h-[40px] rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-1.5 text-[11px] font-mono font-bold text-[#3FB950]"
                           >
-                            Seat ✓
+                            {ui.seatBtn} ✓
                           </button>
                         </div>
                       </div>
@@ -5284,6 +5460,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 )}
               </div>
             </section>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* VIEW 2: DEDICATED "PASSES & EVENTS" (NON-DAILY PREPAID & BRIDAL TRACKING)  */}
+      {/* ========================================================================= */}
+      {currentSectionMode === 'PASSES' && (
+        <div className="space-y-4" dir={isOwnerRtl ? 'rtl' : 'ltr'}>
 
             {/* Prepaid Multi-Session Packages & Membership Passes */}
             <section
@@ -5356,7 +5541,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     disabled={isSavingOpsCard}
                     className="w-full min-h-[44px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] text-xs font-mono font-black uppercase transition"
                   >
-                    Create Prepaid Pass ✓
+                    {ui.createPass}
                   </button>
                 </form>
               )}
@@ -5364,7 +5549,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               <div className="space-y-2">
                 {(conciergeState?.servicePackages || []).length === 0 ? (
                   <p className="text-xs text-[#8B949E] font-sans rounded-xl border border-[#30363D] bg-[#0D1117] p-3">
-                    No prepaid session bundles yet. Offer 4-visit or 5-session packages to lock repeat upfront cashflow.
+                    {ui.noPackages}
                   </p>
                 ) : (
                   (conciergeState?.servicePackages || []).map((pass) => {
@@ -5378,11 +5563,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm font-bold text-[#F0F6FC]">{pass.clientName}</span>
                             <span className="rounded bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
-                              {remaining} of {pass.totalSessions} Left
+                              {remaining} / {pass.totalSessions}
                             </span>
                           </div>
                           <p className="text-xs text-[#8B949E] font-sans truncate">
-                            {pass.packageTitle} · Paid {regionConfig.symbol}
+                            {pass.packageTitle} · {regionConfig.symbol}
                             {pass.pricePaid.toLocaleString()}
                           </p>
                         </div>
@@ -5392,7 +5577,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           onClick={() => void handleConsumePackageSession(pass.id)}
                           className="min-h-[40px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] disabled:opacity-40 px-3 py-1.5 text-[11px] font-mono font-bold text-[#06B6D4] shrink-0"
                         >
-                          {remaining > 0 ? 'Use 1 Session' : 'Completed ✓'}
+                          {remaining > 0 ? ui.useSession : ui.completedTick}
                         </button>
                       </div>
                     );
@@ -5400,10 +5585,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 )}
               </div>
             </section>
-          </div>
 
-          {/* 3C. BRIDAL & EVENT ADVANCE DEPOSIT TRACKER (Prominent for Ladies Parlors & Event Salons) */}
-          {(isLadies || (conciergeState?.bridalBookings || []).length > 0 || showBridalForm) && (
+          {/* BRIDAL & EVENT ADVANCE DEPOSIT TRACKER */}
             <section
               aria-label="Bridal and Event Advance Tracker"
               className="rounded-2xl border border-[#9E6A03] bg-[#161B22] p-4 sm:p-5 space-y-3"
@@ -5418,7 +5601,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   </div>
                   {isLadies && (
                     <p className="text-[11px] font-mono text-[#3FB950]">
-                      ✓ Female-Only Private Cabin Policy Active across WhatsApp Rate Menu &amp; Bookings
+                      {ui.femaleOnlyBadge}
                     </p>
                   )}
                 </div>
@@ -5560,96 +5743,15 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 })}
               </div>
             </section>
-          )}
-
-          {/* 4. TOP BOOKED SERVICES + STYLIST / BARBER BREAKDOWN & 24H/2H REMINDERS */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" dir={isOwnerRtl ? 'rtl' : 'ltr'}>
-            <section
-              aria-label="Top Booked Services with Stylist Breakdown"
-              className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3"
-            >
-              <div className="flex items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="size-4 text-[#D29922] shrink-0" />
-                  <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
-                    {ui.topServicesTitle}
-                  </h2>
-                </div>
-                <span className="text-[10px] font-mono text-[#8B949E] uppercase">
-                  {ui.mostRequested}
-                </span>
-              </div>
-
-              <div className="space-y-2.5">
-                {topServicesWithStylists.map((item, idx) => (
-                  <div
-                    key={item.service}
-                    className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-[#F0F6FC]">
-                        #{idx + 1} · {item.service}
-                      </span>
-                      <span className="text-xs font-mono font-bold text-[#D29922] tabular-nums shrink-0">
-                        {item.pct}% share
-                      </span>
-                    </div>
-                    <p className="text-xs font-mono text-[#06B6D4]">
-                      {item.pct}% booked with {item.stylist} ({item.bookingsCount} slots)
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* 24h / 2h Automated Pre-Appointment Reminders (Included in STARTER, PRO, PRO++) */}
-            <section
-              aria-label="24h and 2h WhatsApp Reminders"
-              className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3"
-            >
-              <div className="flex items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
-                <div className="flex items-center gap-2">
-                  <Clock className="size-4 text-[#3FB950] shrink-0" />
-                  <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
-                    {ui.remindersTitle}
-                  </h2>
-                </div>
-                <span className="rounded-md border border-[#116329] bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
-                  {ui.activeBadge}
-                </span>
-              </div>
-
-              <div className="space-y-2.5 text-xs">
-                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex items-center justify-between gap-2">
-                  <div>
-                    <p className="font-bold text-[#F0F6FC]">{ui.adv24h}</p>
-                    <p className="text-[11px] text-[#8B949E] font-sans">
-                      {ui.adv24hDesc}
-                    </p>
-                  </div>
-                  <span className="font-mono font-bold text-[#3FB950] shrink-0">T-24h ✓</span>
-                </div>
-                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex items-center justify-between gap-2">
-                  <div>
-                    <p className="font-bold text-[#F0F6FC]">{ui.arr2h}</p>
-                    <p className="text-[11px] text-[#8B949E] font-sans">
-                      {ui.arr2hDesc}
-                    </p>
-                  </div>
-                  <span className="font-mono font-bold text-[#3FB950] shrink-0">T-2h ✓</span>
-                </div>
-              </div>
-            </section>
-          </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* VIEW 2: DEDICATED "MANAGE" SECTION (SHOP SETUP & RULES)                   */}
+      {/* VIEW 3: DEDICATED "VOICE HELP" SECTION (FOUNDER SUPPORT + VOICE LOG)      */}
       {/* ========================================================================= */}
-      {currentSectionMode === 'MANAGE' && (
+      {currentSectionMode === 'VOICE' && (
         <div className="space-y-4" dir={isOwnerRtl ? 'rtl' : 'ltr'}>
-          {/* Query 6: Compact Matte Obsidian "Voice Support with Founder" Card */}
+          {/* Compact Matte Obsidian "Voice Support with Founder" Card */}
           <div ref={founderVoiceCardRef}>
             <PortalCard
               title={ui.voiceSupportTitle}
@@ -5657,13 +5759,13 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             >
               <div className="space-y-3">
                 <p className="text-xs text-[#8B949E] font-sans">
-                  Speak in your preferred language ({ownerLang === 'ur' ? 'Urdu' : ownerLang === 'ar' ? 'Arabic' : 'English'}). Compressed Opus voice notes route to the Founder Voice Inbox, and Founder replies play back aloud in your language.
+                  {ui.voiceSupportSub}
                 </p>
 
                 <VoiceRecorder
                   compact
-                  title="Hold or Tap to Record Voice Support Note"
-                  subtitle="Light Opus clip (~150 KB, auto-purged after 7 days)"
+                  title={ui.recordVoiceNoteTitle}
+                  subtitle={ui.recordVoiceNoteSub}
                   onRecorded={(clip) => {
                     setOwnerRecordedClip(clip);
                     setFounderVoiceError(null);
@@ -5676,7 +5778,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     dir="ltr"
                     value={ownerVoiceDraft}
                     onChange={(e) => setOwnerVoiceDraft(e.target.value)}
-                    placeholder="Optional note or quick question (or just send recorded voice)..."
+                    placeholder={ui.voiceDraftPlaceholder}
                     className="flex-1 min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] placeholder-[#6E7681] focus:border-[#06B6D4] focus:outline-none"
                   />
                   <button
@@ -5697,7 +5799,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 {activeFounderVoiceThread.messages.length > 0 && (
                   <div className="space-y-2 pt-2 border-t border-[#21262D]">
                     <p className="text-[10px] font-mono uppercase text-[#8B949E]">
-                      Recent Support Messages ({activeFounderVoiceThread.messages.length})
+                      {ui.recentSupportTitle} ({activeFounderVoiceThread.messages.length})
                     </p>
                     <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                       {activeFounderVoiceThread.messages.slice(-4).map((msg) => {
@@ -5784,6 +5886,115 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             </PortalCard>
           </div>
 
+          {/* Hands-Free Voice Concierge & Neural Announcement Log */}
+          <PortalCard
+            title={`${ui.voiceLogsHeading} (${voiceLogs.length})`}
+            kicker={ui.voiceLogsSub}
+          >
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setVoiceFilter('ALL')}
+                    className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono font-bold transition ${
+                      voiceFilter === 'ALL'
+                        ? 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
+                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
+                    }`}
+                  >
+                    {ui.allAlertsBtn}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVoiceFilter('URGENT_ONLY')}
+                    className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono font-bold transition ${
+                      voiceFilter === 'URGENT_ONLY'
+                        ? 'border-[#D29922] bg-[#3B2E0B] text-[#D29922]'
+                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
+                    }`}
+                  >
+                    {ui.urgentOnlyBtn}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isTestingLoudAlert}
+                    onClick={() => handleTriggerSimulatedVoiceWebhook('CONFIRMATION')}
+                    className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950] transition disabled:opacity-50"
+                  >
+                    🔊 Test: Ali Confirmed Hamza 4:30 PM
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isTestingLoudAlert}
+                    onClick={() => handleTriggerSimulatedVoiceWebhook('REMINDER_LATE')}
+                    className="min-h-[44px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-3 py-1.5 text-xs font-mono font-bold text-[#D29922] transition disabled:opacity-50"
+                  >
+                    🔊 Test: Reminder Reply (15m Late)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isTestingLoudAlert}
+                    onClick={() => handleTriggerSimulatedVoiceWebhook('BRIDAL_URGENT')}
+                    className="min-h-[44px] rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#5e2223] px-3 py-1.5 text-xs font-mono font-bold text-[#F85149] transition disabled:opacity-50"
+                  >
+                    🔊 Test: Urgent Bridal/Groom Alert
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                {voiceLogs
+                  .filter((v) => voiceFilter === 'ALL' || v.isUrgent)
+                  .map((log) => (
+                    <div
+                      key={log.id}
+                      className={`rounded-xl border p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        log.isUrgent
+                          ? 'border-[#9E6A03] bg-[#3B2E0B]/40'
+                          : 'border-[#30363D] bg-[#0D1117]'
+                      }`}
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded bg-[#161B22] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono font-bold text-[#06B6D4]">
+                            {log.clientLang.toUpperCase()} ➔ {log.ownerVoiceLang.toUpperCase()} VOICE
+                          </span>
+                          <span className="text-[11px] font-mono text-[#8B949E]">{log.time}</span>
+                        </div>
+                        <p className="text-xs font-bold text-[#F0F6FC]">{log.summary}</p>
+                        <p
+                          dir={log.ownerVoiceLang === 'ur' || log.ownerVoiceLang === 'ar' ? 'rtl' : 'ltr'}
+                          className="text-xs text-[#8B949E] font-sans break-words [overflow-wrap:break-word]"
+                        >
+                          &ldquo;{log.spokenText}&rdquo;
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => speakHandsFree(log.spokenText, log.ownerVoiceLang)}
+                        className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] shrink-0 flex items-center gap-1.5 transition"
+                      >
+                        <Volume2 className="size-4" />
+                        <span>{ui.replayBtn}</span>
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </PortalCard>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* VIEW 4: DEDICATED "MANAGE" SECTION (SHOP SETUP & RULES)                   */}
+      {/* ========================================================================= */}
+      {currentSectionMode === 'MANAGE' && (
+        <div className="space-y-4" dir={isOwnerRtl ? 'rtl' : 'ltr'}>
+
           {/* Sub-Section Switcher Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1.5 rounded-2xl border border-[#30363D] bg-[#161B22]">
             {[
@@ -5819,7 +6030,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-mono font-bold uppercase text-[#06B6D4]">
-                    Salon Category Profile (Persisted on WhatsApp &amp; Posters)
+                    {ui.salonProfileModeLabel}
                   </p>
                   <p className="text-xs text-[#8B949E] font-sans mt-0.5">
                     {isLadies
@@ -5837,7 +6048,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
                     }`}
                   >
-                    Men&apos;s Salon
+                    {ui.mensSalonBtn}
                   </button>
                   <button
                     type="button"
@@ -5848,12 +6059,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
                     }`}
                   >
-                    Ladies Parlor
+                    {ui.ladiesParlorBtn}
                   </button>
                 </div>
               </div>
             <PortalCard
-              title={isLadies ? 'Staff & Beauticians' : 'Staff & Barbers'}
+              title={isLadies ? ui.staffStylists : ui.staffBarbers}
               kicker={isLadies ? 'STYLIST ROSTER & PRIVATE CABIN STATIONS' : 'BARBER ROSTER & CHAIR ASSIGNMENTS'}
             >
               <div className="space-y-4">
@@ -5978,7 +6189,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase transition flex items-center justify-center gap-1.5 shrink-0"
                   >
                     <Plus className="size-4" />
-                    <span>Add Barber</span>
+                    <span>{isLadies ? ui.addStylistBtn : ui.addBarberBtn}</span>
                   </button>
                 </form>
               </div>
@@ -6408,14 +6619,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-6 py-2.5 text-xs font-mono font-black uppercase transition flex items-center gap-2"
                   >
                     <Save className="size-4" />
-                    <span>Save Salon Hours</span>
+                    <span>{ui.saveHoursBtn}</span>
                   </button>
                 </div>
               </form>
             </PortalCard>
           )}
 
-          {/* 4. AUTOMATION & REWARDS (Birthday %, 30-day Win-Back, Google Review URL, Regional Language Preview, Voice Logs & Proof Ledger) */}
+          {/* 4. AUTOMATION & REWARDS (Birthday %, 30-day Win-Back, Google Review URL, 24h/2h Reminders, Proof Ledger & Video Campaigns) */}
           {manageSubSection === 'AUTOMATION' && (
             <div className="space-y-4">
               <SalonRetentionSettingsPanel
@@ -6432,125 +6643,44 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 }}
               />
 
-              {/* Collapsible 1: Hands-Free Voice Concierge & Announcement Log */}
-              <div className="rounded-2xl border border-[#30363D] bg-[#161B22] overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setShowVoiceLogsDrawer(!showVoiceLogsDrawer)}
-                  className="w-full min-h-[48px] px-4 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-[#21262D]/50 transition"
-                >
-                  <div>
-                    <span className="text-xs font-mono font-bold uppercase text-[#06B6D4] block">
-                      Hands-Free Voice Alerts &amp; Translation Log ({voiceLogs.length})
-                    </span>
-                    <span className="text-[11px] font-sans text-[#8B949E]">
-                      Announces incoming confirmations &amp; reminder replies loudly without opening your phone
-                    </span>
+              {/* 24h / 2h Automated Pre-Appointment Reminders (Moved cleanly from Live Floor into Automation & Rewards) */}
+              <section
+                aria-label="24h and 2h WhatsApp Reminders"
+                className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3"
+              >
+                <div className="flex items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Clock className="size-4 text-[#3FB950] shrink-0" />
+                    <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
+                      {ui.remindersTitle}
+                    </h2>
                   </div>
-                  {showVoiceLogsDrawer ? (
-                    <ChevronUp className="size-4 text-[#8B949E] shrink-0" />
-                  ) : (
-                    <ChevronDown className="size-4 text-[#8B949E] shrink-0" />
-                  )}
-                </button>
+                  <span className="rounded-md border border-[#116329] bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
+                    {ui.activeBadge}
+                  </span>
+                </div>
 
-                {showVoiceLogsDrawer && (
-                  <div className="p-4 pt-3 border-t border-[#30363D] space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setVoiceFilter('ALL')}
-                          className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono font-bold transition ${
-                            voiceFilter === 'ALL'
-                              ? 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
-                              : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
-                          }`}
-                        >
-                          All Alerts
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setVoiceFilter('URGENT_ONLY')}
-                          className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono font-bold transition ${
-                            voiceFilter === 'URGENT_ONLY'
-                              ? 'border-[#D29922] bg-[#3B2E0B] text-[#D29922]'
-                              : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
-                          }`}
-                        >
-                          Urgent Only
-                        </button>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={isTestingLoudAlert}
-                          onClick={() => handleTriggerSimulatedVoiceWebhook('CONFIRMATION')}
-                          className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950] transition disabled:opacity-50"
-                        >
-                          🔊 Test: Ali Confirmed Hamza 4:30 PM
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isTestingLoudAlert}
-                          onClick={() => handleTriggerSimulatedVoiceWebhook('REMINDER_LATE')}
-                          className="min-h-[44px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-3 py-1.5 text-xs font-mono font-bold text-[#D29922] transition disabled:opacity-50"
-                        >
-                          🔊 Test: Reminder Reply (15m Late)
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isTestingLoudAlert}
-                          onClick={() => handleTriggerSimulatedVoiceWebhook('BRIDAL_URGENT')}
-                          className="min-h-[44px] rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#5e2223] px-3 py-1.5 text-xs font-mono font-bold text-[#F85149] transition disabled:opacity-50"
-                        >
-                          🔊 Test: Urgent Bridal/Groom Alert
-                        </button>
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
+                  <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="font-bold text-[#F0F6FC]">{ui.adv24h}</p>
+                      <p className="text-[11px] text-[#8B949E] font-sans">
+                        {ui.adv24hDesc}
+                      </p>
                     </div>
-
-                    <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-                      {voiceLogs
-                        .filter((v) => voiceFilter === 'ALL' || v.isUrgent)
-                        .map((log) => (
-                          <div
-                            key={log.id}
-                            className={`rounded-xl border p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                              log.isUrgent
-                                ? 'border-[#9E6A03] bg-[#3B2E0B]/40'
-                                : 'border-[#30363D] bg-[#0D1117]'
-                            }`}
-                          >
-                            <div className="space-y-1 min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="rounded bg-[#161B22] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono font-bold text-[#06B6D4]">
-                                  {log.clientLang.toUpperCase()} ➔ {log.ownerVoiceLang.toUpperCase()} VOICE
-                                </span>
-                                <span className="text-[11px] font-mono text-[#8B949E]">{log.time}</span>
-                              </div>
-                              <p className="text-xs font-bold text-[#F0F6FC]">{log.summary}</p>
-                              <p
-                                dir={log.ownerVoiceLang === 'ur' || log.ownerVoiceLang === 'ar' ? 'rtl' : 'ltr'}
-                                className="text-xs text-[#8B949E] font-sans break-words [overflow-wrap:break-word]"
-                              >
-                                &ldquo;{log.spokenText}&rdquo;
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => speakHandsFree(log.spokenText, log.ownerVoiceLang)}
-                              className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] shrink-0 flex items-center gap-1.5 transition"
-                            >
-                              <Volume2 className="size-4" />
-                              <span>Replay</span>
-                            </button>
-                          </div>
-                        ))}
-                    </div>
+                    <span className="font-mono font-bold text-[#3FB950] shrink-0">T-24h ✓</span>
                   </div>
-                )}
-              </div>
+                  <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="font-bold text-[#F0F6FC]">{ui.arr2h}</p>
+                      <p className="text-[11px] text-[#8B949E] font-sans">
+                        {ui.arr2hDesc}
+                      </p>
+                    </div>
+                    <span className="font-mono font-bold text-[#3FB950] shrink-0">T-2h ✓</span>
+                  </div>
+                </div>
+              </section>
 
               {/* Collapsible 2: Immutable Booking Confirmation Proof Ledger (SHA-256) */}
               <div className="rounded-2xl border border-[#30363D] bg-[#161B22] overflow-hidden">
@@ -6686,6 +6816,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     ) : (
                       <BroadcastTab
                         salon={activeSalonProfile}
+                        salonId={currentSalon.id}
                         contacts={salonContacts}
                         ownerLang={ownerLang}
                         onShowToast={(msg) => {
