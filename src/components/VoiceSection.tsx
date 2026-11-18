@@ -43,6 +43,7 @@ function getVoiceNameForLocale(locale: SupportedVoiceLocale): string {
 interface VerifiedVoicePreview {
   transcript: string;
   translatedText: string;
+  convertedSourceText: string;
   detectedInputLanguage: string;
   voiceName: string;
   convertedAudioUrl: string | null;
@@ -82,9 +83,10 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
   const rowRecorderRef = useRef<MediaRecorder | null>(null);
   const rowChunksRef = useRef<Blob[]>([]);
 
-  // Audio playback state
+  // Audio playback state & Neural TTS cache
   const [playingThreadId, setPlayingThreadId] = useState<string | null>(null);
   const activeAudioElRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAudioCacheRef = useRef<Map<string, string>>(new Map());
   const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Thread-switching state reset: always clear draft, recorded Opus clip, and synthesized TTS when salon changes
@@ -162,7 +164,7 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
     setPlayingThreadId(null);
   };
 
-  const handleTogglePlayIncoming = (thread: VoiceThreadItem) => {
+  const handleTogglePlayIncoming = async (thread: VoiceThreadItem) => {
     if (playingThreadId === thread.id) {
       stopAllPlayback();
       return;
@@ -188,31 +190,73 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
       return;
     }
 
-    // Fallback playback via localized synthesis for seed messages without MP3 attachment
-    try {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        const langHint = getSpeechLangForLocale(thread.targetLocale);
-        const voices = window.speechSynthesis.getVoices() || [];
-        const prefix = langHint.split('-')[0];
-        const matched =
-          voices.find((v) => v.lang.toLowerCase().startsWith(prefix)) ||
-          (prefix === 'ur' ? voices.find((v) => v.lang.toLowerCase().startsWith('hi')) : undefined);
-        const utterance = new SpeechSynthesisUtterance(thread.speechPlayText);
-        if (matched) utterance.voice = matched;
-        utterance.lang = matched ? matched.lang : langHint;
-        utterance.rate = 0.96;
-        utterance.onend = () => setPlayingThreadId((curr) => (curr === thread.id ? null : curr));
-        utterance.onerror = () => setPlayingThreadId((curr) => (curr === thread.id ? null : curr));
-        window.speechSynthesis.speak(utterance);
-        return;
+    const speakText = (thread.speechPlayText || thread.transcript || '').trim();
+    const localeCode = getSpeechLangForLocale(thread.targetLocale);
+    const playBrowserFallback = () => {
+      try {
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window && speakText) {
+          const voices = window.speechSynthesis.getVoices() || [];
+          const prefix = localeCode.split('-')[0];
+          const matched =
+            voices.find((v) => v.lang.toLowerCase().startsWith(prefix)) ||
+            (prefix === 'ur' ? voices.find((v) => v.lang.toLowerCase().startsWith('hi')) : undefined);
+          const utterance = new SpeechSynthesisUtterance(speakText);
+          if (matched) utterance.voice = matched;
+          utterance.lang = matched ? matched.lang : localeCode;
+          utterance.rate = 0.96;
+          utterance.onend = () => setPlayingThreadId((curr) => (curr === thread.id ? null : curr));
+          utterance.onerror = () => setPlayingThreadId((curr) => (curr === thread.id ? null : curr));
+          window.speechSynthesis.speak(utterance);
+          return;
+        }
+      } catch {
+        // ignore fallback errors
       }
-    } catch {
-      // ignore fallback errors
+      window.setTimeout(() => {
+        setPlayingThreadId((curr) => (curr === thread.id ? null : curr));
+      }, 2500);
+    };
+
+    // Upgrade text-only / seed rows to zero-quota Natural Neural Edge TTS
+    if (speakText) {
+      const cacheKey = `${localeCode}::${speakText}`;
+      try {
+        let dataUrl = ttsAudioCacheRef.current.get(cacheKey);
+        if (!dataUrl) {
+          const ttsRes = await fetch('/api/voice/tts', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: speakText, locale: localeCode }),
+          });
+          if (ttsRes.ok) {
+            const ttsData = (await ttsRes.json()) as {
+              audioBase64?: string;
+              audioMimeType?: string;
+            };
+            if (ttsData.audioBase64) {
+              dataUrl = `data:${ttsData.audioMimeType || 'audio/mpeg'};base64,${ttsData.audioBase64}`;
+              ttsAudioCacheRef.current.set(cacheKey, dataUrl);
+            }
+          }
+        }
+        if (dataUrl) {
+          const audio = new Audio(dataUrl);
+          activeAudioElRef.current = audio;
+          audio.onended = () => setPlayingThreadId((curr) => (curr === thread.id ? null : curr));
+          audio.onerror = () => {
+            activeAudioElRef.current = null;
+            playBrowserFallback();
+          };
+          await audio.play();
+          return;
+        }
+      } catch {
+        // fallback cleanly below
+      }
     }
 
-    window.setTimeout(() => {
-      setPlayingThreadId((curr) => (curr === thread.id ? null : curr));
-    }, 2500);
+    playBrowserFallback();
   };
 
   const handleToggleRowMic = async (thread: VoiceThreadItem) => {
@@ -340,6 +384,7 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
     const preview: VerifiedVoicePreview = {
       transcript: finalTranscript,
       translatedText: finalTranslated,
+      convertedSourceText: finalTranslated,
       detectedInputLanguage: translateData.detectedInputLanguage || 'Auto',
       voiceName: finalVoiceName,
       convertedAudioUrl: convertedDataUrl,
@@ -399,11 +444,39 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
 
       const finalTranscript = activePreview.transcript.trim();
       const finalTranslated = activePreview.translatedText.trim();
-      const finalVoiceName = activePreview.voiceName;
-      const audioDataUrl = activePreview.convertedAudioUrl || undefined;
+      let finalVoiceName = activePreview.voiceName;
+      let audioDataUrl = activePreview.convertedAudioUrl || undefined;
 
       if (!finalTranslated) {
         throw new Error('Translated reply text is empty. Please re-record or type your reply.');
+      }
+
+      // If Founder edited the translated text in preview, re-synthesize matching Neural TTS audio before sending
+      if (finalTranslated !== activePreview.convertedSourceText.trim() || !audioDataUrl) {
+        try {
+          const regenRes = await fetch('/api/voice/tts', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: finalTranslated,
+              locale: activeThread.targetLocale,
+            }),
+          });
+          if (regenRes.ok) {
+            const regenJson = (await regenRes.json()) as {
+              audioBase64?: string;
+              audioMimeType?: string;
+              voiceName?: string;
+            };
+            if (regenJson.audioBase64) {
+              audioDataUrl = `data:${regenJson.audioMimeType || 'audio/mpeg'};base64,${regenJson.audioBase64}`;
+              if (regenJson.voiceName) finalVoiceName = regenJson.voiceName;
+            }
+          }
+        } catch {
+          // keep previous audio if offline
+        }
       }
 
       // Persist unified message into backend voice thread (syncs straight to Salon Owner Dashboard)
