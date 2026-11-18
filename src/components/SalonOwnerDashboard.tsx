@@ -57,7 +57,7 @@ import { PortalCard } from './PortalCard';
 import { BroadcastTab } from './Tabs/BroadcastTab';
 import { SalonWindowPosterPdf } from './SalonWindowPosterPdf';
 import { SalonRetentionSettingsPanel } from './SalonRetentionSettingsPanel';
-import { VoiceRecorder, type RecordedOpusClip } from './VoiceRecorder';
+import { VoiceRecorder, type RecordedOpusClip, type VoiceRecorderHandle } from './VoiceRecorder';
 import {
   INITIAL_VOICE_THREADS,
   type SupportedVoiceLocale,
@@ -67,7 +67,12 @@ import { Contact, SalonProfile } from '../types';
 import type { AuthUser } from '../types/auth';
 import type { SalonConciergeStateResponse, SalonPackageTier } from '../types/concierge';
 import { generate214Contacts } from '../data/mockData';
-import type { OnboardedSalonPayload } from './FieldAgentHub';
+import {
+  getLocalizedPackageName,
+  getLocalizedPackageCardCopy,
+  getLocalizedPackageFeatures,
+  type OnboardedSalonPayload,
+} from './FieldAgentHub';
 
 interface BookingRecord {
   id: string;
@@ -1317,6 +1322,24 @@ function getRegionFromPhone(phone: string, location?: string) {
   return REGION_CONFIGS.GLOBAL;
 }
 
+// Query 2: Pakistan & India -> English & Urdu only; MENA / Europe / Intl -> Arabic, English & Urdu
+function getAllowedDashboardLangs(phone: string, location?: string): VoiceLang[] {
+  const cleaned = phone.replace(/\s+/g, '');
+  const loc = (location || '').toLowerCase();
+  const isSouthAsia =
+    cleaned.startsWith('+92') ||
+    cleaned.startsWith('+91') ||
+    loc.includes('pakistan') ||
+    loc.includes('lahore') ||
+    loc.includes('karachi') ||
+    loc.includes('islamabad') ||
+    loc.includes('india') ||
+    loc.includes('mumbai') ||
+    loc.includes('delhi');
+  if (isSouthAsia) return ['en', 'ur'];
+  return ['ar', 'en', 'ur'];
+}
+
 export const INITIAL_CLIENT_SALONS: ClientSalon[] = [
   {
     id: '1',
@@ -1396,13 +1419,15 @@ interface SalonOwnerDashboardProps {
   sectionMode?: 'LIVE' | 'PASSES' | 'VOICE' | 'MANAGE';
   onSectionModeChange?: (mode: 'LIVE' | 'PASSES' | 'VOICE' | 'MANAGE') => void;
   onOwnerLangChange?: (lang: 'en' | 'ur' | 'ar') => void;
-  externalHardwareAction?: { type: 'WAKE' | 'AUX' | 'SLEEP'; seq: number } | null;
+  externalHardwareAction?: { type: 'WAKE' | 'AUX' | 'TEST_SPEAKER'; seq: number } | null;
   onHardwareStatusSync?: (status: {
     isWakeLockActive: boolean;
     isLoudspeakerBoostActive: boolean;
     isCounterSleeping: boolean;
     overnightCount: number;
     hasFounderVoiceReply: boolean;
+    allowedLangs: Array<'en' | 'ur' | 'ar'>;
+    ownerLang: 'en' | 'ur' | 'ar';
   }) => void;
   onOpenSimulator?: () => void;
   onClose?: () => void;
@@ -1523,6 +1548,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   }, [selectedSalonName, salonsState, onboardedData, lockedSalonId]);
 
   const currentSalon = salonsState.find((s) => s.id === selectedSalonId) || salonsState[0];
+  const allowedLangs = getAllowedDashboardLangs(currentSalon.phone, currentSalon.location);
   const regionConfig = getRegionFromPhone(currentSalon.phone, currentSalon.location);
   const currentPackage =
     regionConfig.packages.find((p) => p.id === currentSalon.planId) || regionConfig.packages[0];
@@ -1537,6 +1563,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setInternalSectionMode(mode);
     onSectionModeChange?.(mode);
   };
+  const [isWalkInExpanded, setIsWalkInExpanded] = useState(false);
   const [manageSubSection, setManageSubSection] = useState<
     'STAFF' | 'SERVICES' | 'HOURS' | 'AUTOMATION' | 'POSTER'
   >('STAFF');
@@ -1700,6 +1727,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   );
   const [ownerVoiceDraft, setOwnerVoiceDraft] = useState('');
   const [ownerRecordedClip, setOwnerRecordedClip] = useState<RecordedOpusClip | null>(null);
+  const [isOwnerRecordingVoice, setIsOwnerRecordingVoice] = useState(false);
+  const founderVoiceRecorderRef = useRef<VoiceRecorderHandle | null>(null);
   const [isSendingFounderVoice, setIsSendingFounderVoice] = useState(false);
   const [founderVoiceError, setFounderVoiceError] = useState<string | null>(null);
   const [playingFounderMsgId, setPlayingFounderMsgId] = useState<string | null>(null);
@@ -1908,8 +1937,22 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
   const handleSendOwnerVoiceToFounder = async () => {
     if (isSendingFounderVoice) return;
-    if (!ownerVoiceDraft.trim() && !ownerRecordedClip) {
-      setFounderVoiceError('Record an Opus voice note or type a short question for Founder Support.');
+    let clipToSend = ownerRecordedClip;
+    if (founderVoiceRecorderRef.current?.isRecording()) {
+      const finalized = await founderVoiceRecorderRef.current.stopAndGetClip();
+      if (finalized) {
+        clipToSend = finalized;
+        setOwnerRecordedClip(finalized);
+      }
+    }
+    if (!ownerVoiceDraft.trim() && !clipToSend) {
+      setFounderVoiceError(
+        ownerLang === 'ur'
+          ? 'مائیک بٹن دبا کر آواز ریکارڈ کریں یا اپنا پیغام لکھیں، پھر بھیجیں۔'
+          : ownerLang === 'ar'
+          ? 'اضغط على الميكروفون لتسجيل رسالة صوتية أو اكتب سؤالك أولاً ثم أرسل.'
+          : 'Tap the Mic to record a voice note or type your message first, then send.'
+      );
       return;
     }
     setFounderVoiceError(null);
@@ -1922,8 +1965,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       let translationNotice: string | null = null;
 
       let resolvedDetectedLang = ownerLang === 'ur' ? 'Urdu' : ownerLang === 'ar' ? 'Arabic' : 'English';
-      if (ownerRecordedClip?.base64) {
-        resolvedAudioDataUrl = `data:${ownerRecordedClip.mimeType};base64,${ownerRecordedClip.base64}`;
+      if (clipToSend?.base64) {
+        resolvedAudioDataUrl = `data:${clipToSend.mimeType};base64,${clipToSend.base64}`;
       }
 
       // Translate Owner voice/text into Founder-readable English ('en-US') while preserving original words in originalText
@@ -1933,8 +1976,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            audioBase64: ownerRecordedClip?.base64,
-            audioMimeType: ownerRecordedClip?.mimeType,
+            audioBase64: clipToSend?.base64,
+            audioMimeType: clipToSend?.mimeType,
             text: ownerVoiceDraft.trim() || undefined,
             targetLocale: 'en-US',
             targetDialect: 'Founder English',
@@ -1965,14 +2008,14 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         translationNotice = 'Translation server unreachable right now.';
       }
 
-      if (translationNotice && ownerRecordedClip && !ownerVoiceDraft.trim()) {
+      if (translationNotice && clipToSend && !ownerVoiceDraft.trim()) {
         setFounderVoiceError(
           `${translationNotice} Your audio clip was saved — type a quick note or retry so the Founder sees translated text.`
         );
       }
 
       if (!resolvedTranscript) {
-        resolvedTranscript = `Voice note (${ownerRecordedClip?.sizeKb || 0} KB Opus) in ${ownerLang.toUpperCase()}`;
+        resolvedTranscript = `Voice note (${clipToSend?.sizeKb || 0} KB Opus) in ${ownerLang.toUpperCase()}`;
       }
       if (!resolvedReplyText) {
         resolvedReplyText = resolvedTranscript;
@@ -2086,9 +2129,13 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     },
   ]);
 
-  // Sync salon defaults when switching test salons + poll incoming WhatsApp confirmations & reminder replies
+  // Sync salon defaults when switching test salons + enforce region language rules (PK/IN: EN/UR, MENA/EU: AR/EN/UR)
   useEffect(() => {
-    setOwnerLang(currentSalon.onboardingLanguage);
+    const allowed = getAllowedDashboardLangs(currentSalon.phone, currentSalon.location);
+    const preferred = allowed.includes(currentSalon.onboardingLanguage)
+      ? currentSalon.onboardingLanguage
+      : allowed[0];
+    setOwnerLang(preferred);
     const cfg = getRegionFromPhone(currentSalon.phone, currentSalon.location);
     setSelectedUpgradeChannel(cfg.paymentChannels[0].id);
     setSelectedUpgradeTargetId(null);
@@ -2691,7 +2738,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     };
   }, [isFounderInspector]);
 
-  // Sync live counter controls to Hamburger Sidebar & handle Hamburger hardware toggle actions
+  // Sync live counter controls to Hamburger Sidebar & handle unified Wake ON/OFF + AUX + Speaker Test actions
   useEffect(() => {
     onHardwareStatusSync?.({
       isWakeLockActive,
@@ -2699,6 +2746,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       isCounterSleeping,
       overnightCount: overnightQueue.length,
       hasFounderVoiceReply,
+      allowedLangs,
+      ownerLang,
     });
   }, [
     isWakeLockActive,
@@ -2706,6 +2755,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     isCounterSleeping,
     overnightQueue.length,
     hasFounderVoiceReply,
+    allowedLangs,
+    ownerLang,
     onHardwareStatusSync,
   ]);
 
@@ -2716,18 +2767,25 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     }
     lastHandledHardwareSeqRef.current = externalHardwareAction.seq;
     if (externalHardwareAction.type === 'WAKE') {
-      void toggleScreenWakeLock();
+      void handleToggleCounterSleep();
     } else if (externalHardwareAction.type === 'AUX') {
       const next = !isLoudspeakerBoostActive;
       setIsLoudspeakerBoostActive(next);
       setMaintToast(
         next
-          ? '📢 Bluetooth/AUX Boost ON: Multi-tone wake chime + pre-speech buffer active.'
-          : '📢 Loudspeaker Boost set to normal volume.'
+          ? '📢 Loudspeaker Boost ON: Optimized for wired AUX (~50% less battery) or paired Bluetooth.'
+          : '📢 Loudspeaker Boost set to standard output.'
       );
-      setTimeout(() => setMaintToast(null), 3500);
-    } else if (externalHardwareAction.type === 'SLEEP') {
-      void handleToggleCounterSleep();
+      setTimeout(() => setMaintToast(null), 4000);
+    } else if (externalHardwareAction.type === 'TEST_SPEAKER') {
+      void handleUnlockMobileAudio();
+      const testLine =
+        ownerLang === 'ur'
+          ? 'اسپیکر ٹیسٹ کامیاب! آپ کا کاؤنٹر واٹس ایپ بوٹ 24/7 آن ہے۔'
+          : ownerLang === 'ar'
+          ? 'تم اختبار السماعة بنجاح! نظام الواتساب يعمل على مدار الساعة.'
+          : 'Speaker test successful. Your WorkCraft counter audio and 24/7 booking system are ready.';
+      speakHandsFree(testLine, ownerLang);
     }
   });
 
@@ -2995,16 +3053,30 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setUpgradeTidInput('');
 
     const i18n = UPGRADE_MODAL_I18N[ownerLang];
-    setMaintToast(i18n.successToast(targetPkg.name, regionConfig.symbol, differenceAmount));
+    const localizedPkgTitle = getLocalizedPackageName(targetPkg.name, ownerLang);
+    const isDomPk = regionConfig.currency === 'PKR';
+    const unlockedFeaturesList = getLocalizedPackageFeatures(targetPkg.id, ownerLang, isDomPk)
+      .slice(0, 3)
+      .map((f) => `• ${f.title}`)
+      .join('\n');
 
-    const greetingMsg = i18n.whatsappGreeting(
+    setMaintToast(i18n.successToast(localizedPkgTitle, regionConfig.symbol, differenceAmount));
+
+    const baseGreeting = i18n.whatsappGreeting(
       currentSalon.owner,
       currentSalon.name,
-      targetPkg.name,
+      localizedPkgTitle,
       regionConfig.symbol,
       differenceAmount,
       chosenTid
     );
+    const unlockedHeading =
+      ownerLang === 'ur'
+        ? '\n\nنئے فعال شدہ فیچرز:'
+        : ownerLang === 'ar'
+        ? '\n\nالمزايا الجديدة المفعلة الآن:'
+        : '\n\nNewly Unlocked Features:';
+    const greetingMsg = `${baseGreeting}${unlockedHeading}\n${unlockedFeaturesList}`;
 
     setWhatsAppReceiptNotice({
       title:
@@ -4473,9 +4545,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          {/* Top-Right Cluster: Region-Filtered Language Pills + Top-Right Upgrade + Speaker Mute + Voice Quick Jump */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {/* Desktop Mode Switcher (4 Clean Tabs matching Mobile Bottom Bar) */}
-            <div className="hidden lg:inline-flex items-center rounded-xl border border-[#30363D] bg-[#0D1117] p-1 gap-1">
+            <div className="hidden lg:inline-flex items-center rounded-xl border border-[#30363D] bg-[#0D1117] p-1 gap-1 mr-1">
               <button
                 type="button"
                 onClick={() => setSectionMode('LIVE')}
@@ -4529,70 +4602,83 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               </button>
             </div>
 
-            {/* Strict Owner Voice Language Selector (ur-PK / ar-SA / en-US) */}
-            <select
-              aria-label="Owner Voice Language"
-              value={ownerLang}
-              onChange={(e) => setOwnerLang(e.target.value as VoiceLang)}
-              className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-2.5 text-sm font-mono font-bold text-[#06B6D4] focus:border-[#06B6D4] focus:outline-none"
+            {/* Clean Separate Language Switcher (PK/IN: EN & UR only; MENA/Europe: AR, EN & UR) */}
+            <div
+              className="inline-flex items-center rounded-xl border border-[#30363D] bg-[#0D1117] p-1 gap-0.5"
+              role="group"
+              aria-label="Dashboard Language"
             >
-              <option value="ur">اردو (ur-PK)</option>
-              <option value="ar">العربية (ar-SA)</option>
-              <option value="en">English (en-US)</option>
-            </select>
+              {allowedLangs.map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setOwnerLang(code)}
+                  className={`min-h-[34px] rounded-lg px-2.5 py-1 text-[11px] font-mono font-bold transition ${
+                    ownerLang === code
+                      ? 'bg-[#06B6D4]/20 border border-[#06B6D4]/50 text-[#06B6D4]'
+                      : 'text-[#8B949E] hover:text-[#F0F6FC] border border-transparent'
+                  }`}
+                >
+                  {code === 'ur' ? 'اردو' : code === 'ar' ? 'العربية' : 'EN'}
+                </button>
+              ))}
+            </div>
 
-            {/* Counter Sleep / Keep Counter Awake Quick Toggle */}
-            <button
-              type="button"
-              onClick={handleToggleCounterSleep}
-              className={`min-h-[44px] rounded-xl border px-3 text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                isCounterSleeping
-                  ? 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
-                  : 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
-              }`}
-              title={
-                isCounterSleeping
-                  ? 'Tap in the morning to replay overnight WhatsApp queue aloud'
-                  : 'Tap at closing time to silence & queue overnight WhatsApp alerts'
-              }
-            >
-              {isCounterSleeping ? (
-                <>
-                  <Sun className="size-4 shrink-0" />
-                  <span className="hidden sm:inline">{ui.keepCounterAwake}</span>
-                  {overnightQueue.length > 0 && (
-                    <span className="rounded bg-[#0D1117] px-1.5 py-0.5 text-[10px] text-[#D29922]">
-                      {overnightQueue.length}
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Moon className="size-4 shrink-0" />
-                  <span className="hidden sm:inline">{ui.counterSleep}</span>
-                </>
-              )}
-            </button>
+            {/* Top-Right Upgrade CTA (Shows only remaining higher tiers & difference amount) */}
+            {higherPackages.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedUpgradeTargetId(higherPackages[0].id);
+                  setUpgradeModalError(null);
+                  setIsUpgradeModalOpen(true);
+                }}
+                className="min-h-[42px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-3.5 py-1.5 text-xs font-mono font-black uppercase transition flex items-center gap-1.5 shadow-md"
+              >
+                <ArrowUpCircle className="size-4 shrink-0" />
+                <span>
+                  {ownerLang === 'ur'
+                    ? 'اپگریڈ'
+                    : ownerLang === 'ar'
+                    ? 'ترقية الباقة'
+                    : 'Upgrade'}
+                </span>
+              </button>
+            )}
 
+            {/* Clear Aloud Voice Toggle (Open = Speaks Aloud | Turned Off = Muted) */}
             <button
               type="button"
               onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
-              className={`min-h-[44px] min-w-[44px] rounded-xl border px-2 grid place-items-center transition ${
+              className={`min-h-[42px] rounded-xl border px-2.5 inline-flex items-center gap-1.5 text-[11px] font-mono font-bold transition ${
                 isVoiceEnabled
-                  ? 'border-[#30363D] bg-[#0D1117] text-[#06B6D4]'
+                  ? 'border-[#06B6D4]/50 bg-[#0D1117] text-[#06B6D4]'
                   : 'border-[#30363D] bg-[#0D1117] text-[#6E7681]'
               }`}
-              title={isVoiceEnabled ? 'Voice Announcements ON' : 'Voice Announcements Muted'}
-              aria-label="Toggle voice announcements"
+              title={isVoiceEnabled ? 'Speaker ON: System speaks aloud' : 'Speaker OFF: Spoken voice muted'}
+              aria-label="Toggle spoken voice announcements"
             >
               {isVoiceEnabled ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
+              <span className="hidden sm:inline">
+                {isVoiceEnabled
+                  ? ownerLang === 'ur'
+                    ? 'آواز آن'
+                    : ownerLang === 'ar'
+                    ? 'صوت مفعّل'
+                    : 'Voice ON'
+                  : ownerLang === 'ur'
+                  ? 'میوٹ'
+                  : ownerLang === 'ar'
+                  ? 'صامت'
+                  : 'Muted'}
+              </span>
             </button>
 
             {!isAudioUnlocked && !isFounderInspector && (
               <button
                 type="button"
                 onClick={handleUnlockMobileAudio}
-                className="min-h-[44px] rounded-xl border border-[#06B6D4] bg-[#06B6D4]/15 hover:bg-[#06B6D4]/25 px-3 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5"
+                className="min-h-[42px] rounded-xl border border-[#06B6D4] bg-[#06B6D4]/15 hover:bg-[#06B6D4]/25 px-3 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5"
                 title="Tap once on mobile so loud chimes & spoken alerts play automatically"
               >
                 <Volume2 className="size-4 shrink-0" />
@@ -4603,14 +4689,13 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             <button
               type="button"
               onClick={scrollToFounderVoiceSupport}
-              className="relative min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-2.5 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5"
+              className="relative min-h-[42px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-2.5 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5"
               title={ui.voiceSupportTitle}
               aria-label={ui.voiceSupportTitle}
             >
               <Mic className="size-4 shrink-0" />
-              <span className="hidden sm:inline">{ui.founder}</span>
               {hasFounderVoiceReply && (
-                <span className="size-2 rounded-full bg-[#06B6D4]" aria-hidden="true" />
+                <span className="size-2 rounded-full bg-[#3FB950]" aria-hidden="true" />
               )}
             </button>
 
@@ -4618,7 +4703,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="min-h-[44px] min-w-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] grid place-items-center transition"
+                className="min-h-[42px] min-w-[42px] rounded-xl border border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC] grid place-items-center transition"
                 title="Close Portal"
               >
                 <X className="size-4" />
@@ -4727,17 +4812,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           </div>
         </div>
 
-        {/* Counter Sleep Standby Banner */}
+        {/* Counter Wake Standby Banner */}
         {isCounterSleeping && (
           <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3.5 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
             <div className="flex items-start gap-2.5 text-xs text-[#F0F6FC]">
               <Moon className="size-4 text-[#D29922] shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold text-[#D29922] font-mono">
-                  Counter Sleep Active since {counterSleptAt || 'Closing'} · Audio Silenced
+                  Counter Wake: OFF (since {counterSleptAt || 'Closing'}) · 24/7 WhatsApp Backend Live
                 </p>
                 <p className="text-[#F0F6FC]/90 font-sans mt-0.5">
-                  {overnightQueue.length} overnight WhatsApp message(s) queued quietly. Tap &ldquo;{ui.keepCounterAwake}&rdquo; in the morning to replay aloud.
+                  {overnightQueue.length} overnight WhatsApp message(s) queued quietly. Tap &ldquo;{ui.wakeOn}&rdquo; in the morning to replay aloud.
                 </p>
               </div>
             </div>
@@ -4746,7 +4831,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               onClick={handleToggleCounterSleep}
               className="min-h-[48px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-4 py-2 text-xs font-mono font-black uppercase shrink-0 transition"
             >
-              {ui.keepCounterAwake} ({overnightQueue.length})
+              {ui.wakeOn} ({overnightQueue.length})
             </button>
           </div>
         )}
@@ -5338,127 +5423,146 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             </div>
           </section>
 
-          {/* 3B. LIVE WALK-IN WAITLIST QUEUE ETA (Daily Rush-Hour Operations) */}
+          {/* 3B. COMPACT COLLAPSIBLE WALK-IN WAITLIST BAR (Daily Counter Sync) */}
           <div dir={isOwnerRtl ? 'rtl' : 'ltr'}>
             <section
               aria-label="Live Walk-In Waitlist Queue"
-              className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 sm:p-5 space-y-3"
+              className="rounded-2xl border border-[#30363D] bg-[#161B22] p-3.5 sm:p-4 space-y-3"
             >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#30363D] pb-2.5">
-                <div className="flex items-center gap-2">
-                  <Clock className="size-4 text-[#06B6D4] shrink-0" />
-                  <h2 className="text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
-                    {ui.walkInQueueTitle}
-                  </h2>
-                </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowWalkInForm((v) => !v)}
-                  className="min-h-[40px] inline-flex items-center gap-1 rounded-xl border border-[#06B6D4] bg-[#0D1117] px-3 py-1 text-[11px] font-mono font-bold text-[#06B6D4] transition"
+                  onClick={() => setIsWalkInExpanded((v) => !v)}
+                  className="flex items-center gap-2 text-left min-h-[36px]"
+                >
+                  <Clock className="size-4 text-[#06B6D4] shrink-0" />
+                  <h2 className="text-xs sm:text-sm font-black uppercase tracking-wider text-[#F0F6FC]">
+                    {ui.walkInQueueTitle}
+                  </h2>
+                  <span className="rounded-md bg-[#0D1117] border border-[#30363D] px-2 py-0.5 text-[10px] font-mono text-[#D29922]">
+                    {(conciergeState?.walkInQueue || []).filter((w) => w.status !== 'SEATED').length}
+                  </span>
+                  {isWalkInExpanded ? (
+                    <ChevronUp className="size-4 text-[#8B949E]" />
+                  ) : (
+                    <ChevronDown className="size-4 text-[#8B949E]" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsWalkInExpanded(true);
+                    setShowWalkInForm((v) => !v);
+                  }}
+                  className="min-h-[38px] inline-flex items-center gap-1 rounded-xl border border-[#06B6D4] bg-[#0D1117] px-3 py-1 text-[11px] font-mono font-bold text-[#06B6D4] transition"
                 >
                   <Plus className="size-3.5" />
-                  <span>{showWalkInForm ? ui.closeBtn : ui.addWalkIn}</span>
+                  <span>{showWalkInForm && isWalkInExpanded ? ui.closeBtn : ui.addWalkIn}</span>
                 </button>
               </div>
 
-              {showWalkInForm && (
-                <form
-                  onSubmit={handleAddWalkIn}
-                  className="rounded-xl border border-[#06B6D4]/50 bg-[#0D1117] p-3 space-y-2.5"
-                >
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      dir="ltr"
-                      required
-                      value={walkInName}
-                      onChange={(e) => setWalkInName(e.target.value)}
-                      placeholder="Guest name"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
-                    />
-                    <input
-                      type="text"
-                      dir="ltr"
-                      value={walkInService}
-                      onChange={(e) => setWalkInService(e.target.value)}
-                      placeholder={isLadies ? 'Service (e.g. Party Makeup)' : 'Service (e.g. Skin Fade)'}
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
-                    />
-                    <input
-                      type="text"
-                      dir="ltr"
-                      value={walkInPhone}
-                      onChange={(e) => setWalkInPhone(e.target.value)}
-                      placeholder="WhatsApp (optional)"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
-                    />
-                    <input
-                      type="number"
-                      dir="ltr"
-                      min={5}
-                      max={180}
-                      value={walkInEta}
-                      onChange={(e) => setWalkInEta(e.target.value)}
-                      placeholder="Wait mins"
-                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#D29922]"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={isSavingOpsCard}
-                    className="w-full min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-black uppercase transition"
-                  >
-                    {ui.queueGuest}
-                  </button>
-                </form>
-              )}
-
-              <div className="space-y-2">
-                {(conciergeState?.walkInQueue || []).filter((w) => w.status !== 'SEATED').length === 0 ? (
-                  <p className="text-xs text-[#8B949E] font-sans rounded-xl border border-[#30363D] bg-[#0D1117] p-3">
-                    {ui.noWalkIns}
-                  </p>
-                ) : (
-                  (conciergeState?.walkInQueue || [])
-                    .filter((w) => w.status !== 'SEATED')
-                    .map((guest) => (
-                      <div
-                        key={guest.id}
-                        className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
-                      >
-                        <div className="min-w-0 space-y-0.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-bold text-[#F0F6FC]">{guest.clientName}</span>
-                            <span className="rounded bg-[#3B2E0B] border border-[#9E6A03] px-2 py-0.5 text-[10px] font-mono font-bold text-[#D29922]">
-                              ~{guest.etaMinutes} min
-                            </span>
-                          </div>
-                          <p className="text-xs text-[#8B949E] font-sans truncate">
-                            {guest.service} · {guest.assignedStaff}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {guest.status === 'WAITING' && (
-                            <button
-                              type="button"
-                              onClick={() => void handleUpdateWalkInStatus(guest.id, 'NOTIFIED')}
-                              className="min-h-[40px] rounded-xl border border-[#06B6D4] bg-[#161B22] px-3 py-1.5 text-[11px] font-mono font-bold text-[#06B6D4]"
-                            >
-                              {ui.callNext}
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => void handleUpdateWalkInStatus(guest.id, 'SEATED')}
-                            className="min-h-[40px] rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-1.5 text-[11px] font-mono font-bold text-[#3FB950]"
-                          >
-                            {ui.seatBtn} ✓
-                          </button>
-                        </div>
+              {isWalkInExpanded && (
+                <div className="space-y-3 pt-2 border-t border-[#21262D]">
+                  {showWalkInForm && (
+                    <form
+                      onSubmit={handleAddWalkIn}
+                      className="rounded-xl border border-[#06B6D4]/50 bg-[#0D1117] p-3 space-y-2.5"
+                    >
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          dir="ltr"
+                          required
+                          value={walkInName}
+                          onChange={(e) => setWalkInName(e.target.value)}
+                          placeholder="Guest name"
+                          className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
+                        />
+                        <input
+                          type="text"
+                          dir="ltr"
+                          value={walkInService}
+                          onChange={(e) => setWalkInService(e.target.value)}
+                          placeholder={isLadies ? 'Service (e.g. Party Makeup)' : 'Service (e.g. Skin Fade)'}
+                          className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC]"
+                        />
+                        <input
+                          type="text"
+                          dir="ltr"
+                          value={walkInPhone}
+                          onChange={(e) => setWalkInPhone(e.target.value)}
+                          placeholder="WhatsApp (optional)"
+                          className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC]"
+                        />
+                        <input
+                          type="number"
+                          dir="ltr"
+                          min={5}
+                          max={180}
+                          value={walkInEta}
+                          onChange={(e) => setWalkInEta(e.target.value)}
+                          placeholder="Wait mins"
+                          className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#D29922]"
+                        />
                       </div>
-                    ))
-                )}
-              </div>
+                      <button
+                        type="submit"
+                        disabled={isSavingOpsCard}
+                        className="w-full min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-black uppercase transition"
+                      >
+                        {ui.queueGuest}
+                      </button>
+                    </form>
+                  )}
+
+                  <div className="space-y-2">
+                    {(conciergeState?.walkInQueue || []).filter((w) => w.status !== 'SEATED').length === 0 ? (
+                      <p className="text-xs text-[#8B949E] font-sans rounded-xl border border-[#30363D] bg-[#0D1117] p-3">
+                        {ui.noWalkIns}
+                      </p>
+                    ) : (
+                      (conciergeState?.walkInQueue || [])
+                        .filter((w) => w.status !== 'SEATED')
+                        .map((guest) => (
+                          <div
+                            key={guest.id}
+                            className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                          >
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-bold text-[#F0F6FC]">{guest.clientName}</span>
+                                <span className="rounded bg-[#3B2E0B] border border-[#9E6A03] px-2 py-0.5 text-[10px] font-mono font-bold text-[#D29922]">
+                                  ~{guest.etaMinutes} min
+                                </span>
+                              </div>
+                              <p className="text-xs text-[#8B949E] font-sans truncate">
+                                {guest.service} · {guest.assignedStaff}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {guest.status === 'WAITING' && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleUpdateWalkInStatus(guest.id, 'NOTIFIED')}
+                                  className="min-h-[40px] rounded-xl border border-[#06B6D4] bg-[#161B22] px-3 py-1.5 text-[11px] font-mono font-bold text-[#06B6D4]"
+                                >
+                                  {ui.callNext}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => void handleUpdateWalkInStatus(guest.id, 'SEATED')}
+                                className="min-h-[40px] rounded-xl border border-[#116329] bg-[#0D3822] px-3 py-1.5 text-[11px] font-mono font-bold text-[#3FB950]"
+                              >
+                                {ui.seatBtn} ✓
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                    )}
+                  </div>
+                </div>
+              )}
             </section>
           </div>
         </div>
@@ -5763,9 +5867,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 </p>
 
                 <VoiceRecorder
+                  ref={founderVoiceRecorderRef}
                   compact
                   title={ui.recordVoiceNoteTitle}
                   subtitle={ui.recordVoiceNoteSub}
+                  onRecordingChange={setIsOwnerRecordingVoice}
                   onRecorded={(clip) => {
                     setOwnerRecordedClip(clip);
                     setFounderVoiceError(null);
@@ -5783,12 +5889,22 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   />
                   <button
                     type="button"
-                    onClick={handleSendOwnerVoiceToFounder}
-                    disabled={isSendingFounderVoice || (!ownerVoiceDraft.trim() && !ownerRecordedClip)}
+                    onClick={() => void handleSendOwnerVoiceToFounder()}
+                    disabled={isSendingFounderVoice}
                     className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 px-4 py-2 text-xs font-mono font-bold uppercase text-[#0D1117] transition flex items-center justify-center gap-2 shrink-0"
                   >
                     <Send className="size-4" />
-                    <span>{isSendingFounderVoice ? ui.sending : ui.sendToFounder}</span>
+                    <span>
+                      {isSendingFounderVoice
+                        ? ui.sending
+                        : isOwnerRecordingVoice
+                        ? ownerLang === 'ur'
+                          ? 'روکیں اور فاؤنڈر کو بھیجیں'
+                          : ownerLang === 'ar'
+                          ? 'إيقاف وإرسال للمؤسس'
+                          : 'Stop & Send to Founder'
+                        : ui.sendToFounder}
+                    </span>
                   </button>
                 </div>
 
@@ -6785,9 +6901,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           onChange={(e) => setOwnerLang(e.target.value as VoiceLang)}
                           className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#F0F6FC]"
                         >
-                          <option value="ur">Owner Voice: Urdu</option>
-                          <option value="en">Owner Voice: English</option>
-                          <option value="ar">Owner Voice: Arabic</option>
+                          {allowedLangs.includes('ur') && <option value="ur">Owner Voice: Urdu</option>}
+                          {allowedLangs.includes('en') && <option value="en">Owner Voice: English</option>}
+                          {allowedLangs.includes('ar') && <option value="ar">Owner Voice: Arabic</option>}
                         </select>
                         {higherPackages.length > 0 && (
                           <button
@@ -6895,6 +7011,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     {higherPackages.map((pkg) => {
                       const differenceAmount = Math.max(0, pkg.setupFee - currentPackage.setupFee);
                       const isSelected = selectedUpgradeTargetId === pkg.id;
+                      const isDomPk = regionConfig.currency === 'PKR';
+                      const localizedTitle = getLocalizedPackageName(pkg.name, ownerLang);
+                      const cardCopy = getLocalizedPackageCardCopy(pkg.id, ownerLang, isDomPk);
+                      const detailedFeatures = getLocalizedPackageFeatures(pkg.id, ownerLang, isDomPk);
                       return (
                         <button
                           key={pkg.id}
@@ -6906,13 +7026,16 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                               : 'border-[#30363D] bg-[#0D1117] hover:border-[#484F58]'
                           } ${ownerLang === 'ur' || ownerLang === 'ar' ? 'text-right' : 'text-left'}`}
                         >
-                          <div className="space-y-2">
+                          <div className="space-y-2.5 w-full">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-sm font-black text-[#F0F6FC]">{pkg.name}</span>
+                              <span className="text-sm font-black text-[#F0F6FC]">{localizedTitle}</span>
                               <span className="rounded-md bg-[#06B6D4]/15 border border-[#06B6D4]/30 px-2 py-0.5 text-[9px] font-mono font-bold text-[#06B6D4]">
-                                {pkg.badge}
+                                {cardCopy.bookings}
                               </span>
                             </div>
+                            <p className="text-[11px] font-sans text-[#8B949E] leading-snug">
+                              {cardCopy.scope}
+                            </p>
                             <div className="rounded-xl bg-[#161B22] border border-[#30363D] p-2.5 font-mono">
                               <span className="text-[10px] text-[#6E7681] block">
                                 {i18n.fullPrice} <span className="line-through">{regionConfig.symbol}{pkg.setupFee.toLocaleString()}</span>
@@ -6925,10 +7048,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                               </span>
                             </div>
                             <ul className="space-y-1.5 pt-1">
-                              {pkg.features.map((feat) => (
-                                <li key={feat} className="text-[11px] text-[#8B949E] font-sans flex items-start gap-1.5">
-                                  <Check className="size-3.5 text-[#3FB950] shrink-0 mt-0.5" />
-                                  <span>{feat}</span>
+                              {detailedFeatures.map((feat) => (
+                                <li key={feat.title} className="text-[11px] text-[#8B949E] font-sans flex items-start gap-1.5">
+                                  <Check className={`size-3.5 shrink-0 mt-0.5 ${feat.highlight ? 'text-[#06B6D4]' : 'text-[#3FB950]'}`} />
+                                  <span className={feat.highlight ? 'text-[#F0F6FC] font-medium' : ''}>
+                                    {feat.title}
+                                  </span>
                                 </li>
                               ))}
                             </ul>
