@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Video,
   Upload,
@@ -335,8 +335,14 @@ export const BroadcastTab: React.FC<BroadcastTabProps> = ({
   const [phonebookSearchQuery, setPhonebookSearchQuery] = useState('');
   const vcfInputRef = useRef<HTMLInputElement>(null);
 
-  const activeContacts = importedContacts.filter((c) => !c.optOut);
-  const stoppedContacts = importedContacts.filter((c) => c.optOut);
+  const activeContacts = useMemo(
+    () => importedContacts.filter((c) => !c.optOut),
+    [importedContacts]
+  );
+  const stoppedContacts = useMemo(
+    () => importedContacts.filter((c) => c.optOut),
+    [importedContacts]
+  );
   const [stopFeedbackMsg, setStopFeedbackMsg] = useState<string | null>(null);
 
   // Query 2 & 4: Single Custom Video Uploader + Auto QA + Owner-Language Rejection Guide
@@ -360,7 +366,10 @@ export const BroadcastTab: React.FC<BroadcastTabProps> = ({
   const [activeEditorTab, setActiveEditorTab] = useState<RegionalLang>('roman_urdu');
 
   // Query 5: Region-Filtered Client Watch-Language & Pure-Human AI Voice State
-  const allowedWatchLangs = getAllowedVideoWatchLangs(salon.phone);
+  const allowedWatchLangs = useMemo(
+    () => getAllowedVideoWatchLangs(salon.phone),
+    [salon.phone]
+  );
   const [clientWatchLang, setClientWatchLang] = useState<VideoWatchLang>(() =>
     allowedWatchLangs.includes('ur') ? 'ur' : allowedWatchLangs[0]
   );
