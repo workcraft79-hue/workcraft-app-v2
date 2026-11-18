@@ -28,11 +28,181 @@ interface SalonRetentionSettingsPanelProps {
   salonName: string;
   ownerName: string;
   salonPhone: string;
+  ownerLang?: 'en' | 'ur' | 'ar';
   packageTier?: SalonPackageTier;
   conciergeState: SalonConciergeStateResponse | null;
   onStateUpdated: (nextState: SalonConciergeStateResponse) => void;
   onShowToast: (msg: string) => void;
 }
+
+const RETENTION_UI_I18N: Record<
+  'en' | 'ur' | 'ar',
+  {
+    mod1Title: string;
+    mod1Desc: string;
+    detectedRegion: string;
+    activeOptions: string;
+    simulatorTitle: string;
+    sendHiBtn: string;
+    mod2Title: string;
+    mod2Desc: string;
+    bdayOn: string;
+    bdayOff: string;
+    eventTitleLabel: string;
+    discPctLabel: string;
+    fixedCashLabel: string;
+    freeSvcLabel: string;
+    bdayMsgLabel: string;
+    test9amBtn: string;
+    saveBtn: string;
+    mod3Title: string;
+    mod3Desc: string;
+    winbackOn: string;
+    winbackOff: string;
+    inactivityDaysLabel: string;
+    winbackPctLabel: string;
+    cashOffLabel: string;
+    freeAddonLabel: string;
+    winbackTplLabel: string;
+    runScanBtn: string;
+    testRebookBtn: string;
+    mod4Title: string;
+    mod4Desc: string;
+    boosterOn: string;
+    boosterOff: string;
+    googleUrlLabel: string;
+    testStarsLabel: string;
+    dispatchT2hBtn: string;
+    profilesTitle: string;
+    trackedCount: string;
+    saveProfileBtn: string;
+    recentLogsLabel: string;
+  }
+> = {
+  en: {
+    mod1Title: '1. Region-Aware Language Selector Menu',
+    mod1Desc: 'Auto-detects region from WhatsApp number and locks client preferred language on greeting.',
+    detectedRegion: 'Detected Region',
+    activeOptions: 'Active Regional Greeting Options',
+    simulatorTitle: 'Live Greeting Menu & Lock Simulator',
+    sendHiBtn: '1. Send "Hi" Greeting',
+    mod2Title: '2. Retention & Rewards · 9:00 AM Birthday & Event Offers',
+    mod2Desc: "Dispatches automatically at 9:00 AM in each client's locked language when birth date (DD/MM) matches.",
+    bdayOn: 'Birthday / Event Offer: ON',
+    bdayOff: 'Birthday / Event Offer: OFF',
+    eventTitleLabel: 'Event / Campaign Title (All Clients Receive This)',
+    discPctLabel: 'Discount Percentage (%) · 0 = Off',
+    fixedCashLabel: 'Fixed Cash OFF',
+    freeSvcLabel: 'Complimentary Free Service',
+    bdayMsgLabel: 'Customizable Offer Message Text',
+    test9amBtn: 'Test 9:00 AM Birthday Dispatch Now',
+    saveBtn: 'Save Settings',
+    mod3Title: '3. Win-Back Rules · 30-Day Dormant Client Engine',
+    mod3Desc: 'Monitors inactive clients with no upcoming booking and sends a 1-tap rebooking offer.',
+    winbackOn: '30-Day Win-Back: ON',
+    winbackOff: '30-Day Win-Back: OFF',
+    inactivityDaysLabel: 'Inactivity Trigger (Days)',
+    winbackPctLabel: 'Win-Back % (0 = Off)',
+    cashOffLabel: 'Cash OFF',
+    freeAddonLabel: 'Free Add-On Service',
+    winbackTplLabel: 'Win-Back Message Template',
+    runScanBtn: 'Run 30-Day Win-Back Scan',
+    testRebookBtn: 'Test 1-Tap "REBOOK" Reply',
+    mod4Title: '4. Post-Service Google Review & Rating Booster (T+2 Hours)',
+    mod4Desc: 'Routes 4–5★ to Google Maps and intercepts 1–3★ privately with an Owner Alert.',
+    boosterOn: 'T+2h Booster: ON',
+    boosterOff: 'T+2h Booster: OFF',
+    googleUrlLabel: 'Direct Google Review URL (google_review_url)',
+    testStarsLabel: 'Test Smart Reputation Routing (Simulate Client Reply)',
+    dispatchT2hBtn: 'Dispatch T+2h Prompts Now',
+    profilesTitle: 'Client Retention Profiles (Birth Date & Last Completed Visit)',
+    trackedCount: 'Tracked Profiles',
+    saveProfileBtn: 'Save Client Profile',
+    recentLogsLabel: 'Recent Automated WhatsApp Webhook & Cron Dispatches',
+  },
+  ur: {
+    mod1Title: '1. علاقائی زبان منتخب کرنے کا مینو',
+    mod1Desc: 'سیلون کے واٹس ایپ نمبر سے علاقہ خودکار پہچان کر گاہک کی پسندیدہ زبان محفوظ کرتا ہے۔',
+    detectedRegion: 'شناخت شدہ علاقہ',
+    activeOptions: 'فعال علاقائی خوش آمدید آپشنز',
+    simulatorTitle: 'لائیو گریٹنگ مینو اور لینگویج لاک ٹیسٹر',
+    sendHiBtn: '1. "Hi" سلام بھیجیں',
+    mod2Title: '2. برتھ ڈے اور ایونٹ آفرز (صبح 9:00 بجے خودکار)',
+    mod2Desc: 'جب گاہک کی تاریخِ پیدائش (DD/MM) میچ ہو تو صبح 9:00 بجے اس کی زبان میں خودکار آفر بھیجتا ہے۔',
+    bdayOn: 'برتھ ڈے / ایونٹ آفر: آن',
+    bdayOff: 'برتھ ڈے / ایونٹ آفر: آف',
+    eventTitleLabel: 'ایونٹ یا آفر کا عنوان (تمام گاہکوں کے لیے)',
+    discPctLabel: 'ڈسکاؤنٹ فیصد (%) · 0 = بند',
+    fixedCashLabel: 'نقد رعایت',
+    freeSvcLabel: 'مفت اضافی سروس',
+    bdayMsgLabel: 'آفر پیغام کا متن',
+    test9amBtn: 'صبح 9:00 بجے والا ٹیسٹ میسج چلائیں',
+    saveBtn: 'سیٹنگز محفوظ کریں',
+    mod3Title: '3. 30 دن پرانے غیر فعال گاہکوں کی واپسی (Win-Back)',
+    mod3Desc: 'جن گاہکوں کی کوئی نئی بکنگ نہیں انہیں مقررہ دن کے بعد 1-ٹیپ واپسی آفر خودکار بھیجتا ہے۔',
+    winbackOn: '30 دن ون بیک: آن',
+    winbackOff: '30 دن ون بیک: آف',
+    inactivityDaysLabel: 'کتنے دن بعد پیغام جائے',
+    winbackPctLabel: 'ون بیک رعایت % (0 = بند)',
+    cashOffLabel: 'نقد رعایت',
+    freeAddonLabel: 'مفت سروس آفر',
+    winbackTplLabel: 'ون بیک پیغام کا سانچہ',
+    runScanBtn: '30 دن کا ون بیک اسکین چلائیں',
+    testRebookBtn: '1-ٹیپ "REBOOK" جواب ٹیسٹ کریں',
+    mod4Title: '4. سروس کے 2 گھنٹے بعد گوگل ریویو بوسٹر',
+    mod4Desc: '4–5 اسٹار گاہک کو گوگل میپس پر بھیجتا ہے اور 1–3 اسٹار کو نجی الرٹ کے ساتھ روک لیتا ہے۔',
+    boosterOn: 'ریویو بوسٹر: آن',
+    boosterOff: 'ریویو بوسٹر: آف',
+    googleUrlLabel: 'براہِ راست گوگل ریویو لنک (URL)',
+    testStarsLabel: 'اسمارٹ ریٹنگ راؤٹنگ ٹیسٹ کریں (جواب سیمولیشن)',
+    dispatchT2hBtn: '2 گھنٹے والے ریویو پیغامات ابھی چلائیں',
+    profilesTitle: 'گاہکوں کے پروفائلز (تاریخِ پیدائش اور آخری وزٹ)',
+    trackedCount: 'محفوظ پروفائلز',
+    saveProfileBtn: 'گاہک پروفائل محفوظ کریں',
+    recentLogsLabel: 'حالیہ خودکار واٹس ایپ پیغامات کا لاگ',
+  },
+  ar: {
+    mod1Title: '1. قائمة اختيار اللغة حسب المنطقة',
+    mod1Desc: 'يتعرف تلقائياً على المنطقة من رقم واتساب الصالون ويثبت لغة العميل المفضلة عند الترحيب.',
+    detectedRegion: 'المنطقة المكتشفة',
+    activeOptions: 'خيارات الترحيب الإقليمية النشطة',
+    simulatorTitle: 'محاكي قائمة الترحيب وتثبيت اللغة',
+    sendHiBtn: '1. إرسال رسالة ترحيب "Hi"',
+    mod2Title: '2. عروض أعياد الميلاد والمناسبات (9:00 صباحاً تلقائياً)',
+    mod2Desc: 'يرسل تلقائياً الساعة 9:00 صباحاً بلغة العميل المسجلة عند تطابق يوم وشهر الميلاد (DD/MM).',
+    bdayOn: 'عرض الميلاد / المناسبة: مفعل',
+    bdayOff: 'عرض الميلاد / المناسبة: متوقف',
+    eventTitleLabel: 'عنوان المناسبة أو الحملة',
+    discPctLabel: 'نسبة الخصم (%) · 0 = إيقاف',
+    fixedCashLabel: 'خصم نقدي ثابت',
+    freeSvcLabel: 'خدمة مجانية إضافية',
+    bdayMsgLabel: 'نص رسالة العرض الترويجي',
+    test9amBtn: 'تجربة إرسال عرض 9:00 صباحاً الآن',
+    saveBtn: 'حفظ الإعدادات',
+    mod3Title: '3. قواعد استرجاع العملاء المتغيبين لمدة 30 يوماً',
+    mod3Desc: 'يراقب العملاء غير النشطين ويرسل عرض عودة بضغطة واحدة بعد المدة المحددة.',
+    winbackOn: 'استرجاع 30 يوماً: مفعل',
+    winbackOff: 'استرجاع 30 يوماً: متوقف',
+    inactivityDaysLabel: 'عدد أيام الانقطاع',
+    winbackPctLabel: 'نسبة خصم العودة % (0 = إيقاف)',
+    cashOffLabel: 'خصم نقدي',
+    freeAddonLabel: 'خدمة مجانية مضافة',
+    winbackTplLabel: 'قالب رسالة الاسترجاع',
+    runScanBtn: 'تشغيل فحص استرجاع 30 يوماً',
+    testRebookBtn: 'تجربة رد "REBOOK" المباشر',
+    mod4Title: '4. معزز تقييم جوجل بعد الخدمة بساعتين (T+2h)',
+    mod4Desc: 'يوجه تقييمات 4–5 نجوم إلى خرائط جوجل ويحول 1–3 نجوم لتنبيه خاص للمالك.',
+    boosterOn: 'معزز التقييم: مفعل',
+    boosterOff: 'معزز التقييم: متوقف',
+    googleUrlLabel: 'رابط تقييم جوجل المباشر (URL)',
+    testStarsLabel: 'اختبار توجيه التقييم الذكي',
+    dispatchT2hBtn: 'إرسال طلبات التقييم الآن',
+    profilesTitle: 'ملفات احتفاظ العملاء (تاريخ الميلاد وآخر زيارة)',
+    trackedCount: 'ملفات مسجلة',
+    saveProfileBtn: 'حفظ ملف العميل',
+    recentLogsLabel: 'سجل رسائل واتساب التلقائية الأخيرة',
+  },
+};
 
 const PREVIEW_LANG_TABS: Array<{
   id: ClientPreferredLang;
@@ -48,11 +218,14 @@ const PREVIEW_LANG_TABS: Array<{
 export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelProps> = ({
   salonId,
   salonName,
+  ownerLang = 'en',
   packageTier = 'PRO++',
   conciergeState,
   onStateUpdated,
   onShowToast,
 }) => {
+  const isOwnerRtl = ownerLang === 'ur' || ownerLang === 'ar';
+  const rUi = RETENTION_UI_I18N[ownerLang];
   const [draft, setDraft] = useState<RetentionSettings | null>(conciergeState?.settings ?? null);
   const [previewLang, setPreviewLang] = useState<ClientPreferredLang>('en');
   const [savingSection, setSavingSection] = useState<'BIRTHDAY' | 'WINBACK' | 'REVIEW' | 'ALL' | null>(null);
@@ -338,7 +511,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
   const activeDir = PREVIEW_LANG_TABS.find((t) => t.id === previewLang)?.dir ?? 'ltr';
 
   return (
-    <div className="space-y-6 pb-28 min-w-0">
+    <div dir={isOwnerRtl ? 'rtl' : 'ltr'} className="space-y-6 pb-28 min-w-0">
       {savedBanner && (
         <div className="rounded-xl border border-[#116329] bg-[#0D3822] px-4 py-3 text-xs font-mono text-[#3FB950] flex items-center gap-2">
           <CheckCircle2 className="size-4 shrink-0" />
@@ -355,17 +528,17 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             <div className="flex flex-wrap items-center gap-2">
               <Globe className="size-4 text-[#06B6D4] shrink-0" />
               <h3 className="text-base font-bold text-[#F0F6FC]">
-                1. Region-Aware Language Selector Menu
+                {rUi.mod1Title}
               </h3>
             </div>
             <p className="text-xs text-[#8B949E] font-sans">
-              Auto-detects your salon&apos;s region from registered WhatsApp number{' '}
-              <span className="font-mono text-[#F0F6FC]">{draft.whatsappPhone}</span> and presents the regional language selector on initial &ldquo;Hi&rdquo; / greeting, locking <code className="font-mono text-[#06B6D4]">preferred_language</code>.
+              {rUi.mod1Desc}{' '}
+              <span dir="ltr" className="font-mono text-[#F0F6FC] inline-block">{draft.whatsappPhone}</span>
             </p>
           </div>
           <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 shrink-0">
-            <span className="text-[10px] font-mono text-[#8B949E] uppercase block">Detected Region</span>
-            <span className="text-xs font-mono font-bold text-[#06B6D4]">
+            <span className="text-[10px] font-mono text-[#8B949E] uppercase block">{rUi.detectedRegion}</span>
+            <span dir="ltr" className="text-xs font-mono font-bold text-[#06B6D4] inline-block">
               {conciergeState.regionLabel}
             </span>
           </div>
@@ -375,7 +548,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
             <span className="text-[11px] font-mono font-bold uppercase text-[#8B949E] block">
-              Active Regional Greeting Options ({conciergeState.region})
+              {rUi.activeOptions} ({conciergeState.region})
             </span>
             <div className="flex flex-wrap gap-2">
               {conciergeState.languageOptions.map((opt) => (
@@ -399,22 +572,24 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           {/* Interactive Greeting & Lock Tester */}
           <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
             <span className="text-[11px] font-mono font-bold uppercase text-[#D29922] block">
-              Live Greeting Menu &amp; Lock Simulator
+              {rUi.simulatorTitle}
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <input
                 type="text"
+                dir="ltr"
                 value={simClientName}
                 onChange={(e) => setSimClientName(e.target.value)}
                 placeholder="Client Name"
-                className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+                className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
               />
               <input
                 type="text"
+                dir="ltr"
                 value={simClientPhone}
                 onChange={(e) => setSimClientPhone(e.target.value)}
                 placeholder="+92 301 5559012"
-                className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+                className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
               />
             </div>
             <div className="flex flex-wrap gap-2">
@@ -425,7 +600,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
                 className="min-h-[48px] flex-1 rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase transition flex items-center justify-center gap-1.5"
               >
                 <Send className="size-3.5" />
-                <span>1. Send &ldquo;Hi&rdquo; Greeting</span>
+                <span>{rUi.sendHiBtn}</span>
               </button>
               {conciergeState.languageOptions.map((opt) => (
                 <button
@@ -468,11 +643,11 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             <div className="flex items-center gap-2">
               <Cake className="size-4 text-[#D29922] shrink-0" />
               <h3 className="text-base font-bold text-[#F0F6FC]">
-                2. Retention &amp; Rewards · 9:00 AM Birthday &amp; Event Offers
+                {rUi.mod2Title}
               </h3>
             </div>
             <p className="text-xs text-[#8B949E] font-sans">
-              Dispatches automatically at 9:00 AM (salon local time) in each client&apos;s locked <code className="font-mono text-[#06B6D4]">preferred_language</code> when <code className="font-mono text-[#06B6D4]">birth_date</code> (Day/Month) matches.
+              {rUi.mod2Desc}
             </p>
           </div>
 
@@ -485,7 +660,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
                 : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
             }`}
           >
-            {draft.birthdayEnabled ? 'Birthday / Event Offer: ON' : 'Birthday / Event Offer: OFF'}
+            {draft.birthdayEnabled ? rUi.bdayOn : rUi.bdayOff}
           </button>
         </div>
 
@@ -752,7 +927,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] px-4 py-2 text-xs font-mono font-bold text-[#D29922] transition flex items-center gap-2"
           >
             <Play className="size-3.5" />
-            <span>Test 9:00 AM Birthday Dispatch Now</span>
+            <span>{rUi.test9amBtn}</span>
           </button>
 
           <button
@@ -762,7 +937,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-5 py-2 text-xs font-mono font-bold uppercase transition flex items-center gap-2"
           >
             {savingSection === 'BIRTHDAY' ? <RefreshCw className="size-4 animate-spin" /> : <Save className="size-4" />}
-            <span>Save Settings</span>
+            <span>{rUi.saveBtn}</span>
           </button>
         </div>
       </section>
@@ -776,11 +951,11 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             <div className="flex items-center gap-2">
               <Clock className="size-4 text-[#06B6D4] shrink-0" />
               <h3 className="text-base font-bold text-[#F0F6FC]">
-                3. Win-Back Rules · 30-Day Dormant Client Engine
+                {rUi.mod3Title}
               </h3>
             </div>
             <p className="text-xs text-[#8B949E] font-sans">
-              Monitors <code className="font-mono text-[#06B6D4]">last_completed_visit_at</code> across clients with no upcoming booking and sends a 1-tap rebooking offer at {draft.winbackDays} days.
+              {rUi.mod3Desc} ({draft.winbackDays}d)
             </p>
           </div>
 
@@ -793,7 +968,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
                 : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
             }`}
           >
-            {draft.winbackEnabled ? '30-Day Win-Back: ON' : '30-Day Win-Back: OFF'}
+            {draft.winbackEnabled ? rUi.winbackOn : rUi.winbackOff}
           </button>
         </div>
 
@@ -1031,11 +1206,11 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             <div className="flex items-center gap-2">
               <Star className="size-4 text-[#D29922] shrink-0" />
               <h3 className="text-base font-bold text-[#F0F6FC]">
-                4. Post-Service Google Review &amp; Rating Booster (T+2 Hours)
+                {rUi.mod4Title}
               </h3>
             </div>
             <p className="text-xs text-[#8B949E] font-sans">
-              Dispatches 2 hours after an appointment reaches <code className="font-mono text-[#3FB950]">COMPLETED</code>. Routes 4–5★ to Google Maps and intercepts 1–3★ privately with an <code className="font-mono text-[#F85149]">OWNER_INTERVENTION_NEEDED</code> alert.
+              {rUi.mod4Desc}
             </p>
           </div>
 
@@ -1048,21 +1223,22 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
                 : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
             }`}
           >
-            {draft.reviewBoosterEnabled ? 'T+2h Booster: ON' : 'T+2h Booster: OFF'}
+            {draft.reviewBoosterEnabled ? rUi.boosterOn : rUi.boosterOff}
           </button>
         </div>
 
         <label className="space-y-1.5 block">
           <span className="text-xs font-mono text-[#8B949E] flex items-center gap-1.5">
             <Link2 className="size-3.5 text-[#06B6D4]" />
-            <span>Direct Google Review URL (google_review_url)</span>
+            <span>{rUi.googleUrlLabel}</span>
           </span>
           <input
             type="url"
+            dir="ltr"
             value={draft.googleReviewUrl}
             onChange={(e) => setDraft({ ...draft, googleReviewUrl: e.target.value })}
             placeholder="https://g.page/r/your-salon/review"
-            className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono text-[#06B6D4] break-all focus:border-[#06B6D4] focus:outline-none"
+            className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#06B6D4] break-all focus:border-[#06B6D4] focus:outline-none"
           />
           <span className="text-[11px] font-mono text-[#8B949E] break-all block">
             Active Public Link (4–5★ only): {draft.googleReviewUrl}
@@ -1156,36 +1332,39 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           <div className="flex items-center gap-2">
             <UserPlus className="size-4 text-[#06B6D4]" />
             <h3 className="text-base font-bold text-[#F0F6FC]">
-              Client Retention Profiles (Birth Date &amp; Last Completed Visit)
+              {rUi.profilesTitle}
             </h3>
           </div>
           <span className="text-xs font-mono text-[#8B949E]">
-            {conciergeState.clients.length} Tracked Profiles
+            {conciergeState.clients.length} {rUi.trackedCount}
           </span>
         </div>
 
         <form onSubmit={handleSaveClientBirthDate} className="grid grid-cols-1 sm:grid-cols-5 gap-2.5">
           <input
             type="text"
+            dir="ltr"
             value={newBirthClientName}
             onChange={(e) => setNewBirthClientName(e.target.value)}
             placeholder="Client Name"
-            className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+            className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
           />
           <input
             type="text"
+            dir="ltr"
             required
             value={newBirthClientPhone}
             onChange={(e) => setNewBirthClientPhone(e.target.value)}
             placeholder="WhatsApp (+92...)"
-            className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm font-mono text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+            className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
           />
           <input
             type="text"
+            dir="ltr"
             value={newBirthDayMonth}
             onChange={(e) => setNewBirthDayMonth(e.target.value)}
             placeholder="Birth Date (DD/MM)"
-            className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm font-mono text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
+            className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-sm text-left [unicode-bidi:isolate] font-mono text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
           />
           <select
             value={newBirthLang}
@@ -1201,7 +1380,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             type="submit"
             className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 text-xs font-mono font-bold uppercase transition"
           >
-            Save Client Profile
+            {rUi.saveProfileBtn}
           </button>
         </form>
 
