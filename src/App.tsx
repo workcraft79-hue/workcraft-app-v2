@@ -20,6 +20,9 @@ import {
   Megaphone,
   SlidersHorizontal,
   LogOut,
+  Award,
+  Zap,
+  Moon,
 } from 'lucide-react';
 
 import type { AuthUser } from './types/auth';
@@ -132,7 +135,20 @@ export default function App() {
 
   // Founder Command Center Workspace Navigation
   const [activeTab, setActiveTab] = useState<TabName>('Overview');
-  const [salonOwnerSection, setSalonOwnerSection] = useState<'LIVE' | 'MANAGE'>('LIVE');
+  const [salonOwnerSection, setSalonOwnerSection] = useState<
+    'LIVE' | 'PASSES' | 'VOICE' | 'MANAGE'
+  >('LIVE');
+  const [ownerHardwareAction, setOwnerHardwareAction] = useState<{
+    type: 'WAKE' | 'AUX' | 'SLEEP';
+    seq: number;
+  } | null>(null);
+  const [ownerHardwareStatus, setOwnerHardwareStatus] = useState({
+    isWakeLockActive: false,
+    isLoudspeakerBoostActive: false,
+    isCounterSleeping: false,
+    overnightCount: 0,
+    hasFounderVoiceReply: false,
+  });
 
   const initialRoute = React.useMemo(() => getInitialRouteIntent(), []);
   const shouldStartPublicOnboarding = Boolean(
@@ -974,6 +990,29 @@ export default function App() {
                         ? 'الصالة المباشرة'
                         : 'Live Floor',
                     Icon: Scissors,
+                    badge: false,
+                  },
+                  {
+                    id: 'PASSES' as const,
+                    label:
+                      salonOwnerUiLang === 'ur'
+                        ? 'پاسز اور ایونٹس'
+                        : salonOwnerUiLang === 'ar'
+                        ? 'الباقات والمناسبات'
+                        : 'Passes & Events',
+                    Icon: Award,
+                    badge: false,
+                  },
+                  {
+                    id: 'VOICE' as const,
+                    label:
+                      salonOwnerUiLang === 'ur'
+                        ? 'وائس ہیلپ'
+                        : salonOwnerUiLang === 'ar'
+                        ? 'المساعدة الصوتية'
+                        : 'Voice Help',
+                    Icon: Mic,
+                    badge: ownerHardwareStatus.hasFounderVoiceReply,
                   },
                   {
                     id: 'MANAGE' as const,
@@ -984,8 +1023,9 @@ export default function App() {
                         ? 'الإدارة'
                         : 'Manage',
                     Icon: SlidersHorizontal,
+                    badge: false,
                   },
-                ].map(({ id, label, Icon }) => {
+                ].map(({ id, label, Icon, badge }) => {
                   const isActive = salonOwnerSection === id;
                   return (
                     <button
@@ -1004,9 +1044,110 @@ export default function App() {
                     >
                       <Icon className={`size-[17px] shrink-0 ${isActive ? 'text-[#06B6D4]' : 'text-[#D29922]'}`} />
                       <span>{label}</span>
+                      {badge && (
+                        <span className="ml-auto size-2.5 rounded-full bg-[#3FB950] shadow-[0_0_8px_#3FB950]" />
+                      )}
                     </button>
                   );
                 })}
+
+                {/* Counter Hardware Controls Drawer Section (Moved off Live Floor main header) */}
+                <div className="mt-4 pt-3 border-t border-[#21262D] space-y-1.5">
+                  <div className="px-1 text-[10px] font-mono font-bold uppercase tracking-[.2em] text-[#6E7681]">
+                    {salonOwnerUiLang === 'ur'
+                      ? 'کاؤنٹر کنٹرولز'
+                      : salonOwnerUiLang === 'ar'
+                      ? 'أدوات الكاونتر'
+                      : 'COUNTER CONTROLS'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOwnerHardwareAction((prev) => ({
+                        type: 'WAKE',
+                        seq: (prev?.seq || 0) + 1,
+                      }));
+                    }}
+                    className={`flex w-full min-h-[42px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] font-mono font-bold transition ${
+                      ownerHardwareStatus.isWakeLockActive
+                        ? 'border-[#3FB950]/50 bg-[#1B4332]/40 text-[#3FB950]'
+                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <Smartphone className="size-3.5 shrink-0" />
+                      <span className="truncate">
+                        {salonOwnerUiLang === 'ur'
+                          ? 'اسکرین آن رکھیں'
+                          : salonOwnerUiLang === 'ar'
+                          ? 'إبقاء الشاشة مضاءة'
+                          : 'Keep Screen Awake'}
+                      </span>
+                    </span>
+                    <span className="text-[9px] uppercase">
+                      {ownerHardwareStatus.isWakeLockActive ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOwnerHardwareAction((prev) => ({
+                        type: 'AUX',
+                        seq: (prev?.seq || 0) + 1,
+                      }));
+                    }}
+                    className={`flex w-full min-h-[42px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] font-mono font-bold transition ${
+                      ownerHardwareStatus.isLoudspeakerBoostActive
+                        ? 'border-[#D29922]/60 bg-[#4A320A]/40 text-[#D29922]'
+                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <Zap className="size-3.5 shrink-0" />
+                      <span className="truncate">
+                        {salonOwnerUiLang === 'ur'
+                          ? 'لاؤڈ اسپیکر بوسٹ'
+                          : salonOwnerUiLang === 'ar'
+                          ? 'مضخم السماعة AUX'
+                          : 'AUX Boost'}
+                      </span>
+                    </span>
+                    <span className="text-[9px] uppercase">
+                      {ownerHardwareStatus.isLoudspeakerBoostActive ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOwnerHardwareAction((prev) => ({
+                        type: 'SLEEP',
+                        seq: (prev?.seq || 0) + 1,
+                      }));
+                      setIsSidebarOpen(false);
+                    }}
+                    className={`flex w-full min-h-[42px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] font-mono font-bold transition ${
+                      ownerHardwareStatus.isCounterSleeping
+                        ? 'border-[#06B6D4]/60 bg-[#06B6D4]/15 text-[#06B6D4]'
+                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <Moon className="size-3.5 shrink-0" />
+                      <span className="truncate">
+                        {salonOwnerUiLang === 'ur'
+                          ? 'کاؤنٹر سلیپ موڈ'
+                          : salonOwnerUiLang === 'ar'
+                          ? 'وضع إغلاق الكاونتر'
+                          : 'Counter Sleep'}
+                      </span>
+                    </span>
+                    {ownerHardwareStatus.overnightCount > 0 && (
+                      <span className="rounded-full bg-[#06B6D4]/20 px-1.5 py-0.5 text-[9px] text-[#06B6D4]">
+                        {ownerHardwareStatus.overnightCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
               </>
             ) : (
               navItems.map(([name, Icon]) => {
@@ -1494,6 +1635,8 @@ export default function App() {
                     isFounderInspector={activeRole === 'FOUNDER'}
                     sectionMode={salonOwnerSection}
                     onSectionModeChange={setSalonOwnerSection}
+                    externalHardwareAction={ownerHardwareAction}
+                    onHardwareStatusSync={setOwnerHardwareStatus}
                     voiceThreads={voiceThreads}
                     onVoiceThreadsUpdated={setVoiceThreads}
                     onOwnerLangChange={setSalonOwnerUiLang}
@@ -1565,48 +1708,77 @@ export default function App() {
       >
         {activeRole === 'SALON_OWNER' && hasCompletedSalonOnboarding ? (
           <>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('Salon Owner Dashboard');
-                setSalonOwnerSection('LIVE');
-              }}
-              className={`flex min-h-[48px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-[10px] font-mono font-bold transition ${
-                salonOwnerSection === 'LIVE'
-                  ? 'text-[#06B6D4] bg-[#21262D]'
-                  : 'text-[#8B949E] hover:text-[#F0F6FC]'
-              }`}
-            >
-              <Scissors className="size-4" />
-              <span>
-                {salonOwnerUiLang === 'ur'
-                  ? 'لائیو فلور'
-                  : salonOwnerUiLang === 'ar'
-                  ? 'الصالة المباشرة'
-                  : 'Live Floor'}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('Salon Owner Dashboard');
-                setSalonOwnerSection('MANAGE');
-              }}
-              className={`flex min-h-[48px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-[10px] font-mono font-bold transition ${
-                salonOwnerSection === 'MANAGE'
-                  ? 'text-[#06B6D4] bg-[#21262D]'
-                  : 'text-[#8B949E] hover:text-[#F0F6FC]'
-              }`}
-            >
-              <SlidersHorizontal className="size-4" />
-              <span>
-                {salonOwnerUiLang === 'ur'
-                  ? 'مینج کریں'
-                  : salonOwnerUiLang === 'ar'
-                  ? 'الإدارة'
-                  : 'Manage'}
-              </span>
-            </button>
+            {[
+              {
+                id: 'LIVE' as const,
+                Icon: Scissors,
+                label:
+                  salonOwnerUiLang === 'ur'
+                    ? 'لائیو فلور'
+                    : salonOwnerUiLang === 'ar'
+                    ? 'الصالة'
+                    : 'Live Floor',
+                dot: false,
+              },
+              {
+                id: 'PASSES' as const,
+                Icon: Award,
+                label:
+                  salonOwnerUiLang === 'ur'
+                    ? 'پاسز'
+                    : salonOwnerUiLang === 'ar'
+                    ? 'الباقات'
+                    : 'Passes',
+                dot: false,
+              },
+              {
+                id: 'VOICE' as const,
+                Icon: Mic,
+                label:
+                  salonOwnerUiLang === 'ur'
+                    ? 'وائس ہیلپ'
+                    : salonOwnerUiLang === 'ar'
+                    ? 'الصوت'
+                    : 'Voice Help',
+                dot: ownerHardwareStatus.hasFounderVoiceReply,
+              },
+              {
+                id: 'MANAGE' as const,
+                Icon: SlidersHorizontal,
+                label:
+                  salonOwnerUiLang === 'ur'
+                    ? 'مینج'
+                    : salonOwnerUiLang === 'ar'
+                    ? 'الإدارة'
+                    : 'Manage',
+                dot: false,
+              },
+            ].map(({ id, Icon, label, dot }) => {
+              const isActive = salonOwnerSection === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('Salon Owner Dashboard');
+                    setSalonOwnerSection(id);
+                  }}
+                  className={`relative flex min-h-[48px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[10px] font-mono font-bold transition ${
+                    isActive
+                      ? 'text-[#06B6D4] bg-[#21262D]'
+                      : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                  }`}
+                >
+                  <div className="relative">
+                    <Icon className="size-4" />
+                    {dot && (
+                      <span className="absolute -right-1.5 -top-1 size-2 rounded-full bg-[#3FB950]" />
+                    )}
+                  </div>
+                  <span className="truncate max-w-full">{label}</span>
+                </button>
+              );
+            })}
           </>
         ) : (
           mobileNavItems.map(([name, Icon, label]) => {
