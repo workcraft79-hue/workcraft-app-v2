@@ -37,7 +37,7 @@ export interface VoiceTranslationResult {
   voiceName: string;
   audioBase64: string | null;
   audioMimeType: string;
-  translationSource: 'gemini-audio' | 'gemini-text' | 'error';
+  translationSource: 'gemini-audio' | 'gemini-text' | 'local-fallback' | 'error';
   translationError?: string;
   ttsSource: 'gemini-tts' | 'msedge-tts' | 'unavailable';
   ttsError?: string;
@@ -303,31 +303,38 @@ export async function transcribeChairIntentAudio(
       ? 'Expected language: Arabic / English barber names & time durations.'
       : 'Expected language: English barber names & time durations.';
 
-  try {
-    const response = await withTimeout(
-      ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                mimeType: cleanAudioMime,
-                data: cleanAudioBase64,
+  for (const modelName of ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'] as const) {
+    try {
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: modelName,
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: cleanAudioMime,
+                  data: cleanAudioBase64,
+                },
               },
-            },
-            {
-              text: `Transcribe this short salon chair lock voice command verbatim (e.g., "Aslam 30 minutes" or "Hamza 7 to 8 PM"). ${hint} Return ONLY the concise spoken phrase.`,
-            },
-          ],
-        },
-      }),
-      15000,
-      'Chair lock audio'
-    );
-    return { transcript: (response.text ?? '').trim() };
-  } catch (err) {
-    return { transcript: '', error: formatGeminiError(err) };
+              {
+                text: `Transcribe this short salon chair lock voice command verbatim, keeping BOTH the barber/staff person name AND the exact start/end time or duration (e.g., "Mr. Zia 2:00 PM to 3:00 PM" or "Aslam 30 minutes"). ${hint} Return ONLY the concise spoken phrase.`,
+              },
+            ],
+          },
+        }),
+        15000,
+        'Chair lock audio'
+      );
+      const outText = (response.text ?? '').trim();
+      if (outText) return { transcript: outText };
+    } catch (err) {
+      const formatted = formatGeminiError(err);
+      if (modelName === 'gemini-3.1-flash-lite') {
+        return { transcript: '', error: formatted };
+      }
+    }
   }
+  return { transcript: '', error: 'Could not transcribe chair lock audio.' };
 }
 
 export async function translateAndSynthesizeVoice(
@@ -349,6 +356,22 @@ export async function translateAndSynthesizeVoice(
 
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
   if (!apiKey) {
+    if (cleanText && !cleanAudioBase64) {
+      const edgeTts = await synthesizeEdgeTtsInMemory(cleanText, targetLocale);
+      return {
+        transcript: cleanText,
+        detectedInputLanguage: detectTextLanguageLabel(cleanText),
+        targetLocale,
+        targetDialect,
+        translatedText: cleanText,
+        voiceName: edgeTts.voiceName,
+        audioBase64: edgeTts.audioBase64,
+        audioMimeType: 'audio/mpeg',
+        translationSource: 'local-fallback',
+        ttsSource: edgeTts.ttsSource,
+        ttsError: edgeTts.ttsError,
+      };
+    }
     return {
       transcript: cleanText,
       detectedInputLanguage: cleanText ? detectTextLanguageLabel(cleanText) : 'Audio',
@@ -390,7 +413,7 @@ export async function translateAndSynthesizeVoice(
   let lastErrorMsg = '';
 
   // Single-pass multimodal transcription + translation (1 Gemini call instead of 3 -> 3x lower quota burn & much faster)
-  const translationModels = ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+  const translationModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
   for (const modelName of translationModels) {
     try {
       const hasAudio = Boolean(cleanAudioBase64);
@@ -483,6 +506,22 @@ Original message: "${finalTranscript}"`;
   }
 
   if (!translationSucceeded || !finalTranslated) {
+    if (cleanText && !cleanAudioBase64) {
+      const edgeTts = await synthesizeEdgeTtsInMemory(cleanText, targetLocale);
+      return {
+        transcript: cleanText,
+        detectedInputLanguage,
+        targetLocale,
+        targetDialect,
+        translatedText: cleanText,
+        voiceName: edgeTts.voiceName,
+        audioBase64: edgeTts.audioBase64,
+        audioMimeType: 'audio/mpeg',
+        translationSource: 'local-fallback',
+        ttsSource: edgeTts.ttsSource,
+        ttsError: edgeTts.ttsError || lastErrorMsg,
+      };
+    }
     return {
       transcript: finalTranscript,
       detectedInputLanguage,
