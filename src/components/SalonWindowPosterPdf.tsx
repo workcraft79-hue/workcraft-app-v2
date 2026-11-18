@@ -40,11 +40,11 @@ const POSTER_PHRASES: Record<
     badgeLadies: 'Ladies Beauty Parlor · WhatsApp Enabled',
     headline: 'Respected Customer — Book 24/7 on WhatsApp!',
     phrase:
-      'Respected Customer, we are using the WorkCraft WhatsApp Concierge Service. Simply scan the QR code above or send "Hi" to our WhatsApp number to book your appointment, choose your barber or stylist, check service prices, and receive VIP deals anytime.',
+      'Respected Customer, enjoy our 24/7 Automated WhatsApp Service! Scan the QR code above or send "Hi" in English, Urdu, or Arabic to book anytime with zero counter wait—choose your favorite stylist or barber, check live service menus and prices, unlock bridal, Eid, birthday & prepaid session deals, and receive instant reminders.',
     steps: [
-      '1. Scan QR or message our WhatsApp',
-      '2. Pick services, stylist & time slot',
-      '3. Get instant WhatsApp confirmation',
+      '1. Scan QR or message our WhatsApp 24/7',
+      '2. Pick services, stylist & live open slot',
+      '3. Skip waiting · Get VIP deals & reminders',
     ],
   },
   ur: {
@@ -56,11 +56,11 @@ const POSTER_PHRASES: Record<
     badgeLadies: 'لیڈیز بیوٹی پارلر · واٹس ایپ خودکار بکنگ',
     headline: 'معزز کسٹمر — اب 24 گھنٹے واٹس ایپ پر فوری بکنگ!',
     phrase:
-      'معزز کسٹمر، ہم جدید WorkCraft واٹس ایپ آٹومیٹک بکنگ سروس استعمال کر رہے ہیں۔ اوپر دیا گیا کیو آر کوڈ اسکین کریں یا ہمارے واٹس ایپ نمبر پر میسج کریں اور آسانی سے اپنی اپائنٹمنٹ بک کریں، اپنا اسٹائلسٹ منتخب کریں، تمام سروسز کے ریٹ چیک کریں اور خصوصی ڈیلز حاصل کریں۔',
+      'معزز کسٹمر، اب 24 گھنٹے واٹس ایپ خودکار بکنگ سہولت استعمال کریں! اوپر دیا گیا کیو آر کوڈ اسکین کریں یا میسج بھیجیں—اردو، عربی یا انگلش میں فوری جواب پائیں، بغیر انتظار اپنا پسندیدہ اسٹائلسٹ اور وقت منتخب کریں، تمام سروسز اور پرائیویٹ کیبن ریٹس دیکھیں، عید، برتھ ڈے، سیشن پاس ڈیلز اور خودکار ریمائنڈرز حاصل کریں۔',
     steps: [
       '1۔ کیو آر اسکین کریں یا واٹس ایپ پر میسج کریں',
-      '2۔ سروسز، اسٹائلسٹ اور وقت منتخب کریں',
-      '3۔ فوری واٹس ایپ کنفرمیشن حاصل کریں',
+      '2۔ سروسز، اسٹائلسٹ اور لائیو ٹائم منتخب کریں',
+      '3۔ انتظار سے بچیں · وی آئی پی ڈیلز اور ریمائنڈر پائیں',
     ],
   },
   ar: {
@@ -72,11 +72,11 @@ const POSTER_PHRASES: Record<
     badgeLadies: 'صالون تجميل نسائي · الحجز الذكي عبر واتساب',
     headline: 'عميلنا العزيز — احجز موعدك فوراً عبر واتساب ٢٤/٧!',
     phrase:
-      'عميلنا العزيز، نحن نستخدم خدمة الحجز التلقائي من WorkCraft عبر واتساب. ما عليك سوى مسح رمز الاستجابة السريعة (QR) أعلاه أو إرسال رسالة إلى رقم الواتساب الخاص بنا لحجز موعدك بسهولة، واختيار المصفف المفضل، ومعرفة الأسعار، والحصول على عروض VIP الحصرية في أي وقت.',
+      'عميلنا العزيز، استمتع بخدمة واتساب الذكية على مدار ٢٤ ساعة! امسح رمز QR أعلاه أو أرسل رسالة بالعربية أو الإنجليزية أو الأردية لحجز موعدك فوراً دون انتظار، اختيار مصففك المفضل، استعراض قائمة الأسعار والباقات الخاصة، الاستفادة من عروض المناسبات وأعياد الميلاد وتنبيهات المواعيد التلقائية.',
     steps: [
-      '١. امسح رمز QR أو راسلنا على واتساب',
-      '٢. اختر الخدمات والمصفف والوقت المناسب',
-      '٣. احصل على تأكيد فوري لموعدك على واتساب',
+      '١. امسح رمز QR أو راسلنا على واتساب ٢٤/٧',
+      '٢. اختر الخدمات والمصفف والوقت المتاح فوراً',
+      '٣. احصل على تأكيد فوري وعروض VIP وتذكير تلقائي',
     ],
   },
 };
@@ -218,15 +218,28 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
         });
 
       const loadExternalSafe = async (url: string): Promise<HTMLImageElement | null> => {
-        try {
-          const res = await fetch(url, { mode: 'cors' });
-          if (!res.ok) return null;
-          const blob = await res.blob();
-          tempObjectUrl = URL.createObjectURL(blob);
-          return await loadDataUrlImage(tempObjectUrl);
-        } catch {
-          return null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch(url, { mode: 'cors', cache: 'no-cache' });
+            if (res.ok) {
+              const blob = await res.blob();
+              tempObjectUrl = URL.createObjectURL(blob);
+              const img = await loadDataUrlImage(tempObjectUrl);
+              if (img) return img;
+            }
+          } catch {
+            // Try direct crossOrigin Image load on second attempt
+          }
+          const direct = await new Promise<HTMLImageElement | null>((resolve) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => resolve(img);
+            img.onerror = () => resolve(null);
+            img.src = url;
+          });
+          if (direct) return direct;
         }
+        return null;
       };
 
       const resolvedQrUrl =
@@ -242,21 +255,11 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
         loadDataUrlImage(resolvedQrUrl),
       ]);
 
-      // Top-Left Enlarged Bold WorkCraft Logo Only (Separate watermark removed)
+      // Top-Left Original Pure-Transparent WorkCraft Logo Only (Zero redesign or replacement)
       ctx.direction = 'ltr';
       ctx.textAlign = 'left';
       if (logoImg) {
-        ctx.drawImage(logoImg, 84, 72, 168, 168);
-      } else {
-        ctx.fillStyle = '#D9A441';
-        ctx.beginPath();
-        ctx.arc(168, 156, 68, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#12241C';
-        ctx.font = '900 54px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('WC', 168, 174);
-        ctx.textAlign = 'left';
+        ctx.drawImage(logoImg, 84, 72, 176, 176);
       }
 
       // Top-Right QR Code Card + Salon Owner WhatsApp Number (Always Top-Right & LTR)
@@ -323,10 +326,10 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
         }
       }
 
-      // 4. CENTER VISUAL HIGHLIGHT (CLEAN STEPS WITHOUT INNER BOXES)
-      const stepsY = isA4 ? 545 : 495;
-      ctx.strokeStyle = 'rgba(217, 164, 65, 0.35)';
-      ctx.lineWidth = 2;
+      // 4. CENTER VISUAL HIGHLIGHT (BALANCED GLASS-DOOR DENSITY FOR A4 & A5)
+      const stepsY = isA4 ? 510 : 472;
+      ctx.strokeStyle = 'rgba(217, 164, 65, 0.45)';
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(84, stepsY);
       ctx.lineTo(canvas.width - 84, stepsY);
@@ -335,25 +338,25 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
       ctx.textAlign = 'center';
       ctx.direction = copy.isRtl ? 'rtl' : 'ltr';
       ctx.fillStyle = '#D9A441';
-      ctx.font = 'bold 30px sans-serif';
-      ctx.fillText(copy.headline, canvas.width / 2, stepsY + 56);
+      ctx.font = isA4 ? 'bold 34px sans-serif' : 'bold 28px sans-serif';
+      ctx.fillText(copy.headline, canvas.width / 2, stepsY + 60);
 
-      const stepColW = (canvas.width - 200) / 3;
+      const stepColW = (canvas.width - 180) / 3;
       copy.steps.forEach((stepText, idx) => {
-        const sx = 100 + idx * stepColW + stepColW / 2;
+        const sx = 90 + idx * stepColW + stepColW / 2;
         const sy = stepsY + (isA4 ? 124 : 106);
         ctx.fillStyle = '#F5F2E9';
-        ctx.font = 'bold 21px sans-serif';
-        const sLines = wrapCanvasText(ctx, stepText, stepColW - 28);
+        ctx.font = isA4 ? 'bold 23px sans-serif' : 'bold 20px sans-serif';
+        const sLines = wrapCanvasText(ctx, stepText, stepColW - 24);
         sLines.slice(0, 2).forEach((sl, li) => {
-          ctx.fillText(sl, sx, sy + li * 30);
+          ctx.fillText(sl, sx, sy + li * 32);
         });
       });
 
-      // 5. BOTTOM CUSTOMER ANNOUNCEMENT PHRASE (CLEAN TYPOGRAPHY, NO BORDERED BOX)
-      const bottomSectionY = isA4 ? 850 : 720;
-      ctx.strokeStyle = 'rgba(217, 164, 65, 0.35)';
-      ctx.lineWidth = 2;
+      // 5. BOTTOM CUSTOMER ANNOUNCEMENT PHRASE (FULL, CRISP READABILITY FOR A4 DOOR GLASS & A5 PAMPHLET)
+      const bottomSectionY = isA4 ? 760 : 665;
+      ctx.strokeStyle = 'rgba(217, 164, 65, 0.45)';
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(84, bottomSectionY);
       ctx.lineTo(canvas.width - 84, bottomSectionY);
@@ -362,28 +365,28 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
       ctx.textAlign = 'center';
       ctx.direction = copy.isRtl ? 'rtl' : 'ltr';
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = isA4 ? '600 35px sans-serif' : '600 26px sans-serif';
-      const phraseLines = wrapCanvasText(ctx, copy.phrase, canvas.width - 220);
-      const lineSpacing = isA4 ? 56 : 40;
-      const availableBottomH = canvas.height - 150 - bottomSectionY;
+      ctx.font = isA4 ? '600 37px sans-serif' : '600 26px sans-serif';
+      const phraseLines = wrapCanvasText(ctx, copy.phrase, canvas.width - 180);
+      const lineSpacing = isA4 ? 58 : 39;
+      const availableBottomH = canvas.height - 155 - bottomSectionY;
       let phraseStartY =
         bottomSectionY +
-        Math.max(84, (availableBottomH - phraseLines.length * lineSpacing) / 2);
+        Math.max(76, (availableBottomH - phraseLines.length * lineSpacing) / 2);
 
       for (const line of phraseLines) {
         ctx.fillText(line, canvas.width / 2, phraseStartY);
         phraseStartY += lineSpacing;
       }
 
-      // Bottom Footer Brand & Number Strip (Always LTR)
+      // Bottom Footer: Matching Golden Salon WhatsApp Number Only (Powered by WorkCraft Removed)
       ctx.direction = 'ltr';
       ctx.textAlign = 'center';
-      ctx.fillStyle = '#00FFFF';
-      ctx.font = 'bold 22px monospace';
+      ctx.fillStyle = '#D9A441';
+      ctx.font = isA4 ? 'bold 28px monospace' : 'bold 23px monospace';
       ctx.fillText(
-        `WhatsApp: ${whatsappNumber}  ·  Powered by WorkCraft`,
+        `WhatsApp: ${whatsappNumber}`,
         canvas.width / 2,
-        canvas.height - 96
+        canvas.height - 86
       );
 
       // Export Canvas to Real Downloadable PDF
@@ -542,7 +545,8 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
               <div className="inline-flex items-center">
                 <img
                   src={LOGO_URL}
-                  alt="WorkCraft"
+                  alt="WorkCraft Transparent Logo"
+                  crossOrigin="anonymous"
                   className="size-24 sm:size-28 object-contain drop-shadow-[0_4px_14px_rgba(217,164,65,0.45)]"
                 />
               </div>
@@ -590,9 +594,9 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
             </div>
           </div>
 
-          {/* MIDDLE 3-STEP CLIENT GUIDE (CLEAN UNBOXED FLOW) */}
-          <div className="border-t border-[#D9A441]/30 pt-4 space-y-3">
-            <p dir={copy.isRtl ? 'rtl' : 'ltr'} className="text-center text-sm font-bold text-[#D9A441]">
+          {/* MIDDLE 3-STEP CLIENT GUIDE (BALANCED A4 & A5 DOOR-GLASS DENSITY) */}
+          <div className="border-t border-[#D9A441]/35 pt-4 space-y-3">
+            <p dir={copy.isRtl ? 'rtl' : 'ltr'} className="text-center text-base font-bold text-[#D9A441]">
               {copy.headline}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-center">
@@ -600,7 +604,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
                 <p
                   key={stepText}
                   dir={copy.isRtl ? 'rtl' : 'ltr'}
-                  className="px-2 py-1.5 text-xs font-semibold text-[#F5F2E9]"
+                  className="px-2 py-1.5 text-xs sm:text-sm font-semibold text-[#F5F2E9]"
                 >
                   {stepText}
                 </p>
@@ -608,19 +612,23 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
             </div>
           </div>
 
-          {/* BOTTOM SECTION: CLEAN ANNOUNCEMENT PHRASE WITHOUT OUTER BORDER BOX */}
+          {/* BOTTOM SECTION: FULL SERVICES VALUE PARAGRAPH + GOLDEN WHATSAPP NUMBER (NO POWERED BY WORKCRAFT) */}
           <div
             dir={copy.isRtl ? 'rtl' : 'ltr'}
-            className="border-t border-[#D9A441]/30 pt-4 text-center space-y-2.5"
+            className="border-t border-[#D9A441]/35 pt-4 text-center space-y-3"
           >
-            <p className="text-sm sm:text-base font-semibold text-white leading-relaxed font-sans">
+            <p
+              className={`font-semibold text-white leading-relaxed font-sans ${
+                posterFormat === 'WINDOW_A4' ? 'text-base sm:text-lg' : 'text-sm sm:text-base'
+              }`}
+            >
               {copy.phrase}
             </p>
             <p
               dir="ltr"
-              className="text-[11px] font-mono font-bold text-[#00FFFF] pt-1"
+              className="text-sm font-mono font-black text-[#D9A441] pt-1 tracking-tight"
             >
-              WhatsApp: {whatsappNumber} · Powered by WorkCraft
+              WhatsApp: {whatsappNumber}
             </p>
           </div>
         </div>
