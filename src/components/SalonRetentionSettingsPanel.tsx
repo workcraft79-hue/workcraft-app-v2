@@ -57,6 +57,16 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
   const [previewLang, setPreviewLang] = useState<ClientPreferredLang>('en');
   const [savingSection, setSavingSection] = useState<'BIRTHDAY' | 'WINBACK' | 'REVIEW' | 'ALL' | null>(null);
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
+  const isDirtyRef = React.useRef<boolean>(false);
+  const hydratedSalonIdRef = React.useRef<string | null>(null);
+
+  const updateDraft = (updater: RetentionSettings | ((prev: RetentionSettings) => RetentionSettings)) => {
+    isDirtyRef.current = true;
+    setDraft((prev) => {
+      if (!prev) return null;
+      return typeof updater === 'function' ? updater(prev) : updater;
+    });
+  };
 
   // Module 1 Interactive Greeting Simulator
   const [simClientPhone, setSimClientPhone] = useState('+92 301 5559012');
@@ -84,10 +94,17 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
   } | null>(null);
 
   useEffect(() => {
-    if (conciergeState?.settings) {
+    if (!conciergeState?.settings) return;
+    if (hydratedSalonIdRef.current !== salonId) {
+      hydratedSalonIdRef.current = salonId;
+      isDirtyRef.current = false;
+      setDraft(conciergeState.settings);
+      return;
+    }
+    if (!isDirtyRef.current) {
       setDraft(conciergeState.settings);
     }
-  }, [conciergeState?.settings]);
+  }, [conciergeState?.settings, salonId]);
 
   if (!draft || !conciergeState) {
     return (
@@ -107,9 +124,13 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
       });
       if (!res.ok) throw new Error('Failed to save settings');
       const updated = (await res.json()) as SalonConciergeStateResponse;
+      isDirtyRef.current = false;
+      if (updated.settings) {
+        setDraft(updated.settings);
+      }
       onStateUpdated(updated);
       const labelMap = {
-        BIRTHDAY: 'Retention & 9:00 AM Birthday Offer settings saved.',
+        BIRTHDAY: 'Retention & Event Offer settings saved.',
         WINBACK: '30-Day Dormant Win-Back settings saved.',
         REVIEW: 'Post-Service Google Review URL & Booster settings saved.',
         ALL: 'All Salon Concierge & Retention settings saved.',
@@ -248,16 +269,17 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
     ]
       .filter(Boolean)
       .join(' + ');
-    const summary = offerParts || 'VIP Chair Priority';
+    const eventTitle = draft.birthdayEventName?.trim() || 'Special Event';
+    const summary = `${eventTitle}: ${offerParts || 'VIP Chair Priority'}`;
 
     if (lang === 'roman_ur') {
-      return `Happy Birthday Bilal! ${salonName} ki taraf se aap ko bohat mubarakbad. Aaj subah 9:00 AM offer: ${summary}. Appointment book karne ke liye reply karein!`;
+      return `Salam Bilal! ${salonName} ki taraf se ${eventTitle} par aap ke liye khas offer: ${offerParts || 'VIP Chair Priority'}. Appointment book karne ke liye reply karein!`;
     }
     if (lang === 'ur') {
-      return `سالگرہ مبارک بلال! ${salonName} کی طرف سے دلی مبارکباد۔ آج صبح 9:00 بجے کی خصوصی آفر: ${summary}۔ بکنگ کے لیے جواب دیں!`;
+      return `سلام بلال! ${salonName} کی طرف سے ${eventTitle} پر آپ کے لیے خصوصی آفر: ${offerParts || 'VIP ترجیح'}۔ بکنگ کے لیے جواب دیں!`;
     }
     if (lang === 'ar') {
-      return `عيد ميلاد سعيد يا بلال! تهنئة من ${salonName}. عرض الساعة 9:00 صباحاً الخاص بك: ${summary}. أرسل لتأكيد موعدك!`;
+      return `مرحباً بلال! عرض خاص من ${salonName} بمناسبة ${eventTitle}: ${offerParts || 'أولوية VIP'}. أرسل لتأكيد موعدك!`;
     }
     return draft.birthdayMessageTemplate
       .replace(/\{client_name\}/g, 'Bilal')
@@ -266,12 +288,16 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
   };
 
   const formatWinBackPreview = (lang: ClientPreferredLang): string => {
-    const offer = [
-      draft.winbackDiscountPct > 0 ? `${draft.winbackDiscountPct}% OFF` : '',
-      draft.winbackAddonService.trim(),
-    ]
-      .filter(Boolean)
-      .join(' + ');
+    const offer =
+      [
+        draft.winbackDiscountPct > 0 ? `${draft.winbackDiscountPct}% OFF` : '',
+        (draft.winbackFixedDiscount ?? 0) > 0
+          ? `${draft.currencySymbol}${Number(draft.winbackFixedDiscount).toLocaleString()} OFF`
+          : '',
+        draft.winbackAddonService.trim(),
+      ]
+        .filter(Boolean)
+        .join(' + ') || 'VIP Offer';
 
     if (lang === 'roman_ur') {
       return `Assalamu Alaikum Fahad! Hum ne aap ko ${salonName} par miss kiya (${draft.winbackDays} din ho gaye). Wapis aayein aur paayein: ${offer}. 1-tap booking ke liye "REBOOK" reply karein!`;
@@ -286,7 +312,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
       .replace(/\{client_name\}/g, 'Fahad')
       .replace(/\{salon_name\}/g, salonName)
       .replace(/\{days\}/g, String(draft.winbackDays))
-      .replace(/\{offer_summary\}/g, offer || 'VIP Offer');
+      .replace(/\{offer_summary\}/g, offer);
     return `${base} Reply "REBOOK" for 1-tap instant rebooking!`;
   };
 
@@ -452,85 +478,105 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
 
           <button
             type="button"
-            onClick={() => setDraft({ ...draft, birthdayEnabled: !draft.birthdayEnabled })}
+            onClick={() => updateDraft({ ...draft, birthdayEnabled: !draft.birthdayEnabled })}
             className={`min-h-[48px] rounded-xl border px-4 py-2 text-xs font-mono font-bold uppercase transition shrink-0 ${
               draft.birthdayEnabled
                 ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
                 : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
             }`}
           >
-            {draft.birthdayEnabled ? 'Birthday Auto-Offer: ON' : 'Birthday Auto-Offer: OFF'}
+            {draft.birthdayEnabled ? 'Birthday / Event Offer: ON' : 'Birthday / Event Offer: OFF'}
           </button>
         </div>
 
         {(() => {
+          const hasPct = draft.birthdayDiscountPct > 0;
+          const hasFixed = draft.birthdayFixedDiscount > 0;
+          const hasGift = draft.birthdayGiftService.trim().length > 0;
+          const activeCount = [hasPct, hasFixed, hasGift].filter(Boolean).length;
           const offerMode: 'PCT' | 'FIXED' | 'GIFT' | 'COMBO' =
-            draft.birthdayDiscountPct > 0 && draft.birthdayFixedDiscount > 0
+            activeCount > 1
               ? 'COMBO'
-              : draft.birthdayDiscountPct > 0 && draft.birthdayGiftService.trim().length > 0
-              ? 'COMBO'
-              : draft.birthdayFixedDiscount > 0 && draft.birthdayGiftService.trim().length > 0
-              ? 'COMBO'
-              : draft.birthdayDiscountPct > 0
+              : hasPct
               ? 'PCT'
-              : draft.birthdayFixedDiscount > 0
+              : hasFixed
               ? 'FIXED'
               : 'GIFT';
 
           const setOfferMode = (mode: 'PCT' | 'FIXED' | 'GIFT' | 'COMBO') => {
             if (mode === 'PCT') {
-              setDraft({
+              updateDraft({
                 ...draft,
                 birthdayDiscountPct: draft.birthdayDiscountPct > 0 ? draft.birthdayDiscountPct : 20,
                 birthdayFixedDiscount: 0,
                 birthdayGiftService: '',
               });
             } else if (mode === 'FIXED') {
-              setDraft({
+              updateDraft({
                 ...draft,
                 birthdayDiscountPct: 0,
-                birthdayFixedDiscount: draft.birthdayFixedDiscount > 0 ? draft.birthdayFixedDiscount : (draft.currency === 'PKR' ? 500 : 10),
+                birthdayFixedDiscount:
+                  draft.birthdayFixedDiscount > 0
+                    ? draft.birthdayFixedDiscount
+                    : draft.currency === 'PKR'
+                    ? 500
+                    : 15,
                 birthdayGiftService: '',
               });
             } else if (mode === 'GIFT') {
-              setDraft({
+              updateDraft({
                 ...draft,
                 birthdayDiscountPct: 0,
                 birthdayFixedDiscount: 0,
-                birthdayGiftService: draft.birthdayGiftService.trim() || 'Free Deep Conditioning & Wash',
+                birthdayGiftService: draft.birthdayGiftService.trim() || 'Free Hair Oiling & Wash',
               });
             } else {
-              setDraft({
+              updateDraft({
                 ...draft,
-                birthdayDiscountPct: draft.birthdayDiscountPct > 0 ? draft.birthdayDiscountPct : 15,
-                birthdayFixedDiscount: draft.birthdayFixedDiscount > 0 ? draft.birthdayFixedDiscount : (draft.currency === 'PKR' ? 300 : 5),
-                birthdayGiftService: draft.birthdayGiftService.trim() || 'Complimentary Beard / Facial Care',
+                birthdayDiscountPct: draft.birthdayDiscountPct > 0 ? draft.birthdayDiscountPct : 20,
+                birthdayFixedDiscount:
+                  draft.birthdayFixedDiscount > 0
+                    ? draft.birthdayFixedDiscount
+                    : draft.currency === 'PKR'
+                    ? 300
+                    : 10,
+                birthdayGiftService: draft.birthdayGiftService.trim() || 'Free Complimentary Styling',
               });
             }
           };
 
           return (
             <div className="space-y-3">
-              {/* Offer Type Switcher */}
-              <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-[11px] font-mono font-bold uppercase text-[#06B6D4]">
-                    Select Offer Type (Birthday &amp; Special Events)
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
+              {/* Event Name + Single vs Combo Mode Selector */}
+              <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <label className="flex-1 space-y-1">
+                    <span className="text-[10px] font-mono font-bold uppercase text-[#8B949E] block">
+                      Event / Campaign Title (All Clients Receive This)
+                    </span>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={draft.birthdayEventName || ''}
+                      onChange={(e) => updateDraft({ ...draft, birthdayEventName: e.target.value })}
+                      placeholder="e.g. Birthday Special, Eid Deal, Party Makeup, Bridal Package"
+                      className="w-full min-h-[40px] rounded-lg border border-[#30363D] bg-[#161B22] px-3 text-xs text-left [unicode-bidi:isolate] font-mono font-bold text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-1.5 shrink-0">
                     {(
                       [
-                        { id: 'PCT', label: '% Discount' },
-                        { id: 'FIXED', label: `Fixed ${draft.currency}` },
-                        { id: 'GIFT', label: 'Service Gift' },
-                        { id: 'COMBO', label: 'Combo Offer' },
+                        { id: 'PCT', label: '% Only' },
+                        { id: 'FIXED', label: `${draft.currency} Cash Only` },
+                        { id: 'GIFT', label: 'Service Only' },
+                        { id: 'COMBO', label: 'Combo Mix' },
                       ] as const
                     ).map((m) => (
                       <button
                         key={m.id}
                         type="button"
                         onClick={() => setOfferMode(m.id)}
-                        className={`min-h-[38px] rounded-lg border px-2.5 py-1 text-[11px] font-mono font-bold transition ${
+                        className={`min-h-[40px] rounded-lg border px-2.5 py-1 text-[11px] font-mono font-bold transition ${
                           offerMode === m.id
                             ? 'border-[#06B6D4] bg-[#06B6D4]/15 text-[#06B6D4]'
                             : 'border-[#30363D] bg-[#161B22] text-[#8B949E] hover:text-[#F0F6FC]'
@@ -543,44 +589,49 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
                 </div>
 
                 {/* Quick Event Offer Presets */}
-                <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#21262D]">
-                  <span className="text-[10px] font-mono text-[#8B949E] mr-1">Event Presets:</span>
+                <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#21262D]">
+                  <span className="text-[10px] font-mono text-[#8B949E] mr-1">1-Tap Rules:</span>
                   {[
                     {
-                      label: '🎂 Birthday Default',
+                      label: '🎂 Birthday · 20% OFF Only',
+                      eventName: 'Birthday Special',
                       pct: 20,
                       fixed: 0,
-                      gift: 'Free Organic Hair Mask',
-                      tpl: 'Happy Birthday {client_name}! {salon_name} gifts you {offer_summary} on your special week.',
+                      gift: '',
+                      tpl: 'Happy Birthday {client_name}! {salon_name} gifts you {offer_summary} on your special day.',
                     },
                     {
-                      label: '🌙 Eid Mubarak Deal',
-                      pct: 15,
+                      label: '🌙 Eid Deal · Free Hair Oiling',
+                      eventName: 'Eid Mubarak Deal',
+                      pct: 0,
                       fixed: 0,
-                      gift: 'Free Charcoal Express Polish',
+                      gift: 'Free Hair Oiling Treatment',
                       tpl: 'Eid Mubarak {client_name}! Celebrate with {salon_name}: enjoy {offer_summary} this festive week.',
                     },
                     {
-                      label: '💐 Wedding / Party Glow',
+                      label: `💄 Party Makeup · ${draft.currencySymbol}500 OFF`,
+                      eventName: 'Party Makeup Offer',
                       pct: 0,
-                      fixed: draft.currency === 'PKR' ? 1000 : 15,
-                      gift: 'Complimentary Hair Styling Trial',
-                      tpl: 'Special invitation for {client_name} from {salon_name}: claim {offer_summary} for your upcoming event.',
+                      fixed: 500,
+                      gift: '',
+                      tpl: 'Special invitation for {client_name} from {salon_name}: enjoy {offer_summary} on your booking!',
                     },
                     {
-                      label: '⭐ VIP Appreciation',
-                      pct: 0,
-                      fixed: 0,
-                      gift: 'Complimentary Signature Facial / Beard Spa',
-                      tpl: 'Thank you for being a VIP client at {salon_name}, {client_name}! Your reward: {offer_summary}.',
+                      label: `👰 Groom & Bridal Combo · 20% + ${draft.currencySymbol}300 + Free Service`,
+                      eventName: 'Bridal & Groom Package',
+                      pct: 20,
+                      fixed: 300,
+                      gift: '1 Free Signature Service',
+                      tpl: 'Congratulations {client_name}! Claim your {offer_summary} at {salon_name}.',
                     },
                   ].map((preset) => (
                     <button
                       key={preset.label}
                       type="button"
                       onClick={() =>
-                        setDraft({
+                        updateDraft({
                           ...draft,
+                          birthdayEventName: preset.eventName,
                           birthdayDiscountPct: preset.pct,
                           birthdayFixedDiscount: preset.fixed,
                           birthdayGiftService: preset.gift,
@@ -596,41 +647,51 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <label className={`space-y-1.5 block ${offerMode !== 'PCT' && offerMode !== 'COMBO' ? 'opacity-50' : ''}`}>
-                  <span className="text-xs font-mono text-[#8B949E] block">Discount Percentage (%)</span>
+                <label className={`space-y-1.5 block ${!hasPct && offerMode !== 'COMBO' ? 'opacity-60' : ''}`}>
+                  <span className="text-xs font-mono text-[#8B949E] block">Discount Percentage (%) · 0 = Off</span>
                   <input
                     type="number"
                     dir="ltr"
                     min={0}
                     max={100}
                     value={draft.birthdayDiscountPct}
-                    onChange={(e) => setDraft({ ...draft, birthdayDiscountPct: Math.max(0, Number(e.target.value) || 0) })}
+                    onChange={(e) =>
+                      updateDraft({
+                        ...draft,
+                        birthdayDiscountPct: Math.max(0, Number(e.target.value) || 0),
+                      })
+                    }
                     className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
                   />
                 </label>
 
-                <label className={`space-y-1.5 block ${offerMode !== 'FIXED' && offerMode !== 'COMBO' ? 'opacity-50' : ''}`}>
+                <label className={`space-y-1.5 block ${!hasFixed && offerMode !== 'COMBO' ? 'opacity-60' : ''}`}>
                   <span className="text-xs font-mono text-[#8B949E] block">
-                    Fixed Discount ({draft.currency})
+                    Fixed Cash OFF ({draft.currency}) · 0 = Off
                   </span>
                   <input
                     type="number"
                     dir="ltr"
                     min={0}
                     value={draft.birthdayFixedDiscount}
-                    onChange={(e) => setDraft({ ...draft, birthdayFixedDiscount: Math.max(0, Number(e.target.value) || 0) })}
+                    onChange={(e) =>
+                      updateDraft({
+                        ...draft,
+                        birthdayFixedDiscount: Math.max(0, Number(e.target.value) || 0),
+                      })
+                    }
                     className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
                   />
                 </label>
 
-                <label className={`space-y-1.5 block ${offerMode !== 'GIFT' && offerMode !== 'COMBO' ? 'opacity-50' : ''}`}>
-                  <span className="text-xs font-mono text-[#8B949E] block">Complimentary Service Gift</span>
+                <label className={`space-y-1.5 block ${!hasGift && offerMode !== 'COMBO' ? 'opacity-60' : ''}`}>
+                  <span className="text-xs font-mono text-[#8B949E] block">Complimentary Free Service</span>
                   <input
                     type="text"
                     dir="ltr"
                     value={draft.birthdayGiftService}
-                    onChange={(e) => setDraft({ ...draft, birthdayGiftService: e.target.value })}
-                    placeholder="e.g. Free Organic Hair Mask"
+                    onChange={(e) => updateDraft({ ...draft, birthdayGiftService: e.target.value })}
+                    placeholder="Leave blank if no free service"
                     className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
                   />
                 </label>
@@ -646,7 +707,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           <textarea
             rows={2}
             value={draft.birthdayMessageTemplate}
-            onChange={(e) => setDraft({ ...draft, birthdayMessageTemplate: e.target.value })}
+            onChange={(e) => updateDraft({ ...draft, birthdayMessageTemplate: e.target.value })}
             className="w-full rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-sm text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
           />
         </label>
@@ -725,7 +786,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
 
           <button
             type="button"
-            onClick={() => setDraft({ ...draft, winbackEnabled: !draft.winbackEnabled })}
+            onClick={() => updateDraft({ ...draft, winbackEnabled: !draft.winbackEnabled })}
             className={`min-h-[48px] rounded-xl border px-4 py-2 text-xs font-mono font-bold uppercase transition shrink-0 ${
               draft.winbackEnabled
                 ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
@@ -736,42 +797,153 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <label className="space-y-1.5 block">
-            <span className="text-xs font-mono text-[#8B949E] block">Inactivity Trigger (Days)</span>
-            <input
-              type="number"
-              min={1}
-              max={365}
-              value={draft.winbackDays}
-              onChange={(e) => setDraft({ ...draft, winbackDays: Math.max(1, Number(e.target.value) || 30) })}
-              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono font-bold text-[#06B6D4] focus:border-[#06B6D4] focus:outline-none"
-            />
-          </label>
+        {(() => {
+          const wPct = draft.winbackDiscountPct > 0;
+          const wFixed = (draft.winbackFixedDiscount ?? 0) > 0;
+          const wSvc = draft.winbackAddonService.trim().length > 0;
+          const wCount = [wPct, wFixed, wSvc].filter(Boolean).length;
+          const wMode: 'PCT' | 'FIXED' | 'GIFT' | 'COMBO' =
+            wCount > 1 ? 'COMBO' : wPct ? 'PCT' : wFixed ? 'FIXED' : 'GIFT';
 
-          <label className="space-y-1.5 block">
-            <span className="text-xs font-mono text-[#8B949E] block">Win-Back Discount (%)</span>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={draft.winbackDiscountPct}
-              onChange={(e) => setDraft({ ...draft, winbackDiscountPct: Math.max(0, Number(e.target.value) || 0) })}
-              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono font-bold text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
-            />
-          </label>
+          const setWinbackMode = (mode: 'PCT' | 'FIXED' | 'GIFT' | 'COMBO') => {
+            if (mode === 'PCT') {
+              updateDraft({
+                ...draft,
+                winbackDiscountPct: draft.winbackDiscountPct > 0 ? draft.winbackDiscountPct : 15,
+                winbackFixedDiscount: 0,
+                winbackAddonService: '',
+              });
+            } else if (mode === 'FIXED') {
+              updateDraft({
+                ...draft,
+                winbackDiscountPct: 0,
+                winbackFixedDiscount:
+                  (draft.winbackFixedDiscount ?? 0) > 0
+                    ? draft.winbackFixedDiscount
+                    : draft.currency === 'PKR'
+                    ? 500
+                    : 10,
+                winbackAddonService: '',
+              });
+            } else if (mode === 'GIFT') {
+              updateDraft({
+                ...draft,
+                winbackDiscountPct: 0,
+                winbackFixedDiscount: 0,
+                winbackAddonService: draft.winbackAddonService.trim() || 'Free Express Hair Wash & Styling',
+              });
+            } else {
+              updateDraft({
+                ...draft,
+                winbackDiscountPct: draft.winbackDiscountPct > 0 ? draft.winbackDiscountPct : 15,
+                winbackFixedDiscount: draft.winbackFixedDiscount ?? 0,
+                winbackAddonService: draft.winbackAddonService.trim() || 'Free Express Hair Wash & Styling',
+              });
+            }
+          };
 
-          <label className="space-y-1.5 block">
-            <span className="text-xs font-mono text-[#8B949E] block">Complimentary Add-On Service</span>
-            <input
-              type="text"
-              value={draft.winbackAddonService}
-              onChange={(e) => setDraft({ ...draft, winbackAddonService: e.target.value })}
-              placeholder="e.g. Free Express Hair Wash"
-              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
-            />
-          </label>
-        </div>
+          return (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2.5">
+                <span className="text-[11px] font-mono font-bold uppercase text-[#06B6D4]">
+                  Win-Back Offer Scope (Single Option or Both)
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      { id: 'PCT', label: '% Only' },
+                      { id: 'FIXED', label: `${draft.currency} Cash Only` },
+                      { id: 'GIFT', label: 'Service Only' },
+                      { id: 'COMBO', label: 'Combo Both' },
+                    ] as const
+                  ).map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setWinbackMode(m.id)}
+                      className={`min-h-[38px] rounded-lg border px-2.5 py-1 text-[11px] font-mono font-bold transition ${
+                        wMode === m.id
+                          ? 'border-[#06B6D4] bg-[#06B6D4]/15 text-[#06B6D4]'
+                          : 'border-[#30363D] bg-[#161B22] text-[#8B949E] hover:text-[#F0F6FC]'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <label className="space-y-1.5 block">
+                  <span className="text-xs font-mono text-[#8B949E] block">Inactivity Trigger (Days)</span>
+                  <input
+                    type="number"
+                    dir="ltr"
+                    min={1}
+                    max={365}
+                    value={draft.winbackDays}
+                    onChange={(e) =>
+                      updateDraft({
+                        ...draft,
+                        winbackDays: Math.max(1, Number(e.target.value) || 30),
+                      })
+                    }
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#06B6D4] focus:border-[#06B6D4] focus:outline-none"
+                  />
+                </label>
+
+                <label className={`space-y-1.5 block ${!wPct && wMode !== 'COMBO' ? 'opacity-60' : ''}`}>
+                  <span className="text-xs font-mono text-[#8B949E] block">Win-Back % (0 = Off)</span>
+                  <input
+                    type="number"
+                    dir="ltr"
+                    min={0}
+                    max={100}
+                    value={draft.winbackDiscountPct}
+                    onChange={(e) =>
+                      updateDraft({
+                        ...draft,
+                        winbackDiscountPct: Math.max(0, Number(e.target.value) || 0),
+                      })
+                    }
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
+                  />
+                </label>
+
+                <label className={`space-y-1.5 block ${!wFixed && wMode !== 'COMBO' ? 'opacity-60' : ''}`}>
+                  <span className="text-xs font-mono text-[#8B949E] block">
+                    Cash OFF ({draft.currency})
+                  </span>
+                  <input
+                    type="number"
+                    dir="ltr"
+                    min={0}
+                    value={draft.winbackFixedDiscount ?? 0}
+                    onChange={(e) =>
+                      updateDraft({
+                        ...draft,
+                        winbackFixedDiscount: Math.max(0, Number(e.target.value) || 0),
+                      })
+                    }
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono font-bold text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
+                  />
+                </label>
+
+                <label className={`space-y-1.5 block ${!wSvc && wMode !== 'COMBO' ? 'opacity-60' : ''}`}>
+                  <span className="text-xs font-mono text-[#8B949E] block">Free Add-On Service</span>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={draft.winbackAddonService}
+                    onChange={(e) => updateDraft({ ...draft, winbackAddonService: e.target.value })}
+                    placeholder="Blank if none"
+                    className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+                  />
+                </label>
+              </div>
+            </div>
+          );
+        })()}
 
         <label className="space-y-1.5 block">
           <span className="text-xs font-mono text-[#8B949E] block">
@@ -780,7 +952,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           <textarea
             rows={2}
             value={draft.winbackMessageTemplate}
-            onChange={(e) => setDraft({ ...draft, winbackMessageTemplate: e.target.value })}
+            onChange={(e) => updateDraft({ ...draft, winbackMessageTemplate: e.target.value })}
             className="w-full rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-sm text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
           />
         </label>
