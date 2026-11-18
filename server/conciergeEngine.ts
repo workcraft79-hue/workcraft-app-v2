@@ -240,6 +240,7 @@ function defaultSettingsForSalon(
     billingStatus,
     counterSleptAt: null,
     birthdayEnabled: true,
+    birthdayEventName: 'Birthday Special',
     birthdayDiscountPct: 20,
     birthdayFixedDiscount: isPk ? 500 : 25,
     birthdayGiftService: resolvedCategory === 'LADIES' ? 'Free Express Hair Mask & Blowdry' : 'Free Organic Hair Mask',
@@ -248,6 +249,7 @@ function defaultSettingsForSalon(
     winbackEnabled: true,
     winbackDays: 30,
     winbackDiscountPct: 15,
+    winbackFixedDiscount: 0,
     winbackAddonService:
       resolvedCategory === 'LADIES' ? 'Complimentary Threading & Hair Spa Gloss' : 'Complimentary Express Hair Wash & Styling',
     winbackMessageTemplate:
@@ -619,16 +621,20 @@ function formatOfferSummary(settings: RetentionSettings, kind: 'BIRTHDAY' | 'WIN
     if (settings.birthdayGiftService.trim()) {
       parts.push(settings.birthdayGiftService.trim());
     }
+    const eventLabel = settings.birthdayEventName?.trim() || 'Special Event';
     const joined = parts.join(' + ') || 'VIP Priority Chair';
-    if (lang === 'ur') return `خصوصی سالگرہ آفر: ${joined}`;
-    if (lang === 'ar') return `عرض عيد الميلاد الخاص: ${joined}`;
-    if (lang === 'roman_ur') return `Birthday Special Offer: ${joined}`;
-    return joined;
+    if (lang === 'ur') return `${eventLabel}: ${joined}`;
+    if (lang === 'ar') return `${eventLabel}: ${joined}`;
+    if (lang === 'roman_ur') return `${eventLabel}: ${joined}`;
+    return `${eventLabel} (${joined})`;
   }
 
   const parts: string[] = [];
   if (settings.winbackDiscountPct > 0) {
     parts.push(`${settings.winbackDiscountPct}% OFF`);
+  }
+  if ((settings.winbackFixedDiscount ?? 0) > 0) {
+    parts.push(`${settings.currencySymbol}${Number(settings.winbackFixedDiscount).toLocaleString()} OFF`);
   }
   if (settings.winbackAddonService.trim()) {
     parts.push(settings.winbackAddonService.trim());
@@ -994,13 +1000,17 @@ export function updateRetentionSettings(
     salonCategory: cleanCategory || current.salonCategory || inferSalonCategory(current.salonName, salonId),
     enabledServices: cleanServices && cleanServices.length > 0 ? cleanServices : current.enabledServices,
     birthdayEnabled: patch.birthdayEnabled !== undefined ? Boolean(patch.birthdayEnabled) : current.birthdayEnabled,
+    birthdayEventName:
+      patch.birthdayEventName !== undefined
+        ? sanitizePlainText(patch.birthdayEventName, 80) || 'Birthday Special'
+        : current.birthdayEventName || 'Birthday Special',
     birthdayDiscountPct:
       patch.birthdayDiscountPct !== undefined
-        ? clampInteger(patch.birthdayDiscountPct, 0, 100, current.birthdayDiscountPct)
+        ? clampInteger(patch.birthdayDiscountPct, 0, 100, 0)
         : current.birthdayDiscountPct,
     birthdayFixedDiscount:
       patch.birthdayFixedDiscount !== undefined
-        ? clampInteger(patch.birthdayFixedDiscount, 0, 100000, current.birthdayFixedDiscount)
+        ? clampInteger(patch.birthdayFixedDiscount, 0, 100000, 0)
         : current.birthdayFixedDiscount,
     birthdayGiftService:
       patch.birthdayGiftService !== undefined
@@ -1017,8 +1027,12 @@ export function updateRetentionSettings(
         : current.winbackDays,
     winbackDiscountPct:
       patch.winbackDiscountPct !== undefined
-        ? clampInteger(patch.winbackDiscountPct, 0, 100, current.winbackDiscountPct)
+        ? clampInteger(patch.winbackDiscountPct, 0, 100, 0)
         : current.winbackDiscountPct,
+    winbackFixedDiscount:
+      patch.winbackFixedDiscount !== undefined
+        ? clampInteger(patch.winbackFixedDiscount, 0, 100000, 0)
+        : current.winbackFixedDiscount ?? 0,
     winbackAddonService:
       patch.winbackAddonService !== undefined
         ? sanitizePlainText(patch.winbackAddonService, 120)
@@ -1749,11 +1763,12 @@ export function processWhatsAppWebhook(payload: {
     };
     store.appointments.unshift(newBooking);
 
+    const lockedWinbackSummary = formatOfferSummary(settings, 'WINBACK', activeLang);
     const rebookConfirm: Record<ClientPreferredLang, string> = {
-      en: `Priority Rebooking Confirmed (${newBooking.id})! Your ${settings.winbackDiscountPct}% OFF win-back offer + ${settings.winbackAddonService} is locked at ${settings.salonName}.`,
-      roman_ur: `Mubarak ${client.name}! Aap ki priority rebooking (${newBooking.id}) confirm ho gayi hai. ${settings.winbackDiscountPct}% OFF + ${settings.winbackAddonService} lock kar diya gaya hai.`,
-      ur: `آپ کی ترجیحی ری-بکنگ (${newBooking.id}) کنفرم ہو گئی ہے ${client.name}! آپ کا ${settings.winbackDiscountPct}% ڈسکاؤنٹ اور ${settings.winbackAddonService} محفوظ کر دیا گیا ہے۔`,
-      ar: `تم تأكيد إعادة الحجز الفوري (${newBooking.id}) يا ${client.name}! تم تثبيت خصم ${settings.winbackDiscountPct}% مع ${settings.winbackAddonService} في ${settings.salonName}.`,
+      en: `Priority Rebooking Confirmed (${newBooking.id})! Your offer (${lockedWinbackSummary}) is locked at ${settings.salonName}.`,
+      roman_ur: `Mubarak ${client.name}! Aap ki priority rebooking (${newBooking.id}) confirm ho gayi hai. Offer (${lockedWinbackSummary}) lock kar diya gaya hai.`,
+      ur: `آپ کی ترجیحی ری-بکنگ (${newBooking.id}) کنفرم ہو گئی ہے ${client.name}! آپ کی آفر (${lockedWinbackSummary}) محفوظ کر دی گئی ہے۔`,
+      ar: `تم تأكيد إعادة الحجز الفوري (${newBooking.id}) يا ${client.name}! تم تثبيت عرضك (${lockedWinbackSummary}) في ${settings.salonName}.`,
     };
     const replyText = rebookConfirm[activeLang];
     appendLog(payload.salonId, {
