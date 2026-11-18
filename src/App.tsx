@@ -485,9 +485,9 @@ export default function App() {
   const refreshVoiceAndUsage = React.useCallback(async () => {
     try {
       const [healthRes, threadsRes, usageRes] = await Promise.allSettled([
-        fetch('/api/health/whatsapp'),
-        fetch('/api/voice/threads'),
-        fetch('/api/voice/usage'),
+        fetch('/api/health/whatsapp', { credentials: 'include' }),
+        fetch('/api/voice/threads', { credentials: 'include' }),
+        fetch('/api/voice/usage', { credentials: 'include' }),
       ]);
 
       if (healthRes.status === 'fulfilled' && healthRes.value.ok) {
