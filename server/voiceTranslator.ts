@@ -193,82 +193,91 @@ async function synthesizeGeminiTts(
   }
 }
 
+const LOCALE_BACKUP_EDGE_VOICE: Record<SupportedVoiceLocale, string> = {
+  'ar-AE': 'ar-SA-HamedNeural',
+  'ur-PK': 'ur-PK-UzmaNeural',
+  'en-US': 'en-US-GuyNeural',
+};
+
 export async function synthesizeEdgeTtsInMemory(
   text: string,
   targetLocale: SupportedVoiceLocale
 ): Promise<{ audioBase64: string | null; voiceName: string; ttsSource: 'msedge-tts' | 'unavailable'; ttsError?: string }> {
-  const voiceName = LOCALE_TO_EDGE_VOICE[targetLocale];
+  const primaryVoice = LOCALE_TO_EDGE_VOICE[targetLocale];
+  const backupVoice = LOCALE_BACKUP_EDGE_VOICE[targetLocale];
   const cleanText = text.trim().slice(0, 1500);
   if (!cleanText) {
-    return { audioBase64: null, voiceName, ttsSource: 'unavailable', ttsError: 'Empty speech text.' };
+    return { audioBase64: null, voiceName: primaryVoice, ttsSource: 'unavailable', ttsError: 'Empty speech text.' };
   }
 
-  const tts = new MsEdgeTTS({
-    connectionTimeoutMs: 5000,
-    synthesisTimeoutMs: 8000,
-  });
-
-  try {
-    await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-    const { audioStream } = tts.toStream(cleanText);
-
-    const buffer = await new Promise<Buffer>((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      let settled = false;
-      const timeout = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          reject(new Error('Edge TTS stream timed out.'));
-        }
-      }, 8500);
-
-      audioStream.on('data', (chunk: Buffer | Uint8Array) => {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      });
-      audioStream.on('end', () => {
-        clearTimeout(timeout);
-        if (!settled) {
-          settled = true;
-          resolve(Buffer.concat(chunks));
-        }
-      });
-      audioStream.on('error', (err: Error) => {
-        clearTimeout(timeout);
-        if (!settled) {
-          settled = true;
-          reject(err);
-        }
-      });
+  const attemptVoice = async (voiceName: string): Promise<Buffer> => {
+    const tts = new MsEdgeTTS({
+      connectionTimeoutMs: 5000,
+      synthesisTimeoutMs: 8000,
     });
-
-    if (buffer.length === 0) {
-      return {
-        audioBase64: null,
-        voiceName,
-        ttsSource: 'unavailable',
-        ttsError: 'Empty audio buffer from Edge TTS.',
-      };
-    }
-
-    return {
-      audioBase64: buffer.toString('base64'),
-      voiceName,
-      ttsSource: 'msedge-tts',
-    };
-  } catch (err) {
-    return {
-      audioBase64: null,
-      voiceName,
-      ttsSource: 'unavailable',
-      ttsError: err instanceof Error ? err.message : 'Edge TTS synthesis failed.',
-    };
-  } finally {
     try {
-      tts.close();
-    } catch {
-      // ignore socket cleanup errors
+      await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+      const { audioStream } = tts.toStream(cleanText);
+      return await new Promise<Buffer>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        let settled = false;
+        const timeout = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(new Error('Edge TTS stream timed out.'));
+          }
+        }, 8500);
+
+        audioStream.on('data', (chunk: Buffer | Uint8Array) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        audioStream.on('end', () => {
+          clearTimeout(timeout);
+          if (!settled) {
+            settled = true;
+            resolve(Buffer.concat(chunks));
+          }
+        });
+        audioStream.on('error', (err: Error) => {
+          clearTimeout(timeout);
+          if (!settled) {
+            settled = true;
+            reject(err);
+          }
+        });
+      });
+    } finally {
+      try {
+        tts.close();
+      } catch {
+        // ignore socket cleanup errors
+      }
+    }
+  };
+
+  let lastErr = 'Edge TTS synthesis failed.';
+  for (const voiceName of [primaryVoice, backupVoice]) {
+    try {
+      const buffer = await attemptVoice(voiceName);
+      if (buffer.length > 0) {
+        return {
+          audioBase64: buffer.toString('base64'),
+          voiceName,
+          ttsSource: 'msedge-tts',
+        };
+      }
+      lastErr = 'Empty audio buffer from Edge TTS.';
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : 'Edge TTS synthesis failed.';
     }
   }
+
+  return {
+    audioBase64: null,
+    voiceName: primaryVoice,
+    ttsSource: 'unavailable',
+    ttsError: lastErr,
+  };
 }
 
 export async function transcribeChairIntentAudio(
