@@ -1657,6 +1657,64 @@ export function createApiApp(port = 3000): express.Express {
     }
   );
 
+  // Authoritative Server TID Verification for Video Deal Campaigns (1 Video vs 4 Videos/mo)
+  app.post(
+    '/api/salons/:salonId/payments/video-deal',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const body = req.body || {};
+        const planId =
+          String(body.planId || '').toUpperCase() === 'MONTHLY_4' ? 'MONTHLY_4' : 'SINGLE_1';
+        const currency = sanitizePlainText(body.currency, 8) || 'PKR';
+        const amount = Number(body.amount || 0);
+        const method = sanitizePlainText(body.method, 80) || 'EasyPaisa';
+        const tid = sanitizePlainText(body.tid, 80);
+
+        const verification = verifyAuthoritativeWorkcraftPayment({
+          kind: 'VIDEO_CAMPAIGN',
+          tier: planId,
+          currency,
+          submittedAmount: amount,
+          method,
+          tid,
+          salonId,
+        });
+
+        if (!verification.ok) {
+          return res.status(400).json({ verified: false, error: verification.error });
+        }
+
+        const current = getSalonConciergeState(salonId);
+        const entry = recordSalonFinancialPayment({
+          type: 'VIDEO_CAMPAIGN',
+          salonId,
+          salonName: sanitizePlainText(body.salonName, 100) || current.settings.salonName,
+          amount: verification.verifiedAmount,
+          currency: verification.currency,
+          method,
+          referenceTid: verification.normalizedTid,
+          note: `Video Campaign (${planId}) unlocked (${verification.normalizedTid}) ➔ ${verification.officialDestination}`,
+        });
+
+        return res.status(201).json({
+          verified: true,
+          tid: verification.normalizedTid,
+          amount: verification.verifiedAmount,
+          currency: verification.currency,
+          officialDestination: verification.officialDestination,
+          sha256Proof: verification.sha256Proof,
+          entry,
+        });
+      } catch (err) {
+        console.error('Video campaign payment verify route error:', err);
+        return res.status(500).json({ verified: false, error: 'Failed to verify video campaign TID.' });
+      }
+    }
+  );
+
   // ===========================================================================
   // LIVE WALK-IN QUEUE, BRIDAL ADVANCE TRACKER & PREPAID SERVICE PACKAGES
   // ===========================================================================
