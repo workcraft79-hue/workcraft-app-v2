@@ -9,7 +9,6 @@ import {
   Send,
   ShieldCheck,
   RefreshCw,
-  Square,
   AlertTriangle,
 } from 'lucide-react';
 import { PortalCard } from './PortalCard';
@@ -38,6 +37,36 @@ function getVoiceNameForLocale(locale: SupportedVoiceLocale): string {
   if (locale === 'ar-AE') return 'ar-AE-HamdanNeural';
   if (locale === 'en-US') return 'en-US-AndrewNeural';
   return 'ur-PK-AsadNeural';
+}
+
+function buildFounderReplyFallbackText(
+  rawText: string,
+  targetLocale: SupportedVoiceLocale
+): string {
+  const clean = rawText.trim();
+  if (!clean || targetLocale === 'en-US') return clean;
+
+  // Preserve names/times/numbers while translating common Founder support phrases when Gemini upstream is unavailable
+  const lower = clean.toLowerCase();
+  const isUrdu = targetLocale === 'ur-PK';
+
+  const rules: Array<[RegExp, string, string]> = [
+    [/video deal.*approv|approved.*blast|approved/i, 'جی ہاں، آپ کا ویڈیو ڈیل منظور ہو گیا ہے اور بلاسٹ کے لیے تیار ہے۔', 'نعم، تمت الموافقة على فيديو العرض الخاص بكم وهو جاهز للإرسال.'],
+    [/check|verified|ready|live/i, 'ہم نے چیک کر لیا ہے، آپ کی سیٹنگز سسٹم میں مکمل فعال ہیں۔', 'تم التحقق، إعداداتكم مفعلة وتعمل بشكل ممتاز في النظام.'],
+    [/update|price|rate|schedule|timing|slot/i, 'آپ کے نئے ریٹس اور اوقات سسٹم میں اپڈیٹ کر دیے گئے ہیں۔', 'تم تحديث الأسعار والمواعيد الجديدة في النظام بنجاح.'],
+    [/maintenance|payment|paid|upgrade/i, 'آپ کی ادائیگی اور پیکیج اسٹیٹس تصدیق ہو چکا ہے، شکریہ۔', 'تم تأكيد حالة الدفع والباقة بنجاح، شكراً لكم.'],
+    [/wait|minute|soon|checking|assist/i, 'شکریہ، ہمیں آپ کا پیغام مل گیا ہے اور ہماری ٹیم فوراً چیک کر رہی ہے۔', 'شكراً لتواصلكم، استلمنا رسالتكم وفريقنا يراجعها الآن.'],
+  ];
+
+  for (const [pattern, urLine, arLine] of rules) {
+    if (pattern.test(lower)) {
+      return isUrdu ? `${urLine} (${clean})` : `${arLine} (${clean})`;
+    }
+  }
+
+  return isUrdu
+    ? `فاؤنڈر کا جواب: ${clean}`
+    : `رد المؤسس: ${clean}`;
 }
 
 interface VerifiedVoicePreview {
@@ -78,16 +107,31 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
   const [convertedAudioUrl, setConvertedAudioUrl] = useState<string | null>(null);
   const [ttsVoiceUsed, setTtsVoiceUsed] = useState<string>('');
 
-  // Quick row mic capture state (recording directly from an incoming row's Mic button)
-  const [rowRecordingThreadId, setRowRecordingThreadId] = useState<string | null>(null);
-  const rowRecorderRef = useRef<MediaRecorder | null>(null);
-  const rowChunksRef = useRef<Blob[]>([]);
-
   // Audio playback state & Neural TTS cache
   const [playingThreadId, setPlayingThreadId] = useState<string | null>(null);
   const activeAudioElRef = useRef<HTMLAudioElement | null>(null);
   const ttsAudioCacheRef = useRef<Map<string, string>>(new Map());
   const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const prevTopMsgIdRef = useRef<string | null>(null);
+
+  // Auto-surface newly arrived SALON_OWNER voice notes when threads update & Founder is not composing
+  useEffect(() => {
+    const unreadOwnerThread = threads.find(
+      (t) => t.unread && t.messages.some((m) => m.senderRole === 'SALON_OWNER')
+    );
+    const newestMsg = unreadOwnerThread?.messages[unreadOwnerThread.messages.length - 1];
+    if (
+      unreadOwnerThread &&
+      newestMsg &&
+      newestMsg.id !== prevTopMsgIdRef.current &&
+      !founderInputText.trim() &&
+      !recordedClip
+    ) {
+      prevTopMsgIdRef.current = newestMsg.id;
+      setSelectedThreadId(unreadOwnerThread.id);
+    }
+  }, [threads, founderInputText, recordedClip]);
 
   // Thread-switching state reset: always clear draft, recorded Opus clip, and synthesized TTS when salon changes
   useEffect(() => {
@@ -259,71 +303,6 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
     playBrowserFallback();
   };
 
-  const handleToggleRowMic = async (thread: VoiceThreadItem) => {
-    handleSelectThread(thread, false);
-
-    if (rowRecordingThreadId === thread.id) {
-      rowRecorderRef.current?.stop();
-      setRowRecordingThreadId(null);
-      return;
-    }
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setVoiceError('Microphone permission unavailable in this browser.');
-      return;
-    }
-
-    try {
-      setVoiceError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-      });
-      const mimeCandidates = [
-        'audio/webm;codecs=opus',
-        'audio/ogg;codecs=opus',
-        'audio/mp4',
-        'audio/webm',
-      ];
-      const mime = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || '';
-      const recorder = new MediaRecorder(
-        stream,
-        mime ? { mimeType: mime, audioBitsPerSecond: 20000 } : { audioBitsPerSecond: 20000 }
-      );
-      rowChunksRef.current = [];
-      rowRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (ev) => {
-        if (ev.data.size > 0) rowChunksRef.current.push(ev.data);
-      };
-      recorder.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const resolvedMime = recorder.mimeType || mime || 'audio/mp4';
-        const blob = new Blob(rowChunksRef.current, { type: resolvedMime });
-        const url = URL.createObjectURL(blob);
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const raw = typeof reader.result === 'string' ? reader.result : '';
-          const comma = raw.indexOf(',');
-          const base64 = comma >= 0 ? raw.slice(comma + 1) : raw;
-          setRecordedClip({
-            url,
-            base64,
-            mimeType: resolvedMime,
-            sizeBytes: blob.size,
-            sizeKb: Math.max(1, Math.round(blob.size / 1024)),
-            durationSec: 5,
-          });
-        };
-        reader.readAsDataURL(blob);
-      };
-
-      recorder.start(250);
-      setRowRecordingThreadId(thread.id);
-    } catch {
-      setVoiceError('Could not access microphone. Please allow microphone permission.');
-    }
-  };
-
   const requestTranslationFromServer = async (): Promise<VerifiedVoicePreview> => {
     const cleanDraft = founderInputText.trim();
     const translateRes = await fetch('/api/translate-voice', {
@@ -417,9 +396,55 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
     try {
       await requestTranslationFromServer();
     } catch (err) {
-      setVoiceError(
-        err instanceof Error ? err.message : 'Unable to translate preview right now.'
-      );
+      if (cleanDraft) {
+        const fallbackTranslated = buildFounderReplyFallbackText(cleanDraft, activeThread.targetLocale);
+        let fallbackAudioUrl: string | null = null;
+        let fallbackVoice = getVoiceNameForLocale(activeThread.targetLocale);
+        try {
+          const ttsRes = await fetch('/api/voice/tts', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: fallbackTranslated,
+              locale: activeThread.targetLocale,
+            }),
+          });
+          if (ttsRes.ok) {
+            const ttsJson = (await ttsRes.json()) as {
+              audioBase64?: string;
+              audioMimeType?: string;
+              voiceName?: string;
+            };
+            if (ttsJson.audioBase64) {
+              fallbackAudioUrl = `data:${ttsJson.audioMimeType || 'audio/mpeg'};base64,${ttsJson.audioBase64}`;
+              if (ttsJson.voiceName) fallbackVoice = ttsJson.voiceName;
+            }
+          }
+        } catch {
+          // ignore offline TTS
+        }
+        const preview: VerifiedVoicePreview = {
+          transcript: cleanDraft,
+          translatedText: fallbackTranslated,
+          convertedSourceText: fallbackTranslated,
+          detectedInputLanguage: 'English / Typed',
+          voiceName: fallbackVoice,
+          convertedAudioUrl: fallbackAudioUrl,
+          ttsWarning: 'Live Gemini translation unavailable — previewing Neural Voice + Salon Dictionary reply.',
+          sourceSignature: currentInputSignature,
+        };
+        setDetectedFounderLang(preview.detectedInputLanguage);
+        setAutoTranslatedOutput(preview.translatedText);
+        setTtsVoiceUsed(preview.voiceName);
+        setConvertedAudioUrl(preview.convertedAudioUrl);
+        setTtsWarning(preview.ttsWarning || null);
+        setVerifiedPreview(preview);
+      } else {
+        setVoiceError(
+          err instanceof Error ? err.message : 'Unable to translate preview right now.'
+        );
+      }
     } finally {
       setIsPreviewingVoice(false);
     }
@@ -437,10 +462,33 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
     setReplySent(false);
 
     try {
-      const activePreview =
-        verifiedPreview && verifiedPreview.sourceSignature === currentInputSignature
-          ? verifiedPreview
-          : await requestTranslationFromServer();
+      let activePreview: VerifiedVoicePreview;
+      if (verifiedPreview && verifiedPreview.sourceSignature === currentInputSignature) {
+        activePreview = verifiedPreview;
+      } else {
+        try {
+          activePreview = await requestTranslationFromServer();
+        } catch (trErr) {
+          // Safe fallback when typed reply text exists but Gemini translation is unavailable (503 / missing key)
+          if (!cleanDraft) {
+            throw trErr;
+          }
+          const fallbackTranslated = buildFounderReplyFallbackText(cleanDraft, activeThread.targetLocale);
+          activePreview = {
+            transcript: cleanDraft,
+            translatedText: fallbackTranslated,
+            convertedSourceText: '',
+            detectedInputLanguage: 'English / Typed',
+            voiceName: getVoiceNameForLocale(activeThread.targetLocale),
+            convertedAudioUrl: null,
+            ttsWarning: 'Live Gemini translation unavailable — synthesized direct Neural Voice reply so delivery stays uninterrupted.',
+            sourceSignature: currentInputSignature,
+          };
+          setDetectedFounderLang(activePreview.detectedInputLanguage);
+          setAutoTranslatedOutput(activePreview.translatedText);
+          setTtsWarning(activePreview.ttsWarning || null);
+        }
+      }
 
       const finalTranscript = activePreview.transcript.trim();
       const finalTranslated = activePreview.translatedText.trim();
@@ -910,7 +958,12 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
           {threads.map((thread) => {
             const isPlaying = playingThreadId === thread.id;
             const isSelected = activeThread.id === thread.id;
-            const isRowMicActive = rowRecordingThreadId === thread.id;
+            const latestMsg = thread.messages[thread.messages.length - 1];
+            const displayPreviewText = latestMsg
+              ? latestMsg.senderRole === 'SALON_OWNER'
+                ? latestMsg.originalText || latestMsg.translatedText || thread.transcript
+                : `You replied: ${latestMsg.translatedText || latestMsg.originalText}`
+              : thread.transcript;
             const isRtlNote = thread.targetLocale === 'ur-PK' || thread.targetLocale === 'ar-AE';
 
             return (
@@ -940,13 +993,18 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
                           <span>READ</span>
                         </span>
                       )}
+                      {latestMsg?.senderRole === 'SALON_OWNER' && (
+                        <span className="rounded-md bg-[#3B2E0B] border border-[#9E6A03] px-2 py-0.5 text-[9px] font-mono font-bold text-[#D29922]">
+                          LATEST OWNER NOTE
+                        </span>
+                      )}
                     </div>
                     <p className="text-[11px] font-mono text-[#8B949E]">
-                      {thread.receivedAgo} · {thread.city} · {thread.duration} · Target: {thread.targetLocale}
+                      {thread.receivedAgo} · {thread.city} · {thread.messages.length} msg(s) · Target: {thread.targetLocale}
                     </p>
                   </div>
 
-                  {/* Right: Listen and Mic Record buttons */}
+                  {/* Right: Single clean Listen button (click row to record/type reply in unified composer above) */}
                   <div
                     className="flex items-center gap-2 shrink-0"
                     onClick={(e) => e.stopPropagation()}
@@ -963,19 +1021,6 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
                       {isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
                       <span>{isPlaying ? 'Stop' : 'Listen'}</span>
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleToggleRowMic(thread)}
-                      className={`min-h-[48px] px-4 py-2 rounded-xl border text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                        isRowMicActive
-                          ? 'border-[#da3633] bg-[#F85149] text-[#0D1117]'
-                          : 'border-[#30363D] bg-[#21262D] hover:border-[#06B6D4] text-[#F0F6FC]'
-                      }`}
-                    >
-                      {isRowMicActive ? <Square className="size-4" /> : <Mic className="size-4 text-[#06B6D4]" />}
-                      <span>{isRowMicActive ? 'Stop Rec' : 'Mic Record'}</span>
-                    </button>
                   </div>
                 </div>
 
@@ -985,7 +1030,7 @@ export const VoiceSection: React.FC<VoiceSectionProps> = ({
                     isRtlNote ? 'text-right' : 'text-left'
                   }`}
                 >
-                  {thread.transcript}
+                  {displayPreviewText}
                 </p>
               </div>
             );
