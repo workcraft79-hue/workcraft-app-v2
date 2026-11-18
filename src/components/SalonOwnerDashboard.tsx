@@ -2078,27 +2078,39 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
   const [voiceLogs, setVoiceLogs] = useState<VoiceEventLog[]>([
     {
-      id: 'vlog-init-1',
+      id: 'vlog-init-ur',
       type: 'BOOKING',
       clientName: 'Bilal Ahmed',
       clientLang: 'ur',
       ownerVoiceLang: 'ur',
-      summary: 'New 03:30 PM booking · Barber: Master Aslam · Master Haircut & Skin Fade',
+      summary: 'Urdu Pure-Human Voice · New 03:30 PM Booking (Master Aslam)',
       spokenText:
-        'حمزہ صاحب! ماسٹر اسلم کی نئی اپائنٹمنٹ بلال احمد کے ساتھ 3:30 PM پر کنفرم ہو گئی ہے: ماسٹر ہیئر کٹ اور سکن فید۔',
+        'حمزہ صاحب! ماسٹر اسلم کی نئی اپائنٹمنٹ بلال احمد کے ساتھ ساڑھے تین بجے کنفرم ہو گئی ہے: ماسٹر ہیئر کٹ اور اسکن فیڈ۔',
       time: '03:15 PM',
       isUrgent: false,
     },
     {
-      id: 'vlog-init-2',
+      id: 'vlog-init-ar',
       type: 'REPLY_CONFIRMED',
       clientName: 'Saud Al-Rashid',
       clientLang: 'ar',
-      ownerVoiceLang: 'ur',
-      summary: 'Arabic Client Reply Translated ➔ Owner Voice: Confirmed 4:00 PM slot',
+      ownerVoiceLang: 'ar',
+      summary: 'Arabic Pure-Human Voice · Client Confirmed 04:00 PM Slot',
       spokenText:
-        'سعود نے عربی میں 4 بجے کی اپائنٹمنٹ کنفرم کر دی ہے: ہیئر کٹ اور داڑھی کی سیٹنگ۔',
+        'أهلاً حمزة! أكد العميل سعود الراشد موعده الساعة الرابعة عصراً لقص الشعر وتحديد اللحية.',
       time: '02:40 PM',
+      isUrgent: false,
+    },
+    {
+      id: 'vlog-init-en',
+      type: 'BOOKING',
+      clientName: 'Daniel Evans',
+      clientLang: 'en',
+      ownerVoiceLang: 'en',
+      summary: 'English Pure-Human Voice · Executive Cut & Beard Styling at 05:15 PM',
+      spokenText:
+        'Hamza, Tariq confirmed an appointment for Daniel Evans at 5:15 PM: Executive Haircut and Royal Beard Sculpt.',
+      time: '02:10 PM',
       isUrgent: false,
     },
   ]);
@@ -2545,9 +2557,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   };
 
   // Pure Human Neural Voice Engine (/api/voice/tts -> ur-PK-AsadNeural / ar-AE-HamdanNeural / en-US-AndrewNeural)
-  // Fallback to sentence-chunked Web Speech with keep-alive so full messages never cut off prematurely
-  const speakHandsFree = (text: string, lang: VoiceLang = ownerLang) => {
-    if (!isVoiceEnabled || isFounderInspector || isCounterSleepingRef.current || !text.trim()) return;
+  // Retries once for zero-drop pure human speech; manual log replay always speaks on click
+  const speakHandsFree = (text: string, lang: VoiceLang = ownerLang, forceManualReplay = false) => {
+    if (!text.trim()) return;
+    if (!forceManualReplay && (!isVoiceEnabled || isFounderInspector || isCounterSleepingRef.current)) return;
     stopSpeaking();
     const speakToken = activeSpeakTokenRef.current;
 
@@ -2631,20 +2644,29 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       try {
         let dataUrl = ttsAudioCacheRef.current.get(cacheKey);
         if (!dataUrl) {
-          const res = await fetch('/api/voice/tts', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, locale: strictLangCode }),
-          });
-          if (res.ok) {
-            const data = (await res.json()) as {
-              audioBase64?: string;
-              audioMimeType?: string;
-            };
-            if (data.audioBase64) {
-              dataUrl = `data:${data.audioMimeType || 'audio/mpeg'};base64,${data.audioBase64}`;
-              ttsAudioCacheRef.current.set(cacheKey, dataUrl);
+          for (let attempt = 0; attempt < 2 && !dataUrl; attempt++) {
+            try {
+              const res = await fetch('/api/voice/tts', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, locale: strictLangCode }),
+              });
+              if (res.ok) {
+                const data = (await res.json()) as {
+                  audioBase64?: string;
+                  audioMimeType?: string;
+                };
+                if (data.audioBase64) {
+                  dataUrl = `data:${data.audioMimeType || 'audio/mpeg'};base64,${data.audioBase64}`;
+                  ttsAudioCacheRef.current.set(cacheKey, dataUrl);
+                }
+              }
+            } catch {
+              // Retry once automatically
+            }
+            if (!dataUrl && attempt === 0) {
+              await new Promise((r) => setTimeout(r, 350));
             }
           }
         }
@@ -6091,7 +6113,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                       </div>
                       <button
                         type="button"
-                        onClick={() => speakHandsFree(log.spokenText, log.ownerVoiceLang)}
+                        onClick={() => speakHandsFree(log.spokenText, log.ownerVoiceLang, true)}
                         className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] shrink-0 flex items-center gap-1.5 transition"
                       >
                         <Volume2 className="size-4" />
