@@ -513,7 +513,59 @@ function normalizeLoadedConciergeStore(parsed: Partial<ConciergeStoreData>): Con
   return normalized;
 }
 
+interface ShardedSalonConciergeDoc {
+  settings: RetentionSettings;
+  clients: ConciergeClientProfile[];
+  appointments: ConciergeAppointment[];
+  chairLocks: ChairLock[];
+  barbers: string[];
+  alerts: OwnerInterventionAlert[];
+  logs: WhatsAppMessageLog[];
+  walkInQueue: WalkInQueueItem[];
+  bridalBookings: BridalBookingRecord[];
+  servicePackages: ServicePackagePass[];
+}
+
 export async function hydrateConciergeStoreFromKv(): Promise<void> {
+  const indexIds = await kvGetJson<string[]>('wc:concierge:salons:index:v1');
+  if (Array.isArray(indexIds) && indexIds.length > 0) {
+    const shardDocs = await Promise.all(
+      indexIds.map((sid) => kvGetJson<ShardedSalonConciergeDoc>(`wc:concierge:salon:${sid}`))
+    );
+    const merged: Partial<ConciergeStoreData> = {
+      settingsBySalon: {},
+      clients: [],
+      appointments: [],
+      chairLocks: [],
+      barbersBySalon: {},
+      alerts: [],
+      logs: [],
+      walkInQueue: [],
+      bridalBookings: [],
+      servicePackages: [],
+    };
+    let loadedAny = false;
+    indexIds.forEach((sid, idx) => {
+      const doc = shardDocs[idx];
+      if (!doc || !doc.settings) return;
+      loadedAny = true;
+      merged.settingsBySalon![sid] = doc.settings;
+      if (Array.isArray(doc.clients)) merged.clients!.push(...doc.clients);
+      if (Array.isArray(doc.appointments)) merged.appointments!.push(...doc.appointments);
+      if (Array.isArray(doc.chairLocks)) merged.chairLocks!.push(...doc.chairLocks);
+      if (Array.isArray(doc.barbers)) merged.barbersBySalon![sid] = doc.barbers;
+      if (Array.isArray(doc.alerts)) merged.alerts!.push(...doc.alerts);
+      if (Array.isArray(doc.logs)) merged.logs!.push(...doc.logs);
+      if (Array.isArray(doc.walkInQueue)) merged.walkInQueue!.push(...doc.walkInQueue);
+      if (Array.isArray(doc.bridalBookings)) merged.bridalBookings!.push(...doc.bridalBookings);
+      if (Array.isArray(doc.servicePackages)) merged.servicePackages!.push(...doc.servicePackages);
+    });
+    if (loadedAny) {
+      cachedStore = normalizeLoadedConciergeStore(merged);
+      return;
+    }
+  }
+
   const remote = await kvGetJson<Partial<ConciergeStoreData>>('wc:concierge:v1');
   if (!remote || !remote.settingsBySalon || !Array.isArray(remote.clients)) return;
   cachedStore = normalizeLoadedConciergeStore(remote);
@@ -538,7 +590,7 @@ function ensureStoreLoaded(): ConciergeStoreData {
   return cachedStore;
 }
 
-function persistStore() {
+function persistStore(changedSalonId?: string) {
   if (!cachedStore) return;
   try {
     if (!fs.existsSync(DATA_DIR)) {
@@ -548,7 +600,25 @@ function persistStore() {
   } catch (err) {
     console.warn('Could not persist concierge store:', err);
   }
-  void kvSetJson('wc:concierge:v1', cachedStore);
+  // Shard KV persistence per salon so 2,500–5,000+ clients per salon stay safely inside $0.00 KV payload bounds
+  const salonIds = Object.keys(cachedStore.settingsBySalon);
+  const targetIds = changedSalonId && cachedStore.settingsBySalon[changedSalonId] ? [changedSalonId] : salonIds;
+  void kvSetJson('wc:concierge:salons:index:v1', salonIds);
+  for (const sid of targetIds) {
+    const doc: ShardedSalonConciergeDoc = {
+      settings: cachedStore.settingsBySalon[sid],
+      clients: cachedStore.clients.filter((c) => c.salonId === sid),
+      appointments: cachedStore.appointments.filter((a) => a.salonId === sid),
+      chairLocks: cachedStore.chairLocks.filter((l) => l.salonId === sid),
+      barbers: cachedStore.barbersBySalon[sid] || [...DEFAULT_SALON_BARBERS],
+      alerts: cachedStore.alerts.filter((a) => a.salonId === sid),
+      logs: cachedStore.logs.filter((l) => l.salonId === sid).slice(0, 200),
+      walkInQueue: cachedStore.walkInQueue.filter((w) => w.salonId === sid),
+      bridalBookings: cachedStore.bridalBookings.filter((b) => b.salonId === sid),
+      servicePackages: cachedStore.servicePackages.filter((p) => p.salonId === sid),
+    };
+    void kvSetJson(`wc:concierge:salon:${sid}`, doc);
+  }
 }
 
 function ensureSalonExists(
@@ -702,6 +772,21 @@ export function renderReviewPrompt(salonName: string, lang: ClientPreferredLang)
   return `How was your visit to ${salonName} today? Reply 1–5 Stars.`;
 }
 
+function resolveClientConversationLang(
+  client: ConciergeClientProfile | undefined,
+  rawText: string,
+  region: SalonRegionCode
+): ClientPreferredLang {
+  if (client?.preferredLanguage) return client.preferredLanguage;
+  const trimmed = (rawText || '').trim();
+  const isIndiaPhone = (client?.phone || '').replace(/\s+/g, '').startsWith('+91');
+  if (/[\u0679\u0688\u0691\u06BA\u06BE\u06C1\u06D2\u06AF]/.test(trimmed)) return 'ur';
+  if (/[\u0600-\u06FF]/.test(trimmed)) return region === 'PK' || isIndiaPhone ? 'ur' : 'ar';
+  if (region === 'PK' || isIndiaPhone) return 'roman_ur';
+  if (region === 'MENA') return 'ar';
+  return 'en';
+}
+
 function appendLog(
   salonId: string,
   entry: Omit<WhatsAppMessageLog, 'id' | 'salonId' | 'timestamp'>
@@ -714,9 +799,13 @@ function appendLog(
     ...entry,
   };
   store.logs.unshift(full);
-  if (store.logs.length > 150) {
-    store.logs = store.logs.slice(0, 150);
-  }
+  // Keep up to 200 recent logs per salon cleanly
+  let salonCount = 0;
+  store.logs = store.logs.filter((log) => {
+    if (log.salonId !== salonId) return true;
+    salonCount += 1;
+    return salonCount <= 200;
+  });
   return full;
 }
 
@@ -1575,11 +1664,15 @@ export function processWhatsAppWebhook(payload: {
   }
 
   if (hasStructuredAction && !client.preferredLanguage) {
-    client.preferredLanguage = 'en';
+    client.preferredLanguage = resolveClientConversationLang(client, raw, regionMeta.region);
     client.awaitingLanguageSelection = false;
   }
 
-  const activeLang: ClientPreferredLang = client.preferredLanguage || 'en';
+  const activeLang: ClientPreferredLang = resolveClientConversationLang(
+    client,
+    raw,
+    regionMeta.region
+  );
   const activeDir = getLangDirection(activeLang);
 
   // 3. Smart Reputation Routing for 1–5 Star Feedback (Module 4)
@@ -2430,7 +2523,8 @@ export function runPostServiceReviewCron(
     if (!forceImmediate && (!completedMs || nowMs - completedMs < twoHoursMs)) continue;
 
     const client = store.clients.find((c) => c.id === appt.clientId);
-    const lang: ClientPreferredLang = client?.preferredLanguage || 'en';
+    const regionInfo = detectRegionFromPhone(client?.phone || settings.whatsappPhone);
+    const lang: ClientPreferredLang = resolveClientConversationLang(client, '', regionInfo.region);
     const promptBody = renderReviewPrompt(settings.salonName, lang);
 
     appt.reviewPromptSentAt = new Date(nowMs).toISOString();
