@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   House,
+  QrCode,
   UsersRound,
+  GitFork,
   WalletCards,
   Settings2,
   Mic,
@@ -18,100 +20,34 @@ import {
   Globe,
   ChevronDown,
   Megaphone,
-  SlidersHorizontal,
-  LogOut,
-  Award,
-  Zap,
-  Moon,
-  Volume2,
 } from 'lucide-react';
 
-import type { AuthUser } from './types/auth';
-
 import { TabName } from './types/workcraft';
-import {
-  WATERMARK_URL,
-  DEFAULT_USAGE_METER,
-  INITIAL_VOICE_THREADS,
-  type LiveUsageMeter,
-  type VoiceThreadItem,
-} from './data/portalData';
+import { WATERMARK_URL } from './data/portalData';
 import { BrandMark } from './components/BrandMark';
 import { OverviewSection } from './components/OverviewSection';
 import { VoiceSection } from './components/VoiceSection';
+import { VoiceSupportDrawer } from './components/VoiceSupportDrawer';
 import { TabsSection } from './components/TabsSection';
 import { DetailSheet } from './components/DetailSheet';
-import { FieldAgentHub, OnboardedSalonPayload } from './components/FieldAgentHub';
+import { FieldAgentHub } from './components/FieldAgentHub';
+import { SalonPwaSimulator } from './components/SalonPwaSimulator';
 import { SalonOwnerDashboard } from './components/SalonOwnerDashboard';
 import { SilentSelfHealingBoundary } from './components/SilentSelfHealingBoundary';
-import { reportClientIncident, setActiveTelemetryRole } from './utils/errorTelemetry';
+import { FounderPinGate } from './components/FounderPinGate';
 import {
-  FounderBiometricEnrollPrompt,
-  FounderUnlockGate,
-  detectMobileFounderDevice,
-  loadStoredFounderBiometric,
-  supportsPlatformBiometric,
-} from './components/FounderUnlockGate';
+  AUDIT_EXPIRES_AT_ISO,
+  AUDIT_EXPIRES_AT_MS,
+  FOUNDER_SESSION_STORAGE_KEY,
+  MANUAL_LOCK_STORAGE_KEY,
+  detectPublicRoleRoute,
+  isAuditWindowOpen,
+} from './config/auditWindow';
 import {
   FinancialReportModal,
   PaymentRoutingModal,
   NotificationsDrawer,
 } from './components/Modals';
-
-const SOCIAL_CAMPAIGN_SOURCE_MAP: Record<string, string> = {
-  fb: 'Facebook Ads Campaign',
-  facebook: 'Facebook Ads Campaign',
-  ig: 'Instagram Ads Campaign',
-  instagram: 'Instagram Ads Campaign',
-  tiktok: 'TikTok Ads Campaign',
-  tt: 'TikTok Ads Campaign',
-  social: 'Social Media Campaign',
-};
-
-function getInitialRouteIntent() {
-  if (typeof window === 'undefined') {
-    return {
-      isAgentInviteRoute: false,
-      inviteTokenParam: '',
-      socialSource: null as string | null,
-      sessionOnboardingLocked: false,
-    };
-  }
-  const params = new URLSearchParams(window.location.search);
-  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
-  const inviteTokenParam = (params.get('token') || '').trim();
-  const refParam = (params.get('ref') || '').trim().toLowerCase();
-  const utmSource = (params.get('utm_source') || '').trim().toLowerCase();
-  const onboardParam = (params.get('onboard') || '').trim().toLowerCase();
-  const sourceKey = refParam || utmSource || (onboardParam === 'true' ? 'social' : '');
-  const socialSource = sourceKey ? SOCIAL_CAMPAIGN_SOURCE_MAP[sourceKey] || null : null;
-  let sessionOnboardingLocked = false;
-  try {
-    sessionOnboardingLocked = Boolean(sessionStorage.getItem('wcl_salon_onboarding_locked_v1'));
-  } catch {
-    sessionOnboardingLocked = false;
-  }
-  return {
-    isAgentInviteRoute: pathname === '/enroll/agent',
-    inviteTokenParam,
-    socialSource,
-    sessionOnboardingLocked,
-  };
-}
-
-async function fetchWithTimeout(
-  input: RequestInfo | URL,
-  init?: RequestInit,
-  timeoutMs = 3500
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
 
 export default function App() {
   const [activeSalonCount, setActiveSalonCount] = useState(24);
@@ -125,338 +61,152 @@ export default function App() {
   const [inspectSalonName, setInspectSalonName] = useState<string | undefined>(undefined);
   const [hasCompletedSalonOnboarding, setHasCompletedSalonOnboarding] = useState(true);
   const [onboardedSalonName, setOnboardedSalonName] = useState<string | undefined>(undefined);
-  const [completedOnboardingData, setCompletedOnboardingData] = useState<OnboardedSalonPayload | null>(null);
-  const [enrolledAgentDisplayName, setEnrolledAgentDisplayName] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem('wcl_enrolled_agent_name_v1') || null;
-    } catch {
-      return null;
-    }
-  });
 
   // Founder Command Center Workspace Navigation
   const [activeTab, setActiveTab] = useState<TabName>('Overview');
-  const [salonOwnerSection, setSalonOwnerSection] = useState<
-    'LIVE' | 'PASSES' | 'VOICE' | 'MANAGE'
-  >('LIVE');
-  const [ownerHardwareAction, setOwnerHardwareAction] = useState<{
-    type: 'WAKE' | 'AUX' | 'TEST_SPEAKER';
-    seq: number;
-  } | null>(null);
-  const [ownerHardwareStatus, setOwnerHardwareStatus] = useState<{
-    isWakeLockActive: boolean;
-    isLoudspeakerBoostActive: boolean;
-    isCounterSleeping: boolean;
-    overnightCount: number;
-    hasFounderVoiceReply: boolean;
-    allowedLangs: Array<'en' | 'ur' | 'ar'>;
-    ownerLang: 'en' | 'ur' | 'ar';
-  }>({
-    isWakeLockActive: false,
-    isLoudspeakerBoostActive: false,
-    isCounterSleeping: false,
-    overnightCount: 0,
-    hasFounderVoiceReply: false,
-    allowedLangs: ['en', 'ur'],
-    ownerLang: 'ur',
-  });
 
-  const initialRoute = React.useMemo(() => getInitialRouteIntent(), []);
-  const shouldStartPublicOnboarding = Boolean(
-    !initialRoute.isAgentInviteRoute &&
-      initialRoute.socialSource &&
-      !initialRoute.sessionOnboardingLocked
-  );
-
-  // Verified Session State: Always starts unauthenticated and verifies server session (zero auto-bypass for Founder)
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [isCheckingSession, setIsCheckingSession] = useState<boolean>(true);
-  const [showMobileBiometricPrompt, setShowMobileBiometricPrompt] = useState(false);
+  // Query 1: Detect WhatsApp direct remote agent enrollment link (/enroll or ?id=...&pin=...)
   const [initialEnrollAgentData, setInitialEnrollAgentData] = useState<{
     id?: string;
+    pin?: string;
     name?: string;
     phone?: string;
     city?: string;
   } | null>(null);
-  const [agentInviteToken, setAgentInviteToken] = useState<string | null>(null);
-  const [agentInviteError, setAgentInviteError] = useState<string | null>(null);
 
-  // Pure Role Isolation Architecture driven strictly by active session `userRole`
-  const [activeRole, setActiveRole] = useState<'FOUNDER' | 'FIELD_AGENT' | 'SALON_OWNER'>(() =>
-    shouldStartPublicOnboarding
-      ? 'SALON_OWNER'
-      : initialRoute.isAgentInviteRoute
-      ? 'FIELD_AGENT'
-      : 'FOUNDER'
-  );
-  const [socialCampaignSource, setSocialCampaignSource] = useState<string | null>(
-    () => (shouldStartPublicOnboarding ? initialRoute.socialSource : null)
-  );
-  const [isPublicOnboardingOpen, setIsPublicOnboardingOpen] = useState<boolean>(
-    () => shouldStartPublicOnboarding
-  );
-  const [isSubmittingPublicOnboarding, setIsSubmittingPublicOnboarding] = useState(false);
-  const [publicOnboardingError, setPublicOnboardingError] = useState<string | null>(null);
+  // Pure 3-Role Isolation Architecture:
+  // - FOUNDER: Central Command, Fleet Dossier, Salons Health, 3-Way Ledger, Founder Marketing
+  // - FIELD_AGENT: Strictly Field Agent Hub / Enrollment / Commission Ledger / Node Repair
+  // - SALON_OWNER: Social Ad Links land in Onboarding First -> Then Private Salon Owner Dashboard Only
+  const [activeRole, setActiveRole] = useState<'FOUNDER' | 'FIELD_AGENT' | 'SALON_OWNER'>('FOUNDER');
+  const [socialCampaignSource, setSocialCampaignSource] = useState<string | null>(null);
 
-  const applyVerifiedSession = (user: AuthUser) => {
-    setAuthUser(user);
-    setFounderPreviewMode('NONE');
-    setIsPublicOnboardingOpen(false);
-    setAgentInviteToken(null);
-    setAgentInviteError(null);
-    if (user.userRole === 'FOUNDER') {
-      setActiveRole('FOUNDER');
-      setActiveTab('Overview');
-      setHasCompletedSalonOnboarding(true);
-      setOnboardedSalonName(undefined);
-      setInitialEnrollAgentData(null);
-    } else if (user.userRole === 'AGENT') {
-      setActiveRole('FIELD_AGENT');
-      setActiveTab('Agent Hub / Onboarding');
-      setInitialEnrollAgentData({
-        id: user.agentId || undefined,
-        name: user.displayName,
-        phone: user.phone,
-      });
-    } else {
-      setActiveRole('SALON_OWNER');
-      setActiveTab('Salon Owner Dashboard');
-      setHasCompletedSalonOnboarding(true);
-      setOnboardedSalonName(user.salonName);
-      setInspectSalonName(user.salonName);
-      setInitialEnrollAgentData(null);
+  // 24-Hour Public Inspection Window + Automatic Founder PIN Lock & Public Role-Link Guard
+  const [detectedPublicRoute] = useState(() => detectPublicRoleRoute());
+  const [serverOffsetMs, setServerOffsetMs] = useState(0);
+  const [syncedNowMs, setSyncedNowMs] = useState(() => Date.now());
+  const [isFounderAuthenticated, setIsFounderAuthenticated] = useState(() => {
+    try {
+      return sessionStorage.getItem(FOUNDER_SESSION_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
     }
-  };
+  });
+  const [isManualLockPreview, setIsManualLockPreview] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('test_lock') === 'true') return true;
+      return sessionStorage.getItem(MANUAL_LOCK_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const isGenuineWindowOpen = isAuditWindowOpen(syncedNowMs);
+  const isAuditOpen = isGenuineWindowOpen && !isManualLockPreview;
 
   useEffect(() => {
-    let cancelled = false;
-    const boot = async () => {
-      // Workflow 3: Single-Use Field Agent Invite Link (/enroll/agent?token=...)
-      if (initialRoute.isAgentInviteRoute) {
-        if (!initialRoute.inviteTokenParam) {
-          if (!cancelled) {
-            setAgentInviteError('Invalid or missing single-use agent invite token.');
-            setIsCheckingSession(false);
-          }
-          return;
-        }
-        try {
-          const res = await fetchWithTimeout(
-            `/api/agent/enroll?token=${encodeURIComponent(initialRoute.inviteTokenParam)}`,
-            undefined,
-            3500
-          );
-          const data = (await res.json()) as {
-            valid?: boolean;
-            error?: string;
-            invite?: { agentId?: string; name?: string; phone?: string; city?: string };
-          };
-          if (cancelled) return;
-          if (!res.ok || !data?.valid || !data.invite) {
-            setAgentInviteError(
-              data?.error ||
-                'This single-use agent invite link has already been completed and permanently locked.'
-            );
-            setIsCheckingSession(false);
-            return;
-          }
-          setAgentInviteToken(initialRoute.inviteTokenParam);
-          setInitialEnrollAgentData({
-            id: data.invite.agentId,
-            name: data.invite.name,
-            phone: data.invite.phone,
-            city: data.invite.city,
-          });
-          setActiveRole('FIELD_AGENT');
-          setActiveTab('Agent Hub / Onboarding');
-          setIsCheckingSession(false);
-          return;
-        } catch {
-          if (!cancelled) {
-            setAgentInviteError('Unable to verify agent invite link right now.');
-            setIsCheckingSession(false);
-          }
-          return;
-        }
-      }
-
-      // Check existing verified session cookie (Founder, Agent, or Salon Owner)
-      let existingUser: AuthUser | null = null;
-      try {
-        const sessionRes = await fetchWithTimeout('/api/auth/session', undefined, 3000);
-        const contentType = sessionRes.headers.get('content-type') || '';
-        if (sessionRes.ok && contentType.includes('application/json')) {
-          const sessionData = (await sessionRes.json()) as {
-            authenticated?: boolean;
-            user?: AuthUser | null;
-          };
-          if (sessionData?.authenticated && sessionData.user) {
-            existingUser = sessionData.user;
-          }
-        }
-      } catch {
-        // Offline or unreachable server: leaves unauthenticated gate cleanly
-      }
-      if (cancelled) return;
-
-      if (initialRoute.socialSource) {
-        if (existingUser?.userRole === 'SALON_OWNER' && initialRoute.sessionOnboardingLocked) {
-          applyVerifiedSession(existingUser);
-        }
-        setIsCheckingSession(false);
-        return;
-      }
-
-      if (existingUser) {
-        applyVerifiedSession(existingUser);
-      }
-      setIsCheckingSession(false);
-    };
-
-    void boot();
-    return () => {
-      cancelled = true;
-    };
-  }, [initialRoute]);
-
-  const handleAgentEnrollmentComplete = async (agentPayload: {
-    name: string;
-    phone: string;
-    city: string;
-    websiteUrl?: string;
-  }) => {
-    if (!agentInviteToken) return;
-    const res = await fetch('/api/agent/enroll/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token: agentInviteToken,
-        name: agentPayload.name,
-        phone: agentPayload.phone,
-        city: agentPayload.city,
-        websiteUrl: agentPayload.websiteUrl || '',
-      }),
-    });
-    const data = (await res.json()) as {
-      authenticated?: boolean;
-      user?: AuthUser;
-      error?: string;
-    };
-    if (!res.ok || !data?.authenticated || !data.user) {
-      setAgentInviteError(data?.error || 'Could not complete agent enrollment.');
-      return;
-    }
-    if (typeof window !== 'undefined' && window.location.pathname === '/enroll/agent') {
-      window.history.replaceState({}, '', '/');
-    }
-    const syncedName = (agentPayload.name || data.user.displayName || '').trim();
-    if (syncedName) {
-      setEnrolledAgentDisplayName(syncedName);
-      try {
-        localStorage.setItem('wcl_enrolled_agent_name_v1', syncedName);
-      } catch {}
-    }
-    applyVerifiedSession(data.user);
-    showToast('Invite locked permanently — welcome to your editable Field Agent Hub.');
-  };
-
-  const handleCompletePublicOnboarding = async (payload: OnboardedSalonPayload) => {
-    if (isSubmittingPublicOnboarding) return;
-    setPublicOnboardingError(null);
-    setIsSubmittingPublicOnboarding(true);
-    try {
-      const res = await fetch('/api/onboarding/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          salonName: payload.salonName,
-          ownerName: payload.ownerName,
-          phone: payload.phone,
-          location: payload.location,
-          planId: payload.planId,
-          language: payload.language,
-          salonCategory: payload.salonCategory,
-          enabledServices: Array.isArray(payload.services)
-            ? payload.services.map((s) => ({
-                id: s.id,
-                name: s.name,
-                price: s.price,
-                durationMins: 35,
-                active: s.enabled,
-              }))
-            : undefined,
-          barbers: payload.barbers,
-          websiteUrl: payload.websiteUrl || '',
-        }),
+    let active = true;
+    // Sync UTC clock with Vercel Edge server when available (prevents device-clock bypass)
+    fetch('/api/audit-status', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { serverNowMs?: number } | null) => {
+        if (!active || !data || typeof data.serverNowMs !== 'number') return;
+        const offset = data.serverNowMs - Date.now();
+        setServerOffsetMs(offset);
+        setSyncedNowMs(Date.now() + offset);
+      })
+      .catch(() => {
+        // Pure Vite preview fallback uses local UTC time cleanly
       });
-      const data = await res.json();
-      if (res.status === 409) {
-        setPublicOnboardingError(
-          data?.error ||
-            'Each salon branch requires its own unique WhatsApp number. Please enter a different WhatsApp number for this branch.'
-        );
-        return;
-      }
-      if (!res.ok || !data?.authenticated || !data?.user) {
-        setPublicOnboardingError(
-          data?.error || 'Could not finalize salon installation. Please check your details.'
-        );
-        return;
-      }
 
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem('wcl_salon_onboarding_locked_v1', String(data.salonId));
-        if (window.location.search) {
-          window.history.replaceState({}, '', '/');
-        }
-      }
-      setCompletedOnboardingData(payload);
-      setOnboardedSalonName(data.salonName || payload.salonName);
-      applyVerifiedSession(data.user as AuthUser);
-      setHasCompletedSalonOnboarding(true);
-      setIsPublicOnboardingOpen(false);
-      showToast(
-        `${data.salonName || payload.salonName} Live Floor Dashboard is active! Automated mass blasts activate once billing is confirmed.`
-      );
-    } catch {
-      setPublicOnboardingError('Network error while saving installation details. Try again.');
-    } finally {
-      setIsSubmittingPublicOnboarding(false);
-    }
-  };
+    return () => {
+      active = false;
+    };
+  }, []);
 
-  const handleLogout = async () => {
-    const previousRole = authUser?.userRole;
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setSyncedNowMs(Date.now() + serverOffsetMs);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [serverOffsetMs]);
+
+  useEffect(() => {
     try {
-      await fetchWithTimeout('/api/auth/logout', { method: 'POST' }, 2000);
-    } catch {}
-    setFounderPreviewMode('NONE');
-    setIsSidebarOpen(false);
-    setShowMobileBiometricPrompt(false);
-    setInspectSalonName(undefined);
-    setOnboardedSalonName(undefined);
-    setCompletedOnboardingData(null);
+      const search = window.location.search;
+      const path = window.location.pathname;
+      const hash = window.location.hash;
+      const params = new URLSearchParams(search);
 
-    if (previousRole === 'SALON_OWNER') {
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('wcl_salon_onboarding_locked_v1');
+      // Social Media Campaign / Direct Signup Link Detection (Queries 1 & 2):
+      // Detect Facebook, Instagram, TikTok, or custom campaign sources
+      const ref = params.get('ref');
+      const utmSource = params.get('utm_source');
+      const isSocialCampaign =
+        ref === 'fb' || ref === 'facebook' ||
+        ref === 'ig' || ref === 'instagram' ||
+        ref === 'tiktok' || ref === 'tt' ||
+        ref === 'social' ||
+        utmSource === 'facebook' || utmSource === 'instagram' || utmSource === 'tiktok';
+
+      const isSalonDirectRoute =
+        path.includes('/onboard') ||
+        path.includes('/salon') ||
+        hash.includes('onboard') ||
+        params.has('onboard') ||
+        params.has('salon_signup') ||
+        params.get('role') === 'salon_owner' ||
+        isSocialCampaign;
+
+      if (isSalonDirectRoute) {
+        const isAlreadyPaired = params.get('paired') === 'true';
+        const customName = params.get('salon') || params.get('salon_name') || undefined;
+        if (customName) setOnboardedSalonName(customName);
+
+        if (isSocialCampaign) {
+          const sourceLabel =
+            ref === 'fb' || utmSource === 'facebook' ? 'Facebook Ads Campaign'
+            : ref === 'ig' || utmSource === 'instagram' ? 'Instagram Reels Campaign'
+            : ref === 'tiktok' || utmSource === 'tiktok' ? 'TikTok Viral Campaign'
+            : ref ? `${ref.toUpperCase()} Social Campaign`
+            : 'Social Ad Campaign';
+          setSocialCampaignSource(sourceLabel);
+        }
+
+        setHasCompletedSalonOnboarding(isAlreadyPaired);
+        setActiveRole('SALON_OWNER');
+        setActiveTab('Salon Owner Dashboard');
+        return;
       }
-      setAuthUser(null);
-      setHasCompletedSalonOnboarding(false);
-      setIsPublicOnboardingOpen(true);
-      return;
-    }
 
-    setAuthUser(null);
-    setActiveRole('FOUNDER');
-    setActiveTab('Overview');
-  };
+      // Agent Remote Enrollment Link Detection (/enroll, ?id=...&pin=...)
+      const isEnrollRoute =
+        path.includes('/enroll') ||
+        hash.includes('enroll') ||
+        params.has('enroll') ||
+        params.get('role') === 'agent' ||
+        (params.has('id') && (params.has('pin') || params.has('auth')));
+
+      if (isEnrollRoute) {
+        const id = params.get('id') || undefined;
+        const pin = params.get('pin') || params.get('auth') || undefined;
+        const phone = params.get('phone') || undefined;
+        const name = params.get('name') || undefined;
+        const city = params.get('city') || undefined;
+
+        setInitialEnrollAgentData({ id, pin, phone, name, city });
+        setActiveRole('FIELD_AGENT');
+        setActiveTab('Agent Hub / Onboarding');
+      }
+    } catch {
+      // Ignore URL parsing errors
+    }
+  }, []);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [voiceThreads, setVoiceThreads] = useState<VoiceThreadItem[]>(INITIAL_VOICE_THREADS);
-  const [usageMeter, setUsageMeter] = useState<LiveUsageMeter>(DEFAULT_USAGE_METER);
-  const unreadVoiceCount = voiceThreads.filter((t) => t.unread).length;
+  const [isVoiceDrawerOpen, setIsVoiceDrawerOpen] = useState(false);
   const [paymentRoutingMethod, setPaymentRoutingMethod] = useState<string | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isGlobalPaused, setIsGlobalPaused] = useState(false);
@@ -472,102 +222,12 @@ export default function App() {
   const [isCountryPauseOpen, setIsCountryPauseOpen] = useState(false);
   const [whatsAppHealth, setWhatsAppHealth] = useState<'HEALTHY' | 'ISSUE'>('HEALTHY');
   const [isPairingModalOpen, setIsPairingModalOpen] = useState(false);
-  const [pairingModalQr, setPairingModalQr] = useState<{
-    pairingKey: string;
-    qrDataUrl: string | null;
-  }>({ pairingKey: 'WC-7892-SYS', qrDataUrl: null });
   const [isPaymentPaid, setIsPaymentPaid] = useState(false);
   const [detailSheet, setDetailSheet] = useState<string | null>(null);
 
   const [founderPreviewMode, setFounderPreviewMode] = useState<'NONE' | 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE'>('NONE');
-  const [salonOwnerUiLang, setSalonOwnerUiLang] = useState<'en' | 'ur' | 'ar'>('en');
-
-  const refreshVoiceAndUsage = React.useCallback(async () => {
-    try {
-      const [healthRes, threadsRes, usageRes] = await Promise.allSettled([
-        fetch('/api/health/whatsapp', { credentials: 'include' }),
-        fetch('/api/voice/threads', { credentials: 'include' }),
-        fetch('/api/voice/usage', { credentials: 'include' }),
-      ]);
-
-      if (healthRes.status === 'fulfilled' && healthRes.value.ok) {
-        const healthData = (await healthRes.value.json()) as {
-          status?: 'HEALTHY' | 'ISSUE';
-        };
-        if (healthData?.status === 'ISSUE' || healthData?.status === 'HEALTHY') {
-          setWhatsAppHealth(healthData.status);
-        }
-      }
-
-      if (threadsRes.status === 'fulfilled' && threadsRes.value.ok) {
-        const threadsData = (await threadsRes.value.json()) as {
-          threads?: VoiceThreadItem[];
-        };
-        if (Array.isArray(threadsData?.threads) && threadsData.threads.length > 0) {
-          setVoiceThreads(threadsData.threads);
-        }
-      }
-
-      if (usageRes.status === 'fulfilled' && usageRes.value.ok) {
-        const usageData = (await usageRes.value.json()) as
-          | ({ usage?: LiveUsageMeter } & Partial<LiveUsageMeter>);
-        const parsedUsage = usageData?.usage
-          ? usageData.usage
-          : typeof usageData?.usagePercent === 'number'
-          ? (usageData as LiveUsageMeter)
-          : null;
-        if (parsedUsage) {
-          setUsageMeter(parsedUsage);
-        }
-      }
-    } catch {
-      // Non-blocking fallback for static/offline hosts
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isCheckingSession || !authUser) return;
-    void refreshVoiceAndUsage();
-    if (authUser.userRole === 'FOUNDER' || authUser.userRole === 'AGENT') {
-      fetch('/api/finance/summary')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { cashHeld?: number } | null) => {
-          if (typeof data?.cashHeld === 'number') {
-            setKamranCashHeld(data.cashHeld);
-          }
-        })
-        .catch(() => {});
-    }
-    if (activeRole !== 'FOUNDER') return;
-    const interval = window.setInterval(() => {
-      void refreshVoiceAndUsage();
-    }, 8000);
-    return () => window.clearInterval(interval);
-  }, [isCheckingSession, authUser, activeRole, refreshVoiceAndUsage]);
-
-  useEffect(() => {
-    if (!isCheckingSession && authUser && activeTab === 'Voice') {
-      void refreshVoiceAndUsage();
-    }
-  }, [isCheckingSession, authUser, activeTab, refreshVoiceAndUsage]);
-
-  useEffect(() => {
-    if (!isPairingModalOpen) return;
-    fetch('/api/founder/pairing-qr')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { pairingKey?: string; qrDataUrl?: string } | null) => {
-        if (data?.pairingKey) {
-          setPairingModalQr({
-            pairingKey: data.pairingKey,
-            qrDataUrl: data.qrDataUrl || null,
-          });
-        }
-      })
-      .catch(() => {});
-  }, [isPairingModalOpen]);
 
   const handleLaunchFounderPreview = (mode: 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE') => {
-    if (authUser?.userRole !== 'FOUNDER') return;
     setFounderPreviewMode(mode);
     setIsSidebarOpen(false);
     if (mode === 'AGENT') {
@@ -575,12 +235,10 @@ export default function App() {
       setActiveTab('Agent Hub / Onboarding');
       showToast('🔍 Previewing exact isolated Field Agent screen. Tap Return to Founder anytime.');
     } else if (mode === 'SALON_ONBOARD') {
-      setCompletedOnboardingData(null);
-      setOnboardedSalonName(undefined);
       setHasCompletedSalonOnboarding(false);
       setActiveRole('SALON_OWNER');
       setActiveTab('Salon Owner Dashboard');
-      showToast('🔍 Previewing exact 4-step Salon Self-Onboarding terminal. Tap Return to Founder anytime.');
+      showToast('🔍 Previewing exact 4-step New Salon Signup screen.');
     } else {
       setHasCompletedSalonOnboarding(true);
       setActiveRole('SALON_OWNER');
@@ -590,7 +248,6 @@ export default function App() {
   };
 
   const handleExitFounderPreview = () => {
-    if (authUser?.userRole !== 'FOUNDER') return;
     setFounderPreviewMode('NONE');
     setActiveRole('FOUNDER');
     setActiveTab('Settings');
@@ -617,10 +274,10 @@ export default function App() {
       } else {
         const origin = window.location.origin;
         const dynamicManifest = {
-          id: '/',
+          id: activeRole === 'FIELD_AGENT' ? '/?role=agent' : '/?role=salon_owner&paired=true',
           name: 'WorkCraft',
           short_name: 'WorkCraft',
-          start_url: '/',
+          start_url: activeRole === 'FIELD_AGENT' ? '/?role=agent' : '/?role=salon_owner&paired=true',
           scope: '/',
           display: 'standalone',
           background_color: '#0D1117',
@@ -642,10 +299,6 @@ export default function App() {
       if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl);
     };
   }, [activeRole]);
-
-  useEffect(() => {
-    setActiveTelemetryRole(authUser?.userRole || activeRole);
-  }, [authUser?.userRole, activeRole]);
 
   const BASE_COUNTRY_PAUSE_LIST: { code: string; label: string; flag: string }[] = [
     { code: 'PK', label: 'Pakistan', flag: '🇵🇰' },
@@ -696,22 +349,12 @@ export default function App() {
     showToast(`💵 PKR ${amount.toLocaleString()} Cash Held Logged with Biometric Seal · Receipts sent to agent & ${salonName}`);
   };
 
-  const handleCashRemitted = (amount: number) => {
-    setKamranCashHeld((prev) => Math.max(0, prev - amount));
-    showToast(`✅ PKR ${amount.toLocaleString()} verified into WORKCRAFT Main Account · Pakistani Agent Hub restored automatically!`);
-  };
-
-  const handlePairingComplete = (salonName: string, payload?: OnboardedSalonPayload) => {
+  const handlePairingComplete = (salonName: string) => {
     setActiveSalonCount((prev) => prev + 1);
     setIsSalonPwaModalOpen(false);
     setOnboardedSalonName(salonName);
-    if (payload) {
-      setCompletedOnboardingData(payload);
-    }
     setHasCompletedSalonOnboarding(true);
-    setActiveRole('SALON_OWNER');
-    setActiveTab('Salon Owner Dashboard');
-    showToast(`🎉 ${salonName} Paired Successfully! Welcome to your Live Salon Owner Dashboard.`);
+    showToast(`🎉 ${salonName} Paired Successfully! Welcome to your Salon Owner Dashboard.`);
   };
 
   const handleInspectSalon = (salonName: string) => {
@@ -725,14 +368,12 @@ export default function App() {
     setIsSidebarOpen(false);
   };
 
-  const handleTestSocialLaunch = (source: 'Facebook' | 'Instagram' | 'TikTok' | 'WhatsApp') => {
+  const handleTestSocialLaunch = (source: 'Facebook' | 'Instagram' | 'TikTok') => {
     setSocialCampaignSource(`${source} Ads Campaign`);
-    setCompletedOnboardingData(null);
-    setOnboardedSalonName(undefined);
     setHasCompletedSalonOnboarding(false);
     setActiveRole('SALON_OWNER');
     setActiveTab('Salon Owner Dashboard');
-    showToast(`📱 Previewing mobile Step 1 signup arrival from ${source} Ad Campaign!`);
+    showToast(`📱 Simulated direct mobile arrival from ${source} Ad Campaign. Founder screens bypassed!`);
   };
 
   // Strict 3-Role Sidebar & Bottom Navigation Isolation (Query 1)
@@ -765,184 +406,51 @@ export default function App() {
           ['Revenue', WalletCards, 'Revenue'],
         ];
 
-  if (isCheckingSession) {
+  const handleTriggerLockPreview = () => {
+    try {
+      sessionStorage.setItem(MANUAL_LOCK_STORAGE_KEY, 'true');
+      sessionStorage.removeItem(FOUNDER_SESSION_STORAGE_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+    setIsFounderAuthenticated(false);
+    setIsManualLockPreview(true);
+    setFounderPreviewMode('NONE');
+  };
+
+  const handleResumeAuditWindow = () => {
+    if (!isGenuineWindowOpen) return;
+    try {
+      sessionStorage.removeItem(MANUAL_LOCK_STORAGE_KEY);
+    } catch {
+      // Ignore
+    }
+    setIsManualLockPreview(false);
+    showToast('⏱️ 24-Hour Public Inspection Window resumed cleanly.');
+  };
+
+  // Enforce automatic lock as soon as 24-hour timer expires (or during lock preview)
+  if (!isAuditOpen && !isFounderAuthenticated) {
     return (
-      <main className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex items-center justify-center p-6">
-        <div className="rounded-2xl border border-[#30363D] bg-[#161B22] px-6 py-5 text-xs font-mono text-[#8B949E]">
-          Opening WorkCraft Portal...
-        </div>
-      </main>
-    );
-  }
-
-  if (!authUser) {
-    if (agentInviteToken && initialEnrollAgentData) {
-      return (
-        <main className="min-h-screen overflow-x-hidden bg-[#0D1117] text-[#F0F6FC] font-sans pb-28">
-          <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-[#30363D] bg-[#0D1117]/95 backdrop-blur-md px-4 sm:px-7 gap-3">
-            <div className="inline-flex items-center gap-1.5 rounded-lg border border-[#9E6A03] bg-[#3B2E0B] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#D29922]">
-              <Lock className="size-3 shrink-0" />
-              <span>SINGLE-USE INVITE</span>
-            </div>
-            <div className="flex flex-col items-center justify-center leading-none">
-              <img
-                src={WATERMARK_URL}
-                alt="WORKCRAFT"
-                className="h-auto w-[132px] object-contain opacity-95"
-              />
-              <span className="mt-1 text-[9px] font-mono font-black tracking-[0.25em] text-[#06B6D4] uppercase">
-                FIELD AGENT ENROLLMENT
-              </span>
-            </div>
-            <div className="inline-flex items-center gap-1 rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950]">
-              <ShieldCheck className="size-3 shrink-0" />
-              <span className="hidden sm:inline">Locks After Setup</span>
-            </div>
-          </header>
-
-          <div className="mx-auto max-w-4xl w-full p-4 sm:p-6 space-y-4">
-            {agentInviteError && (
-              <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] px-4 py-3 text-xs font-mono font-bold text-[#F85149] break-words [overflow-wrap:break-word]">
-                {agentInviteError}
-              </div>
-            )}
-            <SilentSelfHealingBoundary
-              areaName="Agent Invite Enrollment"
-              onSilentRecovered={(d) =>
-                reportClientIncident({
-                  role: 'AGENT',
-                  area: d.areaName,
-                  message: d.message,
-                  severity: 'MEDIUM',
-                  resolutionStatus: 'AUTO_RESOLVED',
-                  recoveryMs: 800,
-                })
-              }
-            >
-              <FieldAgentHub
-                userRole="FIELD_AGENT"
-                initialAutoOpenEnrollment={true}
-                initialEnrollAgentData={initialEnrollAgentData}
-                onAgentEnrollmentComplete={handleAgentEnrollmentComplete}
-                onAgentProfileNameSync={(name) => {
-                  const trimmed = name.trim();
-                  if (!trimmed) return;
-                  setEnrolledAgentDisplayName(trimmed);
-                  try {
-                    localStorage.setItem('wcl_enrolled_agent_name_v1', trimmed);
-                  } catch {}
-                }}
-                onSalonCreated={() => {}}
-              />
-            </SilentSelfHealingBoundary>
-          </div>
-        </main>
-      );
-    }
-
-    if (agentInviteError) {
-      return (
-        <main className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex items-center justify-center p-5">
-          <div className="w-full max-w-md rounded-3xl border border-[#da3633] bg-[#161B22] p-6 space-y-4 text-center">
-            <div className="mx-auto grid size-14 place-items-center rounded-2xl border border-[#da3633] bg-[#4C1C1D] text-[#F85149]">
-              <Lock className="size-7" />
-            </div>
-            <span className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-[#F85149] block">
-              INVITE PERMANENTLY LOCKED
-            </span>
-            <h1 className="text-xl font-black text-[#F0F6FC]">
-              Single-Use Enrollment Link Unavailable
-            </h1>
-            <p className="text-xs font-sans text-[#8B949E] leading-relaxed">
-              {agentInviteError}
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                if (typeof window !== 'undefined') {
-                  window.location.href = '/';
-                }
-              }}
-              className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] text-xs font-mono font-bold uppercase transition"
-            >
-              Return to WorkCraft Home
-            </button>
-          </div>
-        </main>
-      );
-    }
-
-    if (isPublicOnboardingOpen) {
-      return (
-        <main className="min-h-screen overflow-x-hidden bg-[#0D1117] text-[#F0F6FC] font-sans pb-28">
-          <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-[#30363D] bg-[#0D1117]/95 backdrop-blur-md px-4 sm:px-7 gap-3">
-            <div className="inline-flex items-center gap-1.5 rounded-lg border border-[#30363D] bg-[#161B22] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#06B6D4]">
-              <Scissors className="size-3 shrink-0" />
-              <span>1 WHATSAPP / BRANCH</span>
-            </div>
-
-            <div className="flex flex-col items-center justify-center leading-none">
-              <img
-                src={WATERMARK_URL}
-                alt="WORKCRAFT"
-                className="h-auto w-[132px] object-contain opacity-95"
-              />
-              <span className="mt-1 text-[9px] font-mono font-black tracking-[0.25em] text-[#06B6D4] uppercase">
-                SALON SETUP &amp; INSTALL
-              </span>
-            </div>
-
-            <div className="inline-flex items-center gap-1 rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950]">
-              <ShieldCheck className="size-3 shrink-0" />
-              <span className="hidden sm:inline">Live Floor Ready</span>
-            </div>
-          </header>
-
-          <div className="mx-auto max-w-4xl w-full p-4 sm:p-6 space-y-4">
-            {publicOnboardingError && (
-              <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] px-4 py-3 text-xs font-mono font-bold text-[#F85149] break-words [overflow-wrap:break-word]">
-                {publicOnboardingError}
-              </div>
-            )}
-            <SilentSelfHealingBoundary
-              areaName="Salon Self-Onboarding"
-              onSilentRecovered={(d) =>
-                reportClientIncident({
-                  role: 'END_USER',
-                  area: d.areaName,
-                  message: d.message,
-                  severity: 'MEDIUM',
-                  resolutionStatus: 'AUTO_RESOLVED',
-                  recoveryMs: 800,
-                })
-              }
-            >
-              <FieldAgentHub
-                userRole="SALON_OWNER"
-                socialCampaignSource={socialCampaignSource}
-                onSalonCreated={() => {}}
-                onSalonOnboardingComplete={handleCompletePublicOnboarding}
-              />
-            </SilentSelfHealingBoundary>
-          </div>
-        </main>
-      );
-    }
-
-    return (
-      <FounderUnlockGate
-        onUnlocked={(user, unlockedVia) => {
-          applyVerifiedSession(user);
-          if (
-            unlockedVia === 'PIN' &&
-            detectMobileFounderDevice() &&
-            supportsPlatformBiometric() &&
-            !loadStoredFounderBiometric()
-          ) {
-            setShowMobileBiometricPrompt(true);
-          } else {
-            setShowMobileBiometricPrompt(false);
+      <FounderPinGate
+        blockedRoute={detectedPublicRoute}
+        isGenuineWindowStillOpen={isGenuineWindowOpen}
+        onUnlockSuccess={(mode) => {
+          if (mode === 'RESUME_AUDIT') {
+            handleResumeAuditWindow();
+            return;
           }
+          try {
+            sessionStorage.setItem(FOUNDER_SESSION_STORAGE_KEY, 'true');
+          } catch {
+            // Ignore
+          }
+          setIsFounderAuthenticated(true);
+          if (detectedPublicRoute.type) {
+            setActiveRole('FOUNDER');
+            setActiveTab('Overview');
+          }
+          showToast('🔓 Founder Security PIN verified. Command Center unlocked.');
         }}
       />
     );
@@ -989,234 +497,31 @@ export default function App() {
 
           {/* Main Nav Items */}
           <nav className="mt-3 flex flex-col gap-1.5" aria-label="Main navigation">
-            {activeRole === 'SALON_OWNER' && hasCompletedSalonOnboarding ? (
-              <>
-                {[
-                  {
-                    id: 'LIVE' as const,
-                    label:
-                      salonOwnerUiLang === 'ur'
-                        ? 'لائیو فلور'
-                        : salonOwnerUiLang === 'ar'
-                        ? 'الصالة المباشرة'
-                        : 'Live Floor',
-                    Icon: Scissors,
-                    badge: false,
-                  },
-                  {
-                    id: 'PASSES' as const,
-                    label:
-                      salonOwnerUiLang === 'ur'
-                        ? 'پاسز اور ایونٹس'
-                        : salonOwnerUiLang === 'ar'
-                        ? 'الباقات والمناسبات'
-                        : 'Passes & Events',
-                    Icon: Award,
-                    badge: false,
-                  },
-                  {
-                    id: 'VOICE' as const,
-                    label:
-                      salonOwnerUiLang === 'ur'
-                        ? 'وائس ہیلپ'
-                        : salonOwnerUiLang === 'ar'
-                        ? 'المساعدة الصوتية'
-                        : 'Voice Help',
-                    Icon: Mic,
-                    badge: ownerHardwareStatus.hasFounderVoiceReply,
-                  },
-                  {
-                    id: 'MANAGE' as const,
-                    label:
-                      salonOwnerUiLang === 'ur'
-                        ? 'مینج کریں'
-                        : salonOwnerUiLang === 'ar'
-                        ? 'الإدارة'
-                        : 'Manage',
-                    Icon: SlidersHorizontal,
-                    badge: false,
-                  },
-                ].map(({ id, label, Icon, badge }) => {
-                  const isActive = salonOwnerSection === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => {
-                        setActiveTab('Salon Owner Dashboard');
-                        setSalonOwnerSection(id);
-                        setIsSidebarOpen(false);
-                      }}
-                      className={`flex min-h-[48px] items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-[12px] font-mono transition ${
-                        isActive
-                          ? 'bg-[#21262D] text-[#F0F6FC] border border-[#06B6D4]/50 font-bold'
-                          : 'text-[#8B949E] hover:bg-[#21262D]/60 hover:text-[#F0F6FC] border border-transparent'
-                      }`}
-                    >
-                      <Icon className={`size-[17px] shrink-0 ${isActive ? 'text-[#06B6D4]' : 'text-[#D29922]'}`} />
-                      <span>{label}</span>
-                      {badge && (
-                        <span className="ml-auto size-2.5 rounded-full bg-[#3FB950] shadow-[0_0_8px_#3FB950]" />
-                      )}
-                    </button>
-                  );
-                })}
-
-                {/* Counter Hardware Controls Drawer Section (Moved off Live Floor main header) */}
-                <div className="mt-4 pt-3 border-t border-[#21262D] space-y-2">
-                  <div className="px-1 text-[10px] font-mono font-bold uppercase tracking-[.2em] text-[#6E7681]">
-                    {salonOwnerUiLang === 'ur'
-                      ? 'کاؤنٹر کنٹرولز'
-                      : salonOwnerUiLang === 'ar'
-                      ? 'أدوات الكاونتر'
-                      : 'COUNTER CONTROLS'}
-                  </div>
-
-                  {/* Unified Wake ON / OFF (24/7 WhatsApp Backend always stays live) */}
-                  <div className="space-y-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOwnerHardwareAction((prev) => ({
-                          type: 'WAKE',
-                          seq: (prev?.seq || 0) + 1,
-                        }));
-                      }}
-                      className={`flex w-full min-h-[42px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] font-mono font-bold transition ${
-                        !ownerHardwareStatus.isCounterSleeping
-                          ? 'border-[#3FB950]/50 bg-[#1B4332]/40 text-[#3FB950]'
-                          : 'border-[#D29922]/50 bg-[#4A320A]/40 text-[#D29922]'
-                      }`}
-                    >
-                      <span className="flex items-center gap-2 truncate">
-                        {ownerHardwareStatus.isCounterSleeping ? (
-                          <Moon className="size-3.5 shrink-0" />
-                        ) : (
-                          <Smartphone className="size-3.5 shrink-0" />
-                        )}
-                        <span className="truncate">
-                          {salonOwnerUiLang === 'ur'
-                            ? ownerHardwareStatus.isCounterSleeping
-                              ? 'کاؤنٹر ویک: آف'
-                              : 'کاؤنٹر ویک: آن'
-                            : salonOwnerUiLang === 'ar'
-                            ? ownerHardwareStatus.isCounterSleeping
-                              ? 'تنبيه الكاونتر: متوقف'
-                              : 'تنبيه الكاونتر: مفعّل'
-                            : ownerHardwareStatus.isCounterSleeping
-                            ? 'Counter Wake: OFF'
-                            : 'Counter Wake: ON'}
-                        </span>
-                      </span>
-                      <span className="flex items-center gap-1.5 shrink-0">
-                        {ownerHardwareStatus.overnightCount > 0 && (
-                          <span className="rounded-full bg-[#06B6D4]/20 px-1.5 py-0.5 text-[9px] text-[#06B6D4]">
-                            {ownerHardwareStatus.overnightCount}
-                          </span>
-                        )}
-                        <span className="text-[9px] uppercase">
-                          {ownerHardwareStatus.isCounterSleeping ? 'OFF' : 'ON'}
-                        </span>
-                      </span>
-                    </button>
-                    <p className="px-1 text-[10px] font-sans leading-snug text-[#8B949E]">
-                      {salonOwnerUiLang === 'ur'
-                        ? 'واٹس ایپ بوٹ 24/7 آن رہتا ہے — آف کرنے پر رات کے میسجز جمع ہو کر صبح چلتے ہیں۔'
-                        : salonOwnerUiLang === 'ar'
-                        ? 'بوت واتساب يعمل 24/7 — عند الإيقاف تُحفظ الرسائل الليلية لتشغيلها صباحاً.'
-                        : '24/7 WhatsApp Backend Live · Turning OFF quiets counter chimes & queues overnight bookings.'}
-                    </p>
-                  </div>
-
-                  {/* Loudspeaker Boost (AUX / Bluetooth) + Test Speaker + Battery Guidance */}
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOwnerHardwareAction((prev) => ({
-                            type: 'AUX',
-                            seq: (prev?.seq || 0) + 1,
-                          }));
-                        }}
-                        className={`flex flex-1 min-h-[42px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] font-mono font-bold transition ${
-                          ownerHardwareStatus.isLoudspeakerBoostActive
-                            ? 'border-[#D29922]/60 bg-[#4A320A]/40 text-[#D29922]'
-                            : 'border-[#30363D] bg-[#0D1117] text-[#8B949E] hover:text-[#F0F6FC]'
-                        }`}
-                      >
-                        <span className="flex items-center gap-2 truncate">
-                          <Zap className="size-3.5 shrink-0" />
-                          <span className="truncate">
-                            {salonOwnerUiLang === 'ur'
-                              ? 'لاؤڈ اسپیکر بوسٹ'
-                              : salonOwnerUiLang === 'ar'
-                              ? 'مضخم السماعة AUX'
-                              : 'AUX / BT Boost'}
-                          </span>
-                        </span>
-                        <span className="text-[9px] uppercase">
-                          {ownerHardwareStatus.isLoudspeakerBoostActive ? 'ON' : 'OFF'}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOwnerHardwareAction((prev) => ({
-                            type: 'TEST_SPEAKER',
-                            seq: (prev?.seq || 0) + 1,
-                          }));
-                        }}
-                        title="Test Speaker"
-                        className="flex min-h-[42px] items-center gap-1 rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-2.5 py-2 text-[10px] font-mono font-bold text-[#06B6D4] transition shrink-0"
-                      >
-                        <Volume2 className="size-3.5 shrink-0" />
-                        <span>
-                          {salonOwnerUiLang === 'ur'
-                            ? 'ٹیسٹ'
-                            : salonOwnerUiLang === 'ar'
-                            ? 'اختبار'
-                            : 'Test'}
-                        </span>
-                      </button>
-                    </div>
-                    <p className="px-1 text-[10px] font-sans leading-snug text-[#8B949E]">
-                      {salonOwnerUiLang === 'ur'
-                        ? 'وائرڈ AUX کیبل بلیوٹوتھ کے مقابلے میں ~50% کم بیٹری استعمال کرتی ہے؛ پیئرڈ بلیوٹوتھ اسپیکر بھی چلتا ہے۔'
-                        : salonOwnerUiLang === 'ar'
-                        ? 'كابل AUX السلكي يستهلك بطارية أقل بـ ~50% من البلوتوث؛ السماعة المقترنة بالبلوتوث تعمل أيضاً.'
-                        : 'Wired AUX uses ~50% less battery than Bluetooth; phone-paired Bluetooth speakers also work automatically.'}
-                    </p>
-                  </div>
-                </div>
-              </>
-            ) : (
-              navItems.map(([name, Icon]) => {
-                const isActive = activeTab === name;
-                return (
-                  <button
-                    key={name}
-                    onClick={() => handleTabChange(name)}
-                    className={`flex min-h-[48px] items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-[12px] font-mono transition ${
-                      isActive
-                        ? 'bg-[#21262D] text-[#F0F6FC] border border-[#06B6D4]/50 font-bold'
-                        : 'text-[#8B949E] hover:bg-[#21262D]/60 hover:text-[#F0F6FC] border border-transparent'
-                    }`}
-                  >
-                    <Icon className={`size-[17px] shrink-0 ${isActive ? 'text-[#06B6D4]' : 'text-[#D29922]'}`} />
-                    <span>{name}</span>
-                    {name === 'Voice' && (
-                      <span className="ml-auto rounded-full bg-[#06B6D4]/15 border border-[#06B6D4]/40 px-2 py-0.5 text-[9px] font-bold text-cyan-400">
-                        {unreadVoiceCount} unread
-                      </span>
-                    )}
-                    {name === 'Revenue' && (
-                      <span className="ml-auto size-2 rounded-full bg-[#D29922]" />
-                    )}
-                  </button>
-                );
-              })
-            )}
+            {navItems.map(([name, Icon]) => {
+              const isActive = activeTab === name;
+              return (
+                <button
+                  key={name}
+                  onClick={() => handleTabChange(name)}
+                  className={`flex min-h-[48px] items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-[12px] font-mono transition ${
+                    isActive
+                      ? 'bg-[#21262D] text-[#F0F6FC] border border-[#06B6D4]/50 font-bold'
+                      : 'text-[#8B949E] hover:bg-[#21262D]/60 hover:text-[#F0F6FC] border border-transparent'
+                  }`}
+                >
+                  <Icon className={`size-[17px] shrink-0 ${isActive ? 'text-[#06B6D4]' : 'text-[#D29922]'}`} />
+                  <span>{name}</span>
+                  {name === 'Voice' && (
+                    <span className="ml-auto rounded-full bg-[#06B6D4]/15 border border-[#06B6D4]/40 px-2 py-0.5 text-[9px] font-bold text-cyan-400">
+                      2 unread
+                    </span>
+                  )}
+                  {name === 'Revenue' && (
+                    <span className="ml-auto size-2 rounded-full bg-[#D29922]" />
+                  )}
+                </button>
+              );
+            })}
           </nav>
 
           {/* Plain-English System Line Status (Query 5: Green Healthy vs Red Issue) */}
@@ -1265,39 +570,21 @@ export default function App() {
             </div>
             {/* 2. Middle: Role in Cyber Cyan (#06B6D4) */}
             {/* 3. Bottom: Name in #F0F6FC */}
-            <div className="text-center space-y-3">
-              <div>
-                <p className="text-xs font-mono font-black tracking-[0.3em] text-[#06B6D4] uppercase">
-                  {activeRole === 'FOUNDER'
-                    ? 'FOUNDER'
-                    : activeRole === 'FIELD_AGENT'
-                    ? 'FIELD AGENT'
-                    : 'SALON PARTNER'}
-                </p>
-                <p className="mt-1 text-sm font-bold text-[#F0F6FC] tracking-wide">
-                  {activeRole === 'FIELD_AGENT'
-                    ? enrolledAgentDisplayName ||
-                      (authUser.userRole === 'AGENT' ? authUser.displayName : 'Kamran Tariq')
-                    : activeRole === 'SALON_OWNER'
-                    ? completedOnboardingData?.ownerName ||
-                      (authUser.userRole === 'SALON_OWNER' ? authUser.displayName : 'Hamza Tariq')
-                    : authUser.displayName}
-                </p>
-                {activeRole === 'SALON_OWNER' &&
-                  (completedOnboardingData?.salonName || authUser.salonName) && (
-                    <p className="text-[11px] font-mono text-[#8B949E] truncate">
-                      {completedOnboardingData?.salonName || authUser.salonName}
-                    </p>
-                  )}
-              </div>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#F85149] hover:text-[#F85149] text-[#8B949E] text-xs font-mono font-bold transition flex items-center justify-center gap-2"
-              >
-                <LogOut className="size-3.5" />
-                <span>Sign Out</span>
-              </button>
+            <div className="text-center">
+              <p className="text-xs font-mono font-black tracking-[0.3em] text-[#06B6D4] uppercase">
+                {activeRole === 'FOUNDER'
+                  ? 'FOUNDER'
+                  : activeRole === 'FIELD_AGENT'
+                  ? 'FIELD AGENT'
+                  : 'SALON PARTNER'}
+              </p>
+              <p className="mt-1 text-sm font-bold text-[#F0F6FC] tracking-wide">
+                {activeRole === 'FOUNDER'
+                  ? 'Farhan Abid'
+                  : activeRole === 'FIELD_AGENT'
+                  ? initialEnrollAgentData?.name || 'Authorized Agent'
+                  : onboardedSalonName || 'Private Salon Portal'}
+              </p>
             </div>
           </div>
         </aside>
@@ -1314,7 +601,7 @@ export default function App() {
         {/* Main Application Body */}
         <section className="min-w-0 flex-1 flex flex-col pb-32 lg:pb-10">
           {/* Top Bar Header with WORKCRAFT Watermark + DASHBOARD */}
-          <header className="sticky top-0 z-30 grid min-h-[72px] pt-safe grid-cols-[auto_1fr_auto] items-center border-b border-[#30363D] bg-[#0D1117]/95 backdrop-blur-md px-4 sm:px-7 gap-3">
+          <header className="sticky top-0 z-30 grid h-[72px] grid-cols-[auto_1fr_auto] items-center border-b border-[#30363D] bg-[#0D1117]/95 backdrop-blur-md px-4 sm:px-7 gap-3">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setIsSidebarOpen(true)}
@@ -1347,6 +634,16 @@ export default function App() {
             <div className="flex items-center justify-end gap-2 min-w-[36px] relative">
               {activeRole === 'FOUNDER' ? (
                 <>
+                  <button
+                    type="button"
+                    onClick={handleTriggerLockPreview}
+                    className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 sm:px-3 text-[10px] font-mono font-bold text-[#D29922] hover:border-[#D29922] transition"
+                    title="Lock Founder Portal (PIN Required)"
+                  >
+                    <Lock className="size-3.5" />
+                    <span className="hidden md:inline">Lock</span>
+                  </button>
+
                   <button
                     onClick={() => setIsNotificationsOpen(true)}
                     className="relative min-h-[44px] min-w-[44px] grid place-items-center rounded-xl border border-[#30363D] bg-[#161B22] text-[#8B949E] hover:border-[#484F58] hover:text-[#F0F6FC] transition"
@@ -1454,21 +751,10 @@ export default function App() {
                   </div>
                 </>
               ) : (
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950]">
-                    <ShieldCheck className="size-3.5" />
-                    <span className="hidden sm:inline">Verified Session</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    aria-label="Sign out"
-                    title="Sign out"
-                    className="min-h-[44px] min-w-[44px] grid place-items-center rounded-xl border border-[#30363D] bg-[#161B22] text-[#8B949E] hover:border-[#F85149] hover:text-[#F85149] transition"
-                  >
-                    <LogOut className="size-4" />
-                  </button>
-                </div>
+                <span className="inline-flex items-center gap-1 rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1.5 text-[10px] font-mono font-bold text-[#3FB950]">
+                  <ShieldCheck className="size-3.5" />
+                  <span className="hidden sm:inline">Private Session</span>
+                </span>
               )}
             </div>
           </header>
@@ -1496,129 +782,120 @@ export default function App() {
 
           {/* Body Content Container */}
           <div className="mx-auto max-w-[1440px] w-full p-4 sm:p-7 pb-28 lg:pb-10 flex-1 overflow-x-hidden">
-            {showMobileBiometricPrompt && authUser.userRole === 'FOUNDER' && (
-              <FounderBiometricEnrollPrompt
-                onEnrolled={() => {
-                  setShowMobileBiometricPrompt(false);
-                  showToast('✓ Mobile Biometric saved! Future mobile logins offer both PIN & Biometric.');
-                }}
-                onDismiss={() => setShowMobileBiometricPrompt(false)}
-              />
-            )}
-            {/* View Mode Header & Status Bar (Kept compact for onboarded Salon Owners so Top Status Strip leads immediately) */}
-            {!(activeRole === 'SALON_OWNER' && hasCompletedSalonOnboarding) && (
-              <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
-                <div>
-                  {/* QUERY 5: GREEN HEALTHY vs RED ISSUE WHATSAPP HEALTH BOX + QUERY 2 COUNTRY PAUSE PILLS */}
-                  <div className="flex flex-wrap items-center gap-2 mb-2 font-mono">
-                    <div
-                      className={`inline-flex items-center gap-2.5 rounded-xl border px-3.5 py-2 text-xs font-mono font-bold transition ${
-                        whatsAppHealth === 'ISSUE'
-                          ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149]'
-                          : 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
-                      }`}
+            {/* View Mode Header & Status Bar */}
+            <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+              <div>
+                {/* QUERY 5: GREEN HEALTHY vs RED ISSUE WHATSAPP HEALTH BOX + QUERY 2 COUNTRY PAUSE PILLS */}
+                <div className="flex flex-wrap items-center gap-2 mb-2 font-mono">
+                  <div
+                    className={`inline-flex items-center gap-2.5 rounded-xl border px-3.5 py-2 text-xs font-mono font-bold transition ${
+                      whatsAppHealth === 'ISSUE'
+                        ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149]'
+                        : 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
+                    }`}
+                  >
+                    <span className="relative flex size-2.5 shrink-0">
+                      <span
+                        className={`absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping ${
+                          whatsAppHealth === 'ISSUE' ? 'bg-[#F85149]' : 'bg-[#3FB950]'
+                        }`}
+                      />
+                      <span
+                        className={`relative inline-flex rounded-full size-2.5 ${
+                          whatsAppHealth === 'ISSUE'
+                            ? 'bg-[#F85149]'
+                            : 'bg-[#3FB950]'
+                        }`}
+                      />
+                    </span>
+                    <span>
+                      {whatsAppHealth === 'ISSUE'
+                        ? 'WhatsApp Line Issue: Disconnected / Blocked'
+                        : 'WhatsApp Line: Connected & Healthy'}
+                    </span>
+                  </div>
+
+                  {activeRole === 'FOUNDER' && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setWhatsAppHealth((prev) => (prev === 'HEALTHY' ? 'ISSUE' : 'HEALTHY'))
+                      }
+                      className="min-h-[40px] rounded-xl border border-[#30363D] bg-[#161B22] hover:bg-[#21262D] px-3 py-1.5 text-[10px] text-[#8B949E] hover:text-[#F0F6FC] transition"
+                      title="Preview Green Healthy vs Red Issue alert state"
                     >
-                      <span className="relative flex size-2.5 shrink-0">
-                        <span
-                          className={`absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping ${
-                            whatsAppHealth === 'ISSUE' ? 'bg-[#F85149]' : 'bg-[#3FB950]'
-                          }`}
-                        />
-                        <span
-                          className={`relative inline-flex rounded-full size-2.5 ${
-                            whatsAppHealth === 'ISSUE'
-                              ? 'bg-[#F85149]'
-                              : 'bg-[#3FB950]'
-                          }`}
-                        />
-                      </span>
-                      <span>
-                        {whatsAppHealth === 'ISSUE'
-                          ? 'WhatsApp Line Issue: Disconnected / Blocked'
-                          : 'WhatsApp Line: Connected & Healthy'}
+                      {whatsAppHealth === 'HEALTHY' ? 'Test Red Issue' : 'Restore Green Healthy'}
+                    </button>
+                  )}
+
+                  {isGlobalPaused && (
+                    <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3 py-1.5 text-[11px] font-bold text-[#D29922]">
+                      <Pause className="size-3" />
+                      <span>All Countries Paused</span>
+                    </div>
+                  )}
+
+                  {!isGlobalPaused && activePausedCountryList.length > 0 && (
+                    <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3 py-1.5 text-[11px] font-bold text-[#D29922] max-w-full overflow-hidden">
+                      <span className="break-words [overflow-wrap:break-word]">
+                        Paused: {activePausedCountryList.map((c) => `${c.flag} ${c.label}`).join(', ')} (Others Active)
                       </span>
                     </div>
-
-                    {isGlobalPaused && (
-                      <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3 py-1.5 text-[11px] font-bold text-[#D29922]">
-                        <Pause className="size-3" />
-                        <span>All Countries Paused</span>
-                      </div>
-                    )}
-
-                    {!isGlobalPaused && activePausedCountryList.length > 0 && (
-                      <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] px-3 py-1.5 text-[11px] font-bold text-[#D29922] max-w-full overflow-hidden">
-                        <span className="break-words [overflow-wrap:break-word]">
-                          Paused: {activePausedCountryList.map((c) => `${c.flag} ${c.label}`).join(', ')} (Others Active)
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  <h2 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl text-[#F0F6FC]">
-                    {activeTab === 'Agent Hub / Onboarding'
-                      ? 'Field Agent Command Hub'
-                      : activeTab === 'Salon Owner Dashboard'
-                      ? activeRole === 'FOUNDER'
-                        ? 'Salon Health & Package View'
-                        : 'Salon Owner Dashboard'
-                      : activeTab === 'Marketing'
-                      ? 'Founder Marketing & Social Campaigns'
-                      : activeTab === 'Overview'
-                      ? 'Founder Daily Overview'
-                      : activeTab}
-                  </h2>
-                  <p className="mt-1 text-sm text-[#8B949E] font-sans">
-                    {activeTab === 'Agent Hub / Onboarding'
-                      ? 'Manage field agents by country, track agent commissions, and repair salon connections.'
-                      : activeTab === 'Salon Owner Dashboard'
-                      ? activeRole === 'FOUNDER'
-                        ? 'Read-only view of each salon package, 5th-of-month payment status, and onboarding language.'
-                        : 'Complete setup steps to activate your live WhatsApp salon portal.'
-                      : activeTab === 'Marketing'
-                      ? 'Broadcast new features to all registered salons and share social signup ad links.'
-                      : activeTab === 'Voice'
-                      ? 'Listen to salon owner voice messages and reply automatically in their language.'
-                      : activeTab === 'Settings'
-                      ? 'All system protections run automatically and report directly to your Founder WhatsApp number.'
-                      : 'Your daily business snapshot: online salons, pending dues, agent cash, and unread voice messages.'}
-                  </p>
+                  )}
                 </div>
 
-                {activeTab === 'Overview' && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setIsReportModalOpen(true)}
-                      className="min-h-[48px] items-center gap-2 rounded-xl bg-[#06B6D4] px-5 py-2.5 text-xs font-mono font-bold text-[#0D1117] uppercase flex hover:bg-[#22D3EE] transition active:scale-95"
-                    >
-                      <span>View reports</span>
-                      <ArrowRight className="size-4" />
-                    </button>
-                  </div>
-                )}
+                <h2 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl text-[#F0F6FC]">
+                  {activeTab === 'Agent Hub / Onboarding'
+                    ? 'Field Agent Command Hub'
+                    : activeTab === 'Salon Owner Dashboard'
+                    ? activeRole === 'FOUNDER'
+                      ? 'Salon Health & Package View'
+                      : 'Salon Owner Dashboard'
+                    : activeTab === 'Marketing'
+                    ? 'Founder Marketing & Social Campaigns'
+                    : activeTab === 'Overview'
+                    ? 'Founder Daily Overview'
+                    : activeTab}
+                </h2>
+                <p className="mt-1 text-sm text-[#8B949E] font-sans">
+                  {activeTab === 'Agent Hub / Onboarding'
+                    ? 'Manage field agents by country, track agent commissions, and repair salon connections.'
+                    : activeTab === 'Salon Owner Dashboard'
+                    ? activeRole === 'FOUNDER'
+                      ? 'Read-only view of each salon package, 5th-of-month payment status, and onboarding language.'
+                      : 'Live queue, hands-free voice alerts, rate editor, upgrades, video deals, and window poster PDF.'
+                    : activeTab === 'Marketing'
+                    ? '1-Tap auto-tagged social campaign links for Facebook, Instagram, and TikTok that bypass founder screens on mobile.'
+                    : activeTab === 'Voice'
+                    ? 'Listen to salon owner voice messages and reply automatically in their language.'
+                    : activeTab === 'Settings'
+                    ? 'All system protections run automatically and report directly to your Founder WhatsApp number.'
+                    : 'Your daily business snapshot: online salons, pending dues, agent cash, and unread voice messages.'}
+                </p>
               </div>
-            )}
+
+              {activeTab === 'Overview' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsReportModalOpen(true)}
+                    className="min-h-[48px] items-center gap-2 rounded-xl bg-[#06B6D4] px-5 py-2.5 text-xs font-mono font-bold text-[#0D1117] uppercase flex hover:bg-[#22D3EE] transition active:scale-95"
+                  >
+                    <span>View reports</span>
+                    <ArrowRight className="size-4" />
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Dynamic Unified Content Wrapped in Silent Auto-Recovery Error Boundaries */}
             {activeTab === 'Agent Hub / Onboarding' ? (
               <SilentSelfHealingBoundary
                 areaName="Field Agent Hub"
-                onSilentRecovered={(d) => {
-                  reportClientIncident({
-                    role: activeRole === 'FIELD_AGENT' ? 'AGENT' : 'FOUNDER',
-                    area: d.areaName,
-                    message: d.message,
-                    severity: 'MEDIUM',
-                    resolutionStatus: 'AUTO_RESOLVED',
-                    recoveryMs: 800,
-                  });
-                  showToast(`🛡️ Auto-recovered ${d.areaName} seamlessly`);
-                }}
+                onSilentRecovered={(d) => showToast(`🛡️ Auto-recovered ${d.areaName} seamlessly`)}
               >
                 <FieldAgentHub
                   onSalonCreated={handleSalonCreated}
                   onCashCollected={handleCashCollected}
-                  onCashRemitted={handleCashRemitted}
                   onOpenSalonPwa={(token, salon) => {
                     setActiveOnboarding({ token, salonName: salon });
                     setIsSalonPwaModalOpen(true);
@@ -1629,58 +906,40 @@ export default function App() {
                   initialEnrollAgentData={initialEnrollAgentData || undefined}
                   userRole={activeRole === 'FIELD_AGENT' ? 'FIELD_AGENT' : 'FOUNDER'}
                   onActiveCountriesChange={setDynamicAgentCountries}
-                  onAgentProfileNameSync={(name) => {
-                    const trimmed = name.trim();
-                    if (!trimmed) return;
-                    setEnrolledAgentDisplayName(trimmed);
-                    try {
-                      localStorage.setItem('wcl_enrolled_agent_name_v1', trimmed);
-                    } catch {}
-                  }}
                 />
               </SilentSelfHealingBoundary>
             ) : activeTab === 'Salon Owner Dashboard' ? (
               <SilentSelfHealingBoundary
                 areaName="Salon Portal"
-                onSilentRecovered={(d) => {
-                  reportClientIncident({
-                    role: activeRole === 'SALON_OWNER' ? 'SALON_OWNER' : 'FOUNDER',
-                    area: d.areaName,
-                    message: d.message,
-                    severity: 'MEDIUM',
-                    resolutionStatus: 'AUTO_RESOLVED',
-                    recoveryMs: 800,
-                  });
-                  showToast(`🛡️ Auto-recovered ${d.areaName} seamlessly`);
-                }}
+                onSilentRecovered={(d) => showToast(`🛡️ Auto-recovered ${d.areaName} seamlessly`)}
               >
                 {activeRole === 'SALON_OWNER' && !hasCompletedSalonOnboarding ? (
-                  <FieldAgentHub
-                    userRole="SALON_OWNER"
-                    socialCampaignSource={socialCampaignSource}
-                    initialSalonName={onboardedSalonName || activeOnboarding?.salonName}
-                    onReturnToFounder={founderPreviewMode !== 'NONE' ? handleExitFounderPreview : undefined}
-                    onSalonCreated={handleSalonCreated}
-                    onSalonOnboardingComplete={(payload) => handlePairingComplete(payload.salonName, payload)}
-                  />
+                  <div className="max-w-4xl mx-auto space-y-4">
+                    <div className="rounded-2xl border border-[#30363D] bg-[#161B22] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] font-mono font-bold uppercase text-cyan-400 block">
+                          WELCOME TO WORKCRAFT LOCAL · STEP-BY-STEP SIGNUP
+                        </span>
+                        <p className="text-xs text-[#8B949E] font-sans mt-0.5">
+                          Complete the 4 quick onboarding steps below (language, services &amp; rates, payment, and WhatsApp link) to unlock your private Salon Owner Dashboard &amp; printable PDF window poster.
+                        </p>
+                      </div>
+                      <span className="rounded-lg border border-[#116329] bg-[#0D3822] px-2.5 py-1 text-[10px] font-mono font-bold text-[#3FB950] shrink-0">
+                        4-Step Onboarding First
+                      </span>
+                    </div>
+                    <SalonPwaSimulator
+                      salonName={onboardedSalonName || activeOnboarding?.salonName || 'My Beauty & Grooming Salon'}
+                      token={activeOnboarding?.token || 'wc_social_signup'}
+                      socialCampaignSource={socialCampaignSource || undefined}
+                      onReturnToFounder={founderPreviewMode !== 'NONE' ? handleExitFounderPreview : undefined}
+                      onPairingComplete={handlePairingComplete}
+                    />
+                  </div>
                 ) : (
                   <SalonOwnerDashboard
                     selectedSalonName={onboardedSalonName || inspectSalonName}
-                    lockedSalonId={
-                      authUser.userRole === 'SALON_OWNER' ? authUser.salonId : null
-                    }
-                    authUser={authUser}
-                    onLogout={handleLogout}
-                    salonCategory={completedOnboardingData?.salonCategory}
-                    onboardedData={completedOnboardingData}
                     isFounderInspector={activeRole === 'FOUNDER'}
-                    sectionMode={salonOwnerSection}
-                    onSectionModeChange={setSalonOwnerSection}
-                    externalHardwareAction={ownerHardwareAction}
-                    onHardwareStatusSync={setOwnerHardwareStatus}
-                    voiceThreads={voiceThreads}
-                    onVoiceThreadsUpdated={setVoiceThreads}
-                    onOwnerLangChange={setSalonOwnerUiLang}
                     onClose={activeRole === 'FOUNDER' ? () => handleTabChange('Overview') : undefined}
                   />
                 )}
@@ -1688,34 +947,17 @@ export default function App() {
             ) : (
               <SilentSelfHealingBoundary
                 areaName="Founder Workspace"
-                onSilentRecovered={(d) => {
-                  reportClientIncident({
-                    role: 'FOUNDER',
-                    area: d.areaName,
-                    message: d.message,
-                    severity: 'MEDIUM',
-                    resolutionStatus: 'AUTO_RESOLVED',
-                    recoveryMs: 800,
-                  });
-                  showToast(`🛡️ Auto-recovered ${d.areaName} cleanly`);
-                }}
+                onSilentRecovered={(d) => showToast(`🛡️ Auto-recovered ${d.areaName} cleanly`)}
               >
                 {activeTab === 'Voice' ? (
-                  <VoiceSection
-                    threads={voiceThreads}
-                    onThreadsUpdated={setVoiceThreads}
-                    onUsageUpdated={setUsageMeter}
-                    onRefreshInbox={refreshVoiceAndUsage}
-                    onClose={() => handleTabChange('Overview')}
-                  />
+                  <VoiceSection onClose={() => handleTabChange('Overview')} />
                 ) : activeTab === 'Overview' ? (
                   <OverviewSection
                     payment={isPaymentPaid}
                     setPayment={setIsPaymentPaid}
                     go={handleTabChange}
                     setDetailSheet={setDetailSheet}
-                    onOpenVoiceTicker={() => handleTabChange('Voice')}
-                    voiceThreads={voiceThreads}
+                    onOpenVoiceTicker={() => setIsVoiceDrawerOpen(true)}
                     onInspectSalon={handleInspectSalon}
                     activeSalonCount={activeSalonCount}
                     kamranCashHeld={kamranCashHeld}
@@ -1728,12 +970,17 @@ export default function App() {
                     active={activeTab}
                     go={handleTabChange}
                     setPaymentRouting={setPaymentRoutingMethod}
-                    usageMeter={usageMeter}
-                    kamranCashHeld={kamranCashHeld}
-                    onRefreshUsage={refreshVoiceAndUsage}
                     onInspectSalon={handleInspectSalon}
                     onLaunchFounderPreview={handleLaunchFounderPreview}
                     onTestSocialLaunch={handleTestSocialLaunch}
+                    auditWindowStatus={{
+                      isAuditOpen,
+                      isGenuineWindowOpen,
+                      remainingMs: Math.max(0, AUDIT_EXPIRES_AT_MS - syncedNowMs),
+                      expiresAtIso: AUDIT_EXPIRES_AT_ISO,
+                      onTriggerLockNow: handleTriggerLockPreview,
+                      onResumeAuditWindow: handleResumeAuditWindow,
+                    }}
                   />
                 )}
               </SilentSelfHealingBoundary>
@@ -1744,102 +991,26 @@ export default function App() {
 
       {/* Floating Bottom Navigation Bar for Mobile */}
       <nav
-        className="fixed inset-x-3 bottom-3 z-40 safe-bottom-nav flex items-center justify-around rounded-2xl border border-[#30363D] bg-[#161B22]/95 p-1.5 backdrop-blur-md lg:hidden"
+        className="fixed inset-x-3 bottom-3 z-40 flex items-center justify-around rounded-2xl border border-[#30363D] bg-[#161B22]/95 p-1.5 backdrop-blur-md lg:hidden"
         aria-label="Quick navigation"
       >
-        {activeRole === 'SALON_OWNER' && hasCompletedSalonOnboarding ? (
-          <>
-            {[
-              {
-                id: 'LIVE' as const,
-                Icon: Scissors,
-                label:
-                  salonOwnerUiLang === 'ur'
-                    ? 'لائیو فلور'
-                    : salonOwnerUiLang === 'ar'
-                    ? 'الصالة'
-                    : 'Live Floor',
-                dot: false,
-              },
-              {
-                id: 'PASSES' as const,
-                Icon: Award,
-                label:
-                  salonOwnerUiLang === 'ur'
-                    ? 'پاسز'
-                    : salonOwnerUiLang === 'ar'
-                    ? 'الباقات'
-                    : 'Passes',
-                dot: false,
-              },
-              {
-                id: 'VOICE' as const,
-                Icon: Mic,
-                label:
-                  salonOwnerUiLang === 'ur'
-                    ? 'وائس ہیلپ'
-                    : salonOwnerUiLang === 'ar'
-                    ? 'الصوت'
-                    : 'Voice Help',
-                dot: ownerHardwareStatus.hasFounderVoiceReply,
-              },
-              {
-                id: 'MANAGE' as const,
-                Icon: SlidersHorizontal,
-                label:
-                  salonOwnerUiLang === 'ur'
-                    ? 'مینج'
-                    : salonOwnerUiLang === 'ar'
-                    ? 'الإدارة'
-                    : 'Manage',
-                dot: false,
-              },
-            ].map(({ id, Icon, label, dot }) => {
-              const isActive = salonOwnerSection === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('Salon Owner Dashboard');
-                    setSalonOwnerSection(id);
-                  }}
-                  className={`relative flex min-h-[48px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[10px] font-mono font-bold transition ${
-                    isActive
-                      ? 'text-[#06B6D4] bg-[#21262D]'
-                      : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                  }`}
-                >
-                  <div className="relative">
-                    <Icon className="size-4" />
-                    {dot && (
-                      <span className="absolute -right-1.5 -top-1 size-2 rounded-full bg-[#3FB950]" />
-                    )}
-                  </div>
-                  <span className="truncate max-w-full">{label}</span>
-                </button>
-              );
-            })}
-          </>
-        ) : (
-          mobileNavItems.map(([name, Icon, label]) => {
-            const isActive = activeTab === name;
-            return (
-              <button
-                key={name}
-                onClick={() => handleTabChange(name)}
-                className={`flex min-h-[48px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[9px] font-mono font-bold transition ${
-                  isActive
-                    ? 'text-[#06B6D4] bg-[#21262D]'
-                    : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                }`}
-              >
-                <Icon className="size-4" />
-                <span>{label}</span>
-              </button>
-            );
-          })
-        )}
+        {mobileNavItems.map(([name, Icon, label]) => {
+          const isActive = activeTab === name;
+          return (
+            <button
+              key={name}
+              onClick={() => handleTabChange(name)}
+              className={`flex min-h-[48px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[9px] font-mono font-bold transition ${
+                isActive
+                  ? 'text-[#06B6D4] bg-[#21262D]'
+                  : 'text-[#8B949E] hover:text-[#F0F6FC]'
+              }`}
+            >
+              <Icon className="size-4" />
+              <span>{label}</span>
+            </button>
+          );
+        })}
       </nav>
 
       {/* Global / Country Broadcast Pause Alert */}
@@ -1851,13 +1022,18 @@ export default function App() {
         </div>
       )}
 
+      {/* Dedicated Voice Ticker Support Drawer */}
+      <VoiceSupportDrawer
+        isOpen={isVoiceDrawerOpen}
+        onClose={() => setIsVoiceDrawerOpen(false)}
+      />
+
       {/* Detail Bottom Sheet */}
       <DetailSheet
         detail={detailSheet}
         onClose={() => setDetailSheet(null)}
         go={handleTabChange}
-        usageMeter={usageMeter}
-        onOpenVoiceTicker={() => handleTabChange('Voice')}
+        onOpenVoiceTicker={() => setIsVoiceDrawerOpen(true)}
         onOpenReportModal={() => setIsReportModalOpen(true)}
       />
 
@@ -1865,9 +1041,6 @@ export default function App() {
       <FinancialReportModal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
-        usageMeter={usageMeter}
-        unreadVoiceCount={unreadVoiceCount}
-        kamranCashHeld={kamranCashHeld}
       />
 
       <PaymentRoutingModal
@@ -1879,10 +1052,10 @@ export default function App() {
       <NotificationsDrawer
         isOpen={isNotificationsOpen}
         onClose={() => setIsNotificationsOpen(false)}
-        onOpenVoiceTicker={() => handleTabChange('Voice')}
+        onOpenVoiceTicker={() => setIsVoiceDrawerOpen(true)}
       />
 
-      {/* Unified 4-Step Salon Onboarding Modal */}
+      {/* Salon PWA Simulator Modal (Founder stays inside Unified Dashboard) */}
       {isSalonPwaModalOpen && (
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0D1117]/80 p-4 backdrop-blur-md"
@@ -1892,11 +1065,33 @@ export default function App() {
             onClick={(e) => e.stopPropagation()}
             className="w-full max-w-4xl rounded-3xl border border-[#30363D] bg-[#161B22] p-5 sm:p-6 animate-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto"
           >
-            <FieldAgentHub
-              userRole="SALON_OWNER"
-              initialSalonName={activeOnboarding?.salonName || 'Royal Fade Lounge'}
-              onSalonCreated={handleSalonCreated}
-              onSalonOnboardingComplete={(payload) => handlePairingComplete(payload.salonName, payload)}
+            <div className="flex items-center justify-between border-b border-[#21262D] pb-3 mb-4">
+              <div>
+                <p className="text-[10px] font-mono font-bold uppercase tracking-[.18em] text-cyan-400">
+                  LIVE SIMULATION · SALON OWNER PWA EXPERIENCE
+                </p>
+                <h3 className="text-lg font-bold text-[#F0F6FC]">
+                  {activeOnboarding?.salonName || 'Royal Fade Lounge'} · Mobile Onboarding &amp; Regional Checkout
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsSalonPwaModalOpen(false);
+                }}
+                className="min-h-[44px] min-w-[44px] grid place-items-center rounded-xl bg-[#21262D] border border-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] transition active:scale-95 shrink-0"
+                title="Close Simulator"
+                aria-label="Close Simulator"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <SalonPwaSimulator
+              salonName={activeOnboarding?.salonName || 'Royal Fade Lounge'}
+              token={activeOnboarding?.token || 'wc_sec_rfade_9821'}
+              onPairingComplete={handlePairingComplete}
               onClose={() => setIsSalonPwaModalOpen(false)}
             />
           </div>
@@ -1934,18 +1129,25 @@ export default function App() {
               </button>
             </div>
 
-            <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-3 text-[#0D1117] border border-[#30363D]">
-              {pairingModalQr.qrDataUrl ? (
-                <img
-                  src={pairingModalQr.qrDataUrl}
-                  alt="WorkCraft WhatsApp Pairing QR"
-                  className="w-full h-full object-contain rounded-lg"
-                />
-              ) : (
-                <div className="text-center font-mono text-xs text-slate-700 p-4">
-                  Generating Live QR...
-                </div>
-              )}
+            <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-5 text-[#0D1117] border border-[#30363D]">
+              <svg viewBox="0 0 100 100" className="w-full h-full text-slate-950">
+                <rect x="5" y="5" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="4" rx="2" />
+                <rect x="11" y="11" width="12" height="12" fill="currentColor" rx="1" />
+                <rect x="71" y="5" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="4" rx="2" />
+                <rect x="77" y="11" width="12" height="12" fill="currentColor" rx="1" />
+                <rect x="5" y="71" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="4" rx="2" />
+                <rect x="11" y="77" width="12" height="12" fill="currentColor" rx="1" />
+                <circle cx="36" cy="17" r="3" fill="currentColor" />
+                <circle cx="50" cy="17" r="3" fill="currentColor" />
+                <circle cx="64" cy="17" r="3" fill="currentColor" />
+                <circle cx="20" cy="50" r="3" fill="currentColor" />
+                <circle cx="50" cy="50" r="3" fill="currentColor" />
+                <circle cx="80" cy="50" r="3" fill="currentColor" />
+                <circle cx="36" cy="83" r="3" fill="currentColor" />
+                <circle cx="50" cy="83" r="3" fill="currentColor" />
+                <circle cx="64" cy="83" r="3" fill="currentColor" />
+                <rect x="42" y="42" width="16" height="16" fill="#D29922" rx="2" />
+              </svg>
             </div>
 
             <div className="space-y-1 font-mono">
@@ -1953,7 +1155,7 @@ export default function App() {
                 Scan via WhatsApp ➔ Linked Devices ➔ Link a Device
               </p>
               <p className="text-[11px] text-cyan-400 break-all [overflow-wrap:break-word]">
-                Alternative Alphanumeric Key: <strong className="break-all">{pairingModalQr.pairingKey}</strong>
+                Alternative Alphanumeric Key: <strong className="break-all">WC-7892-SYS</strong>
               </p>
               <p className="text-[10px] text-[#6E7681]">
                 Central SIM Protection Active · Instant Connection
