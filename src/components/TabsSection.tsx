@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Archive,
   CreditCard,
@@ -17,58 +17,42 @@ import {
   Sparkles,
   ArrowRight,
   Scissors,
-  Send,
-  UsersRound,
-  Fingerprint,
-  RefreshCw,
-  AlertTriangle,
+  Lock,
+  Clock,
 } from 'lucide-react';
 import { TabName } from '../types/workcraft';
-import {
-  SALONS,
-  ARCHIVED_SALONS,
-  MONTHLY_REVENUE_SUMMARY,
-  DEFAULT_USAGE_METER,
-  type LiveUsageMeter,
-} from '../data/portalData';
+import { SALONS, ARCHIVED_SALONS } from '../data/portalData';
 import { PortalCard } from './PortalCard';
-import {
-  clearStoredFounderBiometric,
-  detectMobileFounderDevice,
-  enrollFounderBiometricDevice,
-  loadStoredFounderBiometric,
-  supportsPlatformBiometric,
-  type StoredFounderBiometric,
-} from './FounderUnlockGate';
+import { formatRemainingAuditTime } from '../config/auditWindow';
+
+interface AuditWindowStatusProps {
+  isAuditOpen: boolean;
+  isGenuineWindowOpen: boolean;
+  remainingMs: number;
+  expiresAtIso: string;
+  onTriggerLockNow: () => void;
+  onResumeAuditWindow: () => void;
+}
 
 interface TabsSectionProps {
   active: TabName;
   go: (tab: TabName) => void;
   setPaymentRouting: (method: string) => void;
-  usageMeter?: LiveUsageMeter;
-  kamranCashHeld?: number;
-  onRefreshUsage?: () => void;
   onInspectSalon?: (salonName: string) => void;
   onLaunchFounderPreview?: (mode: 'AGENT' | 'SALON_ONBOARD' | 'SALON_LIVE') => void;
-  onTestSocialLaunch?: (source: 'Facebook' | 'Instagram' | 'TikTok' | 'WhatsApp') => void;
-  onBiometricUpdated?: () => void;
+  onTestSocialLaunch?: (source: 'Facebook' | 'Instagram' | 'TikTok') => void;
+  auditWindowStatus?: AuditWindowStatusProps;
 }
 
 export const TabsSection: React.FC<TabsSectionProps> = ({
   active,
   go,
   setPaymentRouting,
-  usageMeter = DEFAULT_USAGE_METER,
-  kamranCashHeld = 25000,
-  onRefreshUsage,
   onInspectSalon,
   onLaunchFounderPreview,
   onTestSocialLaunch,
-  onBiometricUpdated,
+  auditWindowStatus,
 }) => {
-  const portalOrigin =
-    typeof window !== 'undefined' ? window.location.origin : 'https://workcraft-app.vercel.app';
-
   // Contact search state (Query 3)
   const [clientSearch, setClientSearch] = useState('');
 
@@ -76,110 +60,12 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
   const [founderAlertPhone, setFounderAlertPhone] = useState('+92 321 0000000');
   const [savedPhoneToast, setSavedPhoneToast] = useState(false);
 
-  // Pairing QR State
-  const [pairingQrData, setPairingQrData] = useState<{
-    pairingKey: string;
-    qrDataUrl: string | null;
-  }>({ pairingKey: 'WC-7892-SYS', qrDataUrl: null });
-  const [isLoadingPairingQr, setIsLoadingPairingQr] = useState(false);
-
-  // Founder Mobile Biometric Management State
-  const isMobileDevice = React.useMemo(() => detectMobileFounderDevice(), []);
-  const canBiometric = React.useMemo(() => supportsPlatformBiometric(), []);
-  const [savedBiometric, setSavedBiometric] = useState<StoredFounderBiometric | null>(() =>
-    loadStoredFounderBiometric()
-  );
-  const [biometricStatusMsg, setBiometricStatusMsg] = useState<string | null>(null);
-  const [isProcessingBiometric, setIsProcessingBiometric] = useState(false);
-
-  // Founder Social Campaign Link Copy & Custom Generator State
+  // Founder Social Campaign Link Copy & Custom Generator State (Queries 1 & 2)
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
   const [customCampaignName, setCustomCampaignName] = useState('dha_salons_promo');
   const [customCampaignCategory, setCustomCampaignCategory] = useState<'ALL' | 'MENS' | 'LADIES'>('ALL');
   const [customCampaignLanguage, setCustomCampaignLanguage] = useState<'URDU' | 'ARABIC' | 'ROMAN_URDU' | 'ENGLISH'>('URDU');
   const [marketingToast, setMarketingToast] = useState<string | null>(null);
-
-  // Query 5: Founder Broadcast to All Already-Registered Salons (Feature / Service Announcements)
-  const [broadcastRegionFilter, setBroadcastRegionFilter] = useState<'ALL' | 'PK' | 'MENA' | 'EU'>('ALL');
-  const [broadcastTierFilter, setBroadcastTierFilter] = useState<'ALL' | 'STARTER' | 'GROWTH' | 'VIP' | 'CUSTOM'>('ALL');
-  const [broadcastTitle, setBroadcastTitle] = useState('New Feature Live: Instant Self Re-Login & Updated Voice Concierge');
-  const [broadcastMessageEn, setBroadcastMessageEn] = useState(
-    'New WorkCraft update is live! Your salon can now manage multiple barbers, send VIP deal alerts, and sign back in anytime using your WhatsApp number with 1-tap OTP.'
-  );
-  const [broadcastDispatchedReceipt, setBroadcastDispatchedReceipt] = useState<{
-    count: number;
-    regionLabel: string;
-    tierLabel: string;
-    time: string;
-  } | null>(null);
-
-  const [incidentFeed, setIncidentFeed] = useState<{
-    incidents: Array<{
-      id: string;
-      role: string;
-      area: string;
-      route: string;
-      severity: 'LOW' | 'MEDIUM' | 'CRITICAL';
-      message: string;
-      resolutionStatus: 'AUTO_RESOLVED' | 'FALLBACK_ACTIVE' | 'NEEDS_FOUNDER_ACTION' | 'RESOLVED_BY_FOUNDER';
-      recoveryMs: number;
-      occurredAt: string;
-    }>;
-    summary: {
-      totalRecorded: number;
-      autoResolvedCount: number;
-      openActionCount: number;
-      avgRecoveryMs: number;
-      founderPhone?: string;
-    };
-  } | null>(null);
-  const [isLoadingIncidents, setIsLoadingIncidents] = useState(false);
-
-  const refreshFounderIncidents = async () => {
-    setIsLoadingIncidents(true);
-    try {
-      const res = await fetch('/api/founder/incidents?limit=25');
-      if (res.ok) {
-        const data = await res.json();
-        setIncidentFeed(data);
-      }
-    } catch {
-      // Non-fatal
-    } finally {
-      setIsLoadingIncidents(false);
-    }
-  };
-
-  useEffect(() => {
-    if (active === 'Settings') {
-      setSavedBiometric(loadStoredFounderBiometric());
-      fetch('/api/founder/settings')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { founderReportPhone?: string; reportPhone?: string; pairingKey?: string } | null) => {
-          const phone = data?.founderReportPhone || data?.reportPhone;
-          if (phone) setFounderAlertPhone(phone);
-          if (data?.pairingKey) {
-            setPairingQrData((prev) => ({ ...prev, pairingKey: data.pairingKey! }));
-          }
-        })
-        .catch(() => {});
-      void refreshFounderIncidents();
-    } else if (active === 'Pairing') {
-      setIsLoadingPairingQr(true);
-      fetch('/api/founder/pairing-qr')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { pairingKey?: string; qrDataUrl?: string } | null) => {
-          if (data?.pairingKey) {
-            setPairingQrData({
-              pairingKey: data.pairingKey,
-              qrDataUrl: data.qrDataUrl || null,
-            });
-          }
-        })
-        .catch(() => {})
-        .finally(() => setIsLoadingPairingQr(false));
-    }
-  }, [active]);
 
   const handleCopyLink = (id: string, url: string, label: string) => {
     try {
@@ -222,16 +108,16 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
         startDate: '12 May 2026',
         monthsActive: 6,
         monthsPaid: 6,
-        totalRevenue: 28000,
-        setupFee: 17500,
-        monthlyFee: 1750, // Monthly Starter maintenance
+        totalRevenue: 24000,
+        setupFee: 15000,
+        monthlyFee: 1500, // 10% Starter maintenance
         history: [
-          { month: 'October 2026', amount: 1750, method: 'EasyPaisa Auto-Webhook', txn: 'EP-95412', status: 'Settled & Verified' },
-          { month: 'September 2026', amount: 1750, method: 'EasyPaisa Auto-Webhook', txn: 'EP-92338', status: 'Settled & Verified' },
-          { month: 'August 2026', amount: 1750, method: 'EasyPaisa Auto-Webhook', txn: 'EP-90114', status: 'Settled & Verified' },
-          { month: 'July 2026', amount: 1750, method: 'Direct IBFT Meezan Bank', txn: 'MB-41002', status: 'Settled & Verified' },
-          { month: 'June 2026', amount: 1750, method: 'JazzCash Direct Wallet', txn: 'JC-99201', status: 'Settled & Verified' },
-          { month: 'May 2026', amount: 19250, method: 'EasyPaisa (Setup + May Maint)', txn: 'EP-88219', status: 'Settled & Verified' },
+          { month: 'October 2026', amount: 1500, method: 'EasyPaisa Auto-Webhook', txn: 'EP-95412', status: 'Settled & Verified' },
+          { month: 'September 2026', amount: 1500, method: 'EasyPaisa Auto-Webhook', txn: 'EP-92338', status: 'Settled & Verified' },
+          { month: 'August 2026', amount: 1500, method: 'EasyPaisa Auto-Webhook', txn: 'EP-90114', status: 'Settled & Verified' },
+          { month: 'July 2026', amount: 1500, method: 'Direct IBFT Meezan Bank', txn: 'MB-41002', status: 'Settled & Verified' },
+          { month: 'June 2026', amount: 1500, method: 'JazzCash Direct Wallet', txn: 'JC-99201', status: 'Settled & Verified' },
+          { month: 'May 2026', amount: 16500, method: 'EasyPaisa (Setup + May Maint)', txn: 'EP-88219', status: 'Settled & Verified' },
         ],
       });
     } else {
@@ -244,15 +130,15 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
         startDate: '18 June 2026',
         monthsActive: 5,
         monthsPaid: 5,
-        totalRevenue: 26250,
-        setupFee: 17500,
-        monthlyFee: 1750, // Monthly maintenance
+        totalRevenue: 22500,
+        setupFee: 15000,
+        monthlyFee: 1500, // 10% maintenance
         history: [
-          { month: 'October 2026', amount: 1750, method: 'EasyPaisa', txn: 'EP-77412', status: 'Settled' },
-          { month: 'September 2026', amount: 1750, method: 'JazzCash', txn: 'JC-66338', status: 'Settled' },
-          { month: 'August 2026', amount: 1750, method: 'Bank IBFT', txn: 'BK-55114', status: 'Settled' },
-          { month: 'July 2026', amount: 1750, method: 'EasyPaisa', txn: 'EP-44002', status: 'Settled' },
-          { month: 'June 2026', amount: 19250, method: 'EasyPaisa (Setup + June)', txn: 'EP-33219', status: 'Settled' },
+          { month: 'October 2026', amount: 1500, method: 'EasyPaisa', txn: 'EP-77412', status: 'Settled' },
+          { month: 'September 2026', amount: 1500, method: 'JazzCash', txn: 'JC-66338', status: 'Settled' },
+          { month: 'August 2026', amount: 1500, method: 'Bank IBFT', txn: 'BK-55114', status: 'Settled' },
+          { month: 'July 2026', amount: 1500, method: 'EasyPaisa', txn: 'EP-44002', status: 'Settled' },
+          { month: 'June 2026', amount: 16500, method: 'EasyPaisa (Setup + June)', txn: 'EP-33219', status: 'Settled' },
         ],
       });
     }
@@ -260,7 +146,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
 
   const handleSimulateAutoReactivation = () => {
     setReactivationSuccessMsg(
-      'Payment of PKR 1,750 detected via EasyPaisa webhook! Metric box reactivated instantly · Continuous Care SLA active (<60 min recovery) · WhatsApp dispatch: "Assalamu Alaikum! We have received your monthly maintenance payment. Your Workcraft metric box and automated booking services are fully active."'
+      'Payment of PKR 1,500 detected via EasyPaisa webhook! Metric box reactivated instantly · Continuous Care SLA active (<60 min recovery) · WhatsApp dispatch: "Assalamu Alaikum! We have received your 10% maintenance payment. Your Workcraft metric box and automated booking services are fully active."'
     );
     setTimeout(() => setReactivationSuccessMsg(null), 6000);
   };
@@ -285,7 +171,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
   };
 
   return (
-    <PortalCard title={getTitle()} kicker="WORKCRAFT" onClose={() => go('Overview')}>
+    <PortalCard title={getTitle()} kicker="WORKCRAFT LOCAL" onClose={() => go('Overview')}>
       <div className="flex flex-col gap-5 pb-28 lg:pb-8 min-w-0 text-sm text-[#F0F6FC]">
         {/* 1. Contact / Clients Tab */}
         {active === 'Contact / Clients' && (
@@ -509,7 +395,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     <div className="rounded-lg bg-[#161B22] border border-[#30363D] p-3 text-[11px] font-mono text-[#3FB950] space-y-1 overflow-hidden">
                       <p className="text-[#6E7681] text-[10px] uppercase font-bold">Auto-Generated Native WhatsApp Template (Strict Greeting Rule):</p>
                       <p className="italic font-sans break-words [overflow-wrap:break-word]">
-                        “Assalamu Alaikum {selectedSalonDetail.owner}! Aap ki monthly maintenance payment PKR {selectedSalonDetail.monthlyFee.toLocaleString()} receive ho gayi hai. Continuous Care SLA (&lt;60 min recovery) active hai aur booking lines dubara open ho chuki hain. Aap ka metric box ab live hai.”
+                        “Assalamu Alaikum {selectedSalonDetail.owner}! Aap ki 10% maintenance payment PKR {selectedSalonDetail.monthlyFee.toLocaleString()} receive ho gayi hai. Continuous Care SLA (&lt;60 min recovery) active hai aur booking lines dubara open ho chuki hain. Aap ka metric box ab live hai.”
                       </p>
                     </div>
 
@@ -584,7 +470,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     </div>
                     <button
                       onClick={() => go('Pairing')}
-                      className="min-h-[44px] px-3 text-xs font-mono font-bold text-[#06B6D4] hover:underline shrink-0"
+                      className="min-h-[36px] px-2 text-[10px] font-mono font-bold text-[#06B6D4] hover:underline shrink-0"
                     >
                       Reactivate
                     </button>
@@ -605,12 +491,10 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                   Total Verified MRR
                 </p>
                 <p className="mt-2 text-2xl font-bold font-mono text-[#D29922]">
-                  PKR {MONTHLY_REVENUE_SUMMARY.totalCollected.toLocaleString()}
+                  PKR 108,000
                 </p>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-[10px] font-mono text-[#8B949E]">
-                    {MONTHLY_REVENUE_SUMMARY.paidSalonsCount} of {MONTHLY_REVENUE_SUMMARY.totalSalonsCount} Paid
-                  </span>
+                  <span className="text-[10px] font-mono text-[#8B949E]">24 of 27 Paid</span>
                   <span className="rounded bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono text-[#3FB950] border border-[#116329]">
                     Verified
                   </span>
@@ -622,7 +506,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                   In-Hand Cash Held (Kamran)
                 </p>
                 <p className="mt-2 text-2xl font-bold font-mono text-[#D29922]">
-                  PKR {kamranCashHeld.toLocaleString()}
+                  PKR 25,000
                 </p>
                 <div className="mt-2 flex items-center justify-between">
                   <span className="text-[10px] font-mono text-[#8B949E]">Target: 48h Handover</span>
@@ -632,27 +516,20 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 </div>
               </div>
 
-              {/* Single Linked Software, Storage & AI Expense Line */}
-              <button
-                type="button"
-                onClick={() => go('Settings')}
-                className="rounded-xl border border-[#30363D] hover:border-[#06B6D4] bg-[#0D1117] p-4 text-left transition"
-              >
+              <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4">
                 <p className="text-xs font-mono uppercase tracking-wider text-[#8B949E]">
-                  Software, Storage &amp; Voice AI Expense
+                  Server &amp; WhatsApp Rent
                 </p>
                 <p className="mt-2 text-2xl font-bold font-mono text-[#3FB950]">
-                  {usageMeter.monthlyExpenseLabel}
+                  $0.00 / mo
                 </p>
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-mono text-[#8B949E] truncate">
-                    {usageMeter.storageUsedKb} KB Opus · {usageMeter.usagePercent}% Free Tier
-                  </span>
-                  <span className="rounded bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono text-[#06B6D4] border border-[#30363D] shrink-0">
-                    Live Meter →
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-[10px] font-mono text-[#8B949E]">Self-Hosted Android SIM</span>
+                  <span className="rounded bg-[#0D3822] px-2 py-0.5 text-[10px] font-mono text-[#3FB950] border border-[#116329]">
+                    Active
                   </span>
                 </div>
-              </button>
+              </div>
             </div>
 
             {/* Channel Collection Breakdown (Bank Account Primary + Local Wallets + Overseas) */}
@@ -663,42 +540,66 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     Revenue Collection Breakdown by Channel
                   </h4>
                   <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">
-                    Overseas package purchases &amp; monthly maintenance settle automatically into the official Pakistan bank account alongside local IBFT/Raast transfers.
+                    Overseas package purchases &amp; 10% monthly maintenance settle automatically into the local Pakistan bank account alongside local IBFT/Raast transfers.
                   </p>
                 </div>
                 <span className="rounded bg-[#0D3822] border border-[#116329] px-2.5 py-1 text-[10px] font-mono font-bold text-[#3FB950] shrink-0">
-                  PKR {MONTHLY_REVENUE_SUMMARY.totalCollected.toLocaleString()} VERIFIED
+                  PKR 108,000 VERIFIED
                 </span>
               </div>
 
               <div className="grid gap-2.5 sm:grid-cols-2 font-mono text-xs">
-                {MONTHLY_REVENUE_SUMMARY.channels.map((ch, idx) => (
-                  <div
-                    key={ch.id}
-                    className={`rounded-xl border bg-[#161B22] p-3.5 space-y-1.5 ${
-                      idx === 0 ? 'border-[#06B6D4]/50' : 'border-[#30363D]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[#F0F6FC] font-bold">{ch.name}</span>
-                      <span
-                        className={`rounded border px-2 py-0.5 text-[10px] font-bold shrink-0 ${
-                          idx === 0
-                            ? 'bg-[#06B6D4]/15 border-[#06B6D4]/40 text-cyan-400'
-                            : idx === 3
-                            ? 'bg-[#3B2E0B] border-[#9E6A03] text-[#D29922]'
-                            : 'bg-[#21262D] border-[#30363D] text-[#3FB950]'
-                        }`}
-                      >
-                        {ch.tag}
-                      </span>
-                    </div>
-                    <p className="text-lg font-black text-[#D29922]">
-                      PKR {ch.amount.toLocaleString()}
-                    </p>
-                    <p className="text-[11px] text-[#8B949E] font-sans">{ch.desc}</p>
+                <div className="rounded-xl border border-[#06B6D4]/50 bg-[#161B22] p-3.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[#F0F6FC] font-bold">1. Official Bank Account (IBFT / Raast / Overseas)</span>
+                    <span className="rounded bg-[#06B6D4]/15 border border-[#06B6D4]/40 px-2 py-0.5 text-[10px] font-bold text-cyan-400 shrink-0">
+                      48.1% · PRIMARY
+                    </span>
                   </div>
-                ))}
+                  <p className="text-lg font-black text-[#D29922]">PKR 52,000</p>
+                  <p className="text-[11px] text-[#8B949E] font-sans">
+                    11 salons · Local Bank IBFT (PKR 24,000) + Overseas Package &amp; 10% Maint Auto-Deposits (PKR 28,000)
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[#F0F6FC] font-bold">2. EasyPaisa (Local Pakistan)</span>
+                    <span className="rounded bg-[#21262D] border border-[#30363D] px-2 py-0.5 text-[10px] font-bold text-[#3FB950] shrink-0">
+                      24.1%
+                    </span>
+                  </div>
+                  <p className="text-lg font-black text-[#D29922]">PKR 26,000</p>
+                  <p className="text-[11px] text-[#8B949E] font-sans">
+                    6 local salons · Instant SMS webhook auto-match
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[#F0F6FC] font-bold">3. JazzCash (Local Pakistan)</span>
+                    <span className="rounded bg-[#21262D] border border-[#30363D] px-2 py-0.5 text-[10px] font-bold text-[#3FB950] shrink-0">
+                      13.0%
+                    </span>
+                  </div>
+                  <p className="text-lg font-black text-[#D29922]">PKR 14,000</p>
+                  <p className="text-[11px] text-[#8B949E] font-sans">
+                    4 local salons · Local wallet SMS regex verification
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[#F0F6FC] font-bold">4. Stripe Connect (Overseas 20/80 Split)</span>
+                    <span className="rounded bg-[#3B2E0B] border border-[#9E6A03] px-2 py-0.5 text-[10px] font-bold text-[#D29922] shrink-0">
+                      14.8%
+                    </span>
+                  </div>
+                  <p className="text-lg font-black text-[#D29922]">PKR 16,000</p>
+                  <p className="text-[11px] text-[#8B949E] font-sans">
+                    3 overseas salons · 80% net settled into local WorkCraft bank account
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -711,7 +612,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 {[
                   {
                     name: 'Bank Account (IBFT / Raast / Overseas Wire)',
-                    desc: 'Primary settlement hub: receives local Pakistan IBFT/Raast transfers plus automatic deposits from overseas package & monthly maintenance payments.',
+                    desc: 'Primary settlement hub: receives local Pakistan IBFT/Raast transfers plus automatic deposits from overseas package & 10% maintenance payments.',
                     status: 'Primary Rail',
                   },
                   {
@@ -726,7 +627,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                   },
                   {
                     name: 'Stripe Connect (Overseas 20/80 Split)',
-                    desc: 'Same-currency direct split outside Pakistan: 20% paid straight to Agent in deal currency, 80% routed directly into WorkCraft official bank account.',
+                    desc: 'Same-currency direct split outside Pakistan: 20% paid straight to Agent in deal currency, 80% routed directly into WorkCraft local bank account.',
                     status: 'Direct Split',
                   },
                 ].map((item) => (
@@ -755,50 +656,31 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
         {/* 3. Pairing Tab */}
         {active === 'Pairing' && (
           <div className="space-y-4">
-            <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-3 text-[#0D1117] border-2 border-[#06B6D4]">
-              {pairingQrData.qrDataUrl ? (
-                <img
-                  src={pairingQrData.qrDataUrl}
-                  alt="WorkCraft WhatsApp Device Pairing QR"
-                  className="w-full h-full object-contain rounded-lg"
-                />
-              ) : (
-                <div className="text-center font-mono text-xs text-slate-700 p-4">
-                  {isLoadingPairingQr ? 'Generating Live QR...' : 'QR Ready'}
-                </div>
-              )}
+            <div className="mx-auto grid size-52 place-items-center rounded-2xl bg-white p-5 text-[#0D1117] border-2 border-[#06B6D4]">
+              <svg viewBox="0 0 100 100" className="w-full h-full text-slate-900">
+                <rect x="5" y="5" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="3" rx="2" />
+                <rect x="10" y="10" width="12" height="12" fill="currentColor" rx="1" />
+                <rect x="73" y="5" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="3" rx="2" />
+                <rect x="78" y="10" width="12" height="12" fill="currentColor" rx="1" />
+                <rect x="5" y="73" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="3" rx="2" />
+                <rect x="10" y="78" width="12" height="12" fill="currentColor" rx="1" />
+                <circle cx="34" cy="12" r="2.5" fill="currentColor" />
+                <circle cx="50" cy="12" r="2.5" fill="currentColor" />
+                <circle cx="66" cy="12" r="2.5" fill="currentColor" />
+                <circle cx="12" cy="34" r="2.5" fill="currentColor" />
+                <circle cx="12" cy="50" r="2.5" fill="currentColor" />
+                <circle cx="12" cy="66" r="2.5" fill="currentColor" />
+                <rect x="42" y="42" width="16" height="16" fill="#D29922" rx="2" />
+              </svg>
             </div>
 
-            <div className="text-center space-y-2">
+            <div className="text-center space-y-1">
               <p className="text-xs font-mono font-bold text-[#F0F6FC]">
                 Scan with WhatsApp on Salon Terminal
               </p>
               <p className="text-[11px] font-mono text-[#3FB950]">
-                Active Alphanumeric Pairing Key:{' '}
-                <span className="text-[#06B6D4] font-bold">{pairingQrData.pairingKey}</span>
+                Active Alphanumeric Pairing Key: <span className="text-[#06B6D4] font-bold">WC-7892-SYS</span>
               </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsLoadingPairingQr(true);
-                  fetch('/api/founder/pairing-qr?rotate=1')
-                    .then((res) => (res.ok ? res.json() : null))
-                    .then((data: { pairingKey?: string; qrDataUrl?: string } | null) => {
-                      if (data?.pairingKey) {
-                        setPairingQrData({
-                          pairingKey: data.pairingKey,
-                          qrDataUrl: data.qrDataUrl || null,
-                        });
-                      }
-                    })
-                    .catch(() => {})
-                    .finally(() => setIsLoadingPairingQr(false));
-                }}
-                className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-4 py-2 text-xs font-mono font-bold text-[#06B6D4] transition"
-              >
-                <RefreshCw className={`size-3.5 ${isLoadingPairingQr ? 'animate-spin' : ''}`} />
-                <span>Rotate Live Pairing QR</span>
-              </button>
             </div>
 
             <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 text-xs text-[#8B949E] text-center space-y-1 font-mono">
@@ -808,7 +690,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
           </div>
         )}
 
-        {/* 3B. Founder Marketing: Broadcast to Registered Salons + New Salon Ad Links */}
+        {/* 3B. Marketing & Social Campaign Routing Tab (Queries 1 & 2) */}
         {active === 'Marketing' && (
           <div className="space-y-6">
             {/* Real-time Toast Feedback */}
@@ -828,245 +710,32 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
               </div>
             )}
 
-            {/* ========================================================================= */}
-            {/* PART 1 (QUERY 5): FOUNDER BROADCAST TO ALL REGISTERED SALONS               */}
-            {/* ========================================================================= */}
-            <div className="rounded-2xl border border-[#D29922]/50 bg-[#161B22] p-4 sm:p-5 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#21262D] pb-3">
-                <div className="flex items-center gap-2.5">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]">
-                    <UsersRound className="size-4" />
-                  </span>
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-sm font-mono font-black uppercase tracking-wider text-[#F0F6FC]">
-                        Founder Broadcast to Registered Salons
-                      </h3>
-                      <span className="rounded-md bg-[#0D3822] border border-[#116329] px-2 py-0.5 text-[10px] font-mono font-bold text-[#3FB950]">
-                        EXISTING CLIENTS ONLY
-                      </span>
-                    </div>
-                    <p className="text-xs text-[#8B949E] font-sans mt-0.5">
-                      Announce new WorkCraft features, services, or important notices directly to all active registered salons via WhatsApp in each salon&apos;s saved language.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Audience Filters */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="text-xs font-mono text-[#8B949E] block space-y-1">
-                  <span>TARGET REGION / COUNTRY</span>
-                  <select
-                    value={broadcastRegionFilter}
-                    onChange={(e) => {
-                      setBroadcastRegionFilter(e.target.value as any);
-                      setBroadcastDispatchedReceipt(null);
-                    }}
-                    className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-xs font-mono text-[#F0F6FC] focus:outline-none focus:border-[#D29922]"
-                  >
-                    <option value="ALL">All Registered Countries (24 Active Salons)</option>
-                    <option value="PK">🇵🇰 Pakistan Salons Only (15 Salons · Urdu / English)</option>
-                    <option value="MENA">🇦🇪 UAE &amp; Gulf (MENA) Salons (6 Salons · Arabic / Urdu)</option>
-                    <option value="EU">🇬🇧 UK &amp; International Salons (3 Salons · English)</option>
-                  </select>
-                </label>
-
-                <label className="text-xs font-mono text-[#8B949E] block space-y-1">
-                  <span>PACKAGE TIER TARGET</span>
-                  <select
-                    value={broadcastTierFilter}
-                    onChange={(e) => {
-                      setBroadcastTierFilter(e.target.value as any);
-                      setBroadcastDispatchedReceipt(null);
-                    }}
-                    className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 py-2 text-xs font-mono text-[#F0F6FC] focus:outline-none focus:border-[#D29922]"
-                  >
-                    <option value="ALL">All Package Tiers</option>
-                    <option value="STARTER">Starter Setup Salons</option>
-                    <option value="GROWTH">Growth Automation Salons</option>
-                    <option value="VIP">VIP Executive Salons</option>
-                    <option value="CUSTOM">Custom Enterprise Salons</option>
-                  </select>
-                </label>
-              </div>
-
-              {/* Quick Feature / Service Update Templates */}
-              <div className="flex flex-wrap gap-2">
-                {[
-                  {
-                    label: 'New Feature Launch',
-                    title: 'New Feature Live: Instant Self Re-Login & Updated Voice Concierge',
-                    msg: 'New WorkCraft update is live! Your salon can now manage multiple barbers, send VIP deal alerts, and sign back in anytime using your WhatsApp number with 1-tap OTP.',
-                  },
-                  {
-                    label: 'New Service Category',
-                    title: 'New Service Menu Templates Added',
-                    msg: 'We just added new service presets to your Live Salon Dashboard. Open Settings ➔ Rates to enable new grooming & styling packages in 1 tap.',
-                  },
-                  {
-                    label: 'Upgrade Promo Notice',
-                    title: 'Zero-Loss Tier Upgrade Reminder',
-                    msg: 'Upgrade your WorkCraft plan anytime directly from your Live Dashboard by paying only the remaining package difference—zero double charge.',
-                  },
-                ].map((tpl) => (
-                  <button
-                    key={tpl.label}
-                    type="button"
-                    onClick={() => {
-                      setBroadcastTitle(tpl.title);
-                      setBroadcastMessageEn(tpl.msg);
-                      setBroadcastDispatchedReceipt(null);
-                    }}
-                    className="min-h-[44px] rounded-lg border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] px-3 py-1.5 text-xs font-mono font-bold text-[#D29922] transition"
-                  >
-                    Use: {tpl.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="space-y-2.5">
-                <input
-                  type="text"
-                  value={broadcastTitle}
-                  onChange={(e) => setBroadcastTitle(e.target.value)}
-                  placeholder="Announcement Title..."
-                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono font-bold text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
-                />
-                <textarea
-                  value={broadcastMessageEn}
-                  onChange={(e) => setBroadcastMessageEn(e.target.value)}
-                  rows={3}
-                  placeholder="Write your announcement once—WorkCraft delivers it to each salon in their saved onboarding language (Urdu, Arabic, or English)..."
-                  className="w-full rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 text-sm font-sans text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
-                />
-              </div>
-
-              {/* Automatic Per-Language Dispatch Preview */}
-              <div className="grid gap-2.5 md:grid-cols-3 text-[11px]">
-                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-1">
-                  <span className="text-[10px] font-mono font-bold text-[#3FB950]">🇵🇰 Urdu Salons Preview</span>
-                  <p dir="rtl" className="text-right text-[#F0F6FC] font-sans leading-relaxed">
-                    WorkCraft نیا فیچر اپڈیٹ: {broadcastTitle} — تفصیلات آپ کے لائیو ڈیش بورڈ میں دستیاب ہیں۔
-                  </p>
-                </div>
-                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-1">
-                  <span className="text-[10px] font-mono font-bold text-[#06B6D4]">🇦🇪 Arabic Salons Preview</span>
-                  <p dir="rtl" className="text-right text-[#F0F6FC] font-sans leading-relaxed">
-                    تحديث جديد من WorkCraft: {broadcastTitle} — متاح الآن في لوحة تحكم صالونك.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 space-y-1">
-                  <span className="text-[10px] font-mono font-bold text-[#D29922]">🇬🇧 English Salons Preview</span>
-                  <p className="text-[#F0F6FC] font-sans leading-relaxed">
-                    {broadcastTitle}: {broadcastMessageEn}
-                  </p>
-                </div>
-              </div>
-
-              {broadcastDispatchedReceipt && (
-                <div className="rounded-xl border border-[#116329] bg-[#0D3822] p-3 text-xs font-mono text-[#3FB950] flex items-center justify-between gap-2 flex-wrap">
-                  <span>
-                    ✓ Broadcast sent safely to <strong>{broadcastDispatchedReceipt.count} Registered Salons</strong> ({broadcastDispatchedReceipt.regionLabel} · {broadcastDispatchedReceipt.tierLabel}) at {broadcastDispatchedReceipt.time}
-                  </span>
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                <span className="text-[11px] font-mono text-[#8B949E]">
-                  Sent via Central WorkCraft Line · Zero personal Founder number exposure
-                </span>
-                <button
-                  type="button"
-                  disabled={!broadcastMessageEn.trim()}
-                  onClick={async () => {
-                    const baseByRegion =
-                      broadcastRegionFilter === 'PK'
-                        ? 15
-                        : broadcastRegionFilter === 'MENA'
-                        ? 6
-                        : broadcastRegionFilter === 'EU'
-                        ? 3
-                        : 24;
-                    const count =
-                      broadcastTierFilter === 'ALL'
-                        ? baseByRegion
-                        : Math.max(1, Math.round(baseByRegion / 3));
-                    try {
-                      await fetch('/api/founder/broadcast', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          title: broadcastTitle,
-                          messageEn: broadcastMessageEn,
-                          regionFilter: broadcastRegionFilter,
-                          tierFilter: broadcastTierFilter,
-                          recipientCount: count,
-                        }),
-                      });
-                    } catch {
-                      // non-blocking persistence fallback
-                    }
-                    setBroadcastDispatchedReceipt({
-                      count,
-                      regionLabel:
-                        broadcastRegionFilter === 'ALL'
-                          ? 'All Countries'
-                          : broadcastRegionFilter,
-                      tierLabel:
-                        broadcastTierFilter === 'ALL' ? 'All Tiers' : broadcastTierFilter,
-                      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    });
-                    setMarketingToast(`✓ Broadcast queued for ${count} registered salons in their saved languages!`);
-                    setTimeout(() => setMarketingToast(null), 5000);
-                  }}
-                  className="min-h-[48px] inline-flex items-center gap-2 rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 py-2.5 text-xs font-mono font-black uppercase transition active:scale-95 disabled:opacity-45"
-                >
-                  <Send className="size-4" />
-                  <span>Send Broadcast to Registered Salons →</span>
-                </button>
-              </div>
-            </div>
-
-            {/* ========================================================================= */}
-            {/* PART 2 (QUERIES 4 & 6): NEW SALON ACQUISITION SOCIAL CAMPAIGN LINKS        */}
-            {/* ========================================================================= */}
+            {/* Architecture Banner */}
             <div className="rounded-2xl border border-[#06B6D4]/40 bg-[#06B6D4]/10 p-4 sm:p-5 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-[#06B6D4]">
                   <Megaphone className="size-5 shrink-0" />
                   <h3 className="text-sm font-mono font-black uppercase tracking-wider">
-                    New Salon Acquisition · Social Ad Link Generator
+                    1-Tap Social Campaign Link Generator &amp; Direct Traffic Router
                   </h3>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-md bg-[#0D1117] border border-[#06B6D4]/40 px-2.5 py-1 text-[10px] font-mono font-bold text-[#06B6D4]">
-                    FOR PROSPECTIVE NEW SALONS
-                  </span>
-                  {onLaunchFounderPreview && (
-                    <button
-                      type="button"
-                      onClick={() => onLaunchFounderPreview('SALON_LIVE')}
-                      className="rounded-md bg-[#21262D] hover:border-[#06B6D4] border border-[#30363D] px-2.5 py-1 text-[10px] font-mono font-bold text-[#F0F6FC] transition"
-                    >
-                      Preview Live Salon Portal →
-                    </button>
-                  )}
-                </div>
+                <span className="rounded-md bg-[#0D1117] border border-[#06B6D4]/40 px-2.5 py-1 text-[10px] font-mono font-bold text-[#06B6D4]">
+                  PURE FOUNDER ISOLATION
+                </span>
               </div>
               <p className="text-xs text-[#F0F6FC] font-sans leading-relaxed">
-                These links are for recruiting <strong className="text-[#06B6D4]">new, unregistered salons</strong> on Facebook, Instagram, TikTok, or WhatsApp groups. When a prospective owner clicks an ad link on their phone, the app automatically opens <strong className="text-[#3FB950]">Step 1 of Salon Self-Onboarding</strong> with Founder admin screens completely hidden.
+                WorkCraft links contain automatic device and source tags. When a salon owner clicks your ad on mobile, the app <strong className="text-[#3FB950]">completely bypasses Founder screens</strong> and launches them directly into <strong>Step 1 of the 4-step onboarding flow</strong>.
               </p>
             </div>
 
-            {/* Pre-Built Social Campaign Cards (Facebook, Instagram, TikTok, WhatsApp Referral) */}
+            {/* Pre-Built Social Campaign Cards (Facebook, Instagram, TikTok, WhatsApp) */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center justify-between">
                 <h4 className="text-xs font-mono font-bold text-[#D29922] uppercase tracking-wider">
-                  Pre-Built New Salon Ad Links (Auto-Tagged)
+                  Pre-Built Social Campaign Links (Auto-Tagged)
                 </h4>
                 <span className="text-[10px] font-mono text-[#8B949E]">
-                  Use &ldquo;Preview Signup Ad Flow&rdquo; to inspect what a new prospect sees after clicking your ad
+                  Tap to Copy or Test Direct Mobile Launch
                 </span>
               </div>
 
@@ -1076,41 +745,45 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                     id: 'fb',
                     source: 'Facebook' as const,
                     name: 'Facebook Ads & Meta Stories',
-                    badge: 'FACEBOOK ADS · NEW SIGNUPS',
+                    badge: 'FACEBOOK ADS',
                     badgeColor: 'border-[#1877F2]/40 bg-[#1877F2]/15 text-[#58A6FF]',
-                    url: `${portalOrigin}/?onboard=true&ref=fb&utm_source=facebook&utm_medium=cpc&utm_campaign=salon_signup_q4`,
+                    color: 'text-[#58A6FF]',
+                    url: 'https://portal.workcraft.local/?onboard=true&ref=fb&utm_source=facebook&utm_medium=cpc&utm_campaign=salon_signup_q4',
                     stats: '14.8% CTR · 38 Salons Onboarded · High Conversion',
-                    desc: 'Drop prospective salon owners straight into Step 1 self-onboarding from Facebook Feed or Story ads.',
+                    desc: 'Drop prospective salon owners straight into Step 1 from Facebook Feed or Story ads without viewing admin tools.',
                   },
                   {
                     id: 'ig',
                     source: 'Instagram' as const,
                     name: 'Instagram Reels & Bio Link',
-                    badge: 'INSTAGRAM REELS · NEW SIGNUPS',
+                    badge: 'INSTAGRAM REELS',
                     badgeColor: 'border-[#E1306C]/40 bg-[#E1306C]/15 text-[#FF7B72]',
-                    url: `${portalOrigin}/?onboard=true&ref=ig&utm_source=instagram&utm_medium=cpc&utm_campaign=salon_signup_q4`,
+                    color: 'text-[#FF7B72]',
+                    url: 'https://portal.workcraft.local/?onboard=true&ref=ig&utm_source=instagram&utm_medium=cpc&utm_campaign=salon_signup_q4',
                     stats: '18.2% CTR · 46 Salons Onboarded · Visual Barbers',
-                    desc: 'Designed for Instagram salon transformation reels and bio links. Lands prospective owners in Step 1.',
+                    desc: 'Perfect for viral salon transformation reels and bio links. Auto-tags traffic from Instagram campaigns.',
                   },
                   {
                     id: 'tiktok',
                     source: 'TikTok' as const,
                     name: 'TikTok Viral Video Campaigns',
-                    badge: 'TIKTOK VIRAL · NEW SIGNUPS',
+                    badge: 'TIKTOK VIRAL',
                     badgeColor: 'border-[#00F2FE]/40 bg-[#00F2FE]/15 text-cyan-300',
-                    url: `${portalOrigin}/?onboard=true&ref=tiktok&utm_source=tiktok&utm_medium=cpc&utm_campaign=salon_signup_q4`,
+                    color: 'text-cyan-300',
+                    url: 'https://portal.workcraft.local/?onboard=true&ref=tiktok&utm_source=tiktok&utm_medium=cpc&utm_campaign=salon_signup_q4',
                     stats: '21.5% CTR · 52 Salons Onboarded · Gen-Z Stylists',
-                    desc: 'High-speed mobile funnel for short video promos. Lands prospects straight into Step 1 on mobile.',
+                    desc: 'High-speed mobile funnel for short video promos. Automatically lands owner into Step 1 on their phone.',
                   },
                   {
                     id: 'whatsapp',
-                    source: 'WhatsApp' as const,
-                    name: 'WhatsApp Groups & New Salon Referral',
-                    badge: 'NEW SALON SIGNUP LINK',
+                    source: 'Facebook' as const,
+                    name: 'WhatsApp Groups & Direct Referral',
+                    badge: 'WHATSAPP DIRECT',
                     badgeColor: 'border-[#25D366]/40 bg-[#25D366]/15 text-[#3FB950]',
-                    url: `${portalOrigin}/?onboard=true&ref=whatsapp&utm_source=whatsapp`,
+                    color: 'text-[#3FB950]',
+                    url: 'https://portal.workcraft.local/?onboard=true&ref=social&utm_source=whatsapp',
                     stats: '34.0% Conversion · 1-to-1 Trusted Referral',
-                    desc: 'Share in salon owner WhatsApp groups so unregistered owners can click and onboard themselves (not for broadcasting to existing clients—use Broadcast panel above).',
+                    desc: 'Clean direct WhatsApp link for salon community groups, parlor owners networks, and warm referrals.',
                   },
                 ].map((item) => {
                   const isCopied = copiedLinkId === item.id;
@@ -1163,10 +836,10 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                             }
                           }}
                           className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#30363D] bg-[#21262D] hover:border-[#D29922] px-3 py-2 text-xs font-mono font-bold text-[#D29922] transition"
-                          title="Simulates what a new salon owner sees when they click this social ad link on mobile (opens Step 1 Onboarding)"
+                          title="Simulate tapping this link on mobile"
                         >
                           <Smartphone className="size-3.5" />
-                          <span>Preview Signup Ad Flow →</span>
+                          <span>Test Launch →</span>
                         </button>
                       </div>
                     </div>
@@ -1180,7 +853,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
               <div className="flex items-center gap-2 text-[#D29922]">
                 <Sparkles className="size-4 shrink-0" />
                 <h4 className="text-xs font-mono font-bold uppercase tracking-wider">
-                  Generate Custom Auto-Tagged Acquisition Link
+                  Generate Custom Auto-Tagged Campaign Link
                 </h4>
               </div>
 
@@ -1197,7 +870,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 </label>
 
                 <label className="text-xs font-mono text-[#8B949E] block space-y-1">
-                  <span>TARGET SALON CATEGORY</span>
+                  <span>TARGET CATEGORY</span>
                   <select
                     value={customCampaignCategory}
                     onChange={(e) => setCustomCampaignCategory(e.target.value as 'ALL' | 'MENS' | 'LADIES')}
@@ -1226,7 +899,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
 
               {/* Generated Result Card */}
               {(() => {
-                const generatedUrl = `${portalOrigin}/?onboard=true&ref=social&utm_source=custom&utm_campaign=${encodeURIComponent(
+                const generatedUrl = `https://portal.workcraft.local/?onboard=true&ref=social&utm_source=custom&utm_campaign=${encodeURIComponent(
                   customCampaignName.trim() || 'promo'
                 )}&category=${customCampaignCategory.toLowerCase()}&lang=${customCampaignLanguage.toLowerCase()}`;
                 const isCustomCopied = copiedLinkId === 'custom';
@@ -1234,7 +907,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 return (
                   <div className="rounded-xl border border-[#06B6D4]/40 bg-[#161B22] p-3.5 space-y-2">
                     <div className="flex items-center justify-between text-[11px] font-mono">
-                      <span className="text-[#06B6D4] font-bold">Generated Direct Signup Ad Link:</span>
+                      <span className="text-[#06B6D4] font-bold">Generated Direct Campaign Link:</span>
                       <span className="text-[#3FB950]">Bypasses Founder Command ✓</span>
                     </div>
                     <div className="text-xs font-mono text-[#F0F6FC] break-all select-all p-2 rounded-lg bg-[#0D1117] border border-[#30363D]">
@@ -1263,10 +936,9 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                           }
                         }}
                         className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#21262D] hover:border-[#D29922] px-3.5 py-2 text-xs font-mono font-bold text-[#D29922] transition"
-                        title="Simulates clicking this link to preview the Step 1 Onboarding experience"
                       >
                         <Smartphone className="size-3.5" />
-                        <span>Preview Signup Ad Flow →</span>
+                        <span>Test Link in Step 1</span>
                       </button>
                     </div>
                   </div>
@@ -1277,20 +949,20 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
             {/* Architecture Explainer Diagram */}
             <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-5 space-y-3">
               <h4 className="text-xs font-mono font-bold text-[#8B949E] uppercase tracking-wider">
-                How Prospect Ad Links Route to Self-Onboarding (Zero Founder Leakage)
+                Traffic Routing Architecture (How Zero Founder Leakage Works)
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-center font-mono text-[11px]">
                 <div className="p-3 rounded-xl border border-[#30363D] bg-[#161B22] space-y-1">
                   <span className="text-[#06B6D4] font-bold block">1. Click Ad</span>
-                  <p className="text-[10px] text-[#8B949E] font-sans">New salon owner taps FB/IG/TikTok/WA ad link on phone</p>
+                  <p className="text-[10px] text-[#8B949E] font-sans">Owner taps FB/IG/TikTok ad on their smartphone</p>
                 </div>
                 <div className="p-3 rounded-xl border border-[#116329] bg-[#0D3822] space-y-1">
                   <span className="text-[#3FB950] font-bold block">2. Auto-Bypass</span>
-                  <p className="text-[10px] text-[#8B949E] font-sans">Role isolates to SALON_OWNER · Founder screens hidden</p>
+                  <p className="text-[10px] text-[#8B949E] font-sans">Role isolates to SALON_OWNER · 100% hidden founder</p>
                 </div>
                 <div className="p-3 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] space-y-1">
                   <span className="text-[#D29922] font-bold block">3. 4-Step Setup</span>
-                  <p className="text-[10px] text-[#8B949E] font-sans">Info ➔ Menu ➔ Package &amp; Monthly SLA ➔ Link WhatsApp</p>
+                  <p className="text-[10px] text-[#8B949E] font-sans">Info ➔ Menu ➔ Package &amp; 10% SLA ➔ Link WhatsApp</p>
                 </div>
                 <div className="p-3 rounded-xl border border-[#06B6D4] bg-[#06B6D4]/15 space-y-1">
                   <span className="text-[#06B6D4] font-bold block">4. Live PWA</span>
@@ -1319,119 +991,6 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
               <p className="text-xs text-[#F0F6FC] font-sans leading-relaxed">
                 You do not need to turn switches on or off manually. The system detects issues, sends reminders, switches backup lines, and protects client bookings automatically—and simply sends a clean summary report to your Founder number.
               </p>
-            </div>
-
-            {/* Single Live Software, Storage & Voice AI Usage Meter (Operational Health) */}
-            <div
-              className={`rounded-xl border p-4 space-y-3.5 ${
-                usageMeter.alertTriggered
-                  ? 'border-[#da3633] bg-[#4C1C1D]/60'
-                  : 'border-[#30363D] bg-[#0D1117]'
-              }`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#21262D] pb-2.5">
-                <div>
-                  <h4 className="text-xs font-mono font-bold text-[#06B6D4] uppercase tracking-wider">
-                    Operational Health · Live Software, Storage &amp; Voice AI Usage Meter
-                  </h4>
-                  <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">
-                    Opus voice compression (~{usageMeter.targetClipKb} KB/clip) + 7-day auto-delete cron keeps recurring costs at {usageMeter.monthlyExpenseLabel}. Alerts trigger automatically only above 80% of free tier.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span
-                    className={`rounded-md border px-2.5 py-1 text-[10px] font-mono font-bold ${
-                      usageMeter.alertTriggered
-                        ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149]'
-                        : 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
-                    }`}
-                  >
-                    {usageMeter.monthlyExpenseLabel} · {usageMeter.usagePercent}% USED
-                  </span>
-                  {onRefreshUsage && (
-                    <button
-                      type="button"
-                      onClick={onRefreshUsage}
-                      className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-2.5 text-[10px] font-mono font-bold text-[#06B6D4] transition"
-                    >
-                      Refresh
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {usageMeter.alertTriggered && (
-                <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] p-3 text-xs font-mono text-[#F85149]">
-                  ⚠️ 80%+ Free-Tier Threshold Reached ({usageMeter.usagePercent}%) — Dashboard &amp; Founder WhatsApp alert triggered automatically.
-                </div>
-              )}
-
-              <div className="grid gap-3 sm:grid-cols-4 font-mono text-xs">
-                <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3 space-y-1">
-                  <span className="text-[10px] text-[#8B949E] uppercase block">Opus Voice Buffer</span>
-                  <span className="text-sm font-bold text-[#F0F6FC] block">
-                    {usageMeter.storageUsedKb} KB / {Math.round(usageMeter.storageQuotaKb / 1024)} MB
-                  </span>
-                  <span className="text-[10px] text-[#3FB950]">
-                    {usageMeter.activeClipCount} clips · ~{usageMeter.targetClipKb} KB avg
-                  </span>
-                </div>
-
-                <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3 space-y-1">
-                  <span className="text-[10px] text-[#8B949E] uppercase block">7-Day Auto-Delete Cron</span>
-                  <span className="text-sm font-bold text-[#06B6D4] block">
-                    {usageMeter.retentionDays} Days TTL
-                  </span>
-                  <span className="text-[10px] text-[#8B949E]">
-                    {usageMeter.purgedClipCount} expired clips purged
-                  </span>
-                </div>
-
-                <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3 space-y-1">
-                  <span className="text-[10px] text-[#8B949E] uppercase block">Gemini AI (Free Tier)</span>
-                  <span className="text-sm font-bold text-[#D29922] block">
-                    {usageMeter.geminiRequestsToday} / {usageMeter.geminiDailyLimit}
-                  </span>
-                  <span className="text-[10px] text-[#3FB950]">
-                    {usageMeter.geminiPercent}% daily quota
-                  </span>
-                </div>
-
-                <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3 space-y-1">
-                  <span className="text-[10px] text-[#8B949E] uppercase block">Edge Neural TTS</span>
-                  <span className="text-sm font-bold text-[#3FB950] block">
-                    {usageMeter.edgeTtsRequestsToday} streams
-                  </span>
-                  <span className="text-[10px] text-[#8B949E]">
-                    In-memory MP3 ($0.00)
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[10px] font-mono text-[#8B949E]">
-                  <span>Free-Tier Utilization ({usageMeter.usagePercent}% of ceiling)</span>
-                  <span className="text-[#D29922]">Auto-Alert Threshold: {usageMeter.alertThresholdPercent}%</span>
-                </div>
-                <div className="h-2.5 w-full rounded-full bg-[#161B22] overflow-hidden border border-[#30363D] relative">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      usageMeter.alertTriggered ? 'bg-[#F85149]' : 'bg-[#06B6D4]'
-                    }`}
-                    style={{ width: `${Math.max(2, usageMeter.usagePercent)}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-[10px] font-mono text-[#6E7681]">
-                  <span>Last 7-day purge sweep: {new Date(usageMeter.lastCleanupAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  <button
-                    type="button"
-                    onClick={() => go('Revenue')}
-                    className="text-[#06B6D4] hover:underline font-bold"
-                  >
-                    Linked Expense Line in Revenue →
-                  </button>
-                </div>
-              </div>
             </div>
 
             <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
@@ -1476,212 +1035,6 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
               </div>
             </div>
 
-            {/* Live $0.00 Real-Time Error Detection & Self-Healing Incident Feed */}
-            <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div
-                  className={`flex items-center gap-2 ${
-                    (incidentFeed?.summary.openActionCount ?? 0) > 0
-                      ? 'text-[#F85149]'
-                      : 'text-[#3FB950]'
-                  }`}
-                >
-                  {(incidentFeed?.summary.openActionCount ?? 0) > 0 ? (
-                    <AlertTriangle className="size-4 shrink-0" />
-                  ) : (
-                    <ShieldCheck className="size-4 shrink-0" />
-                  )}
-                  <h4 className="text-xs font-mono font-bold uppercase tracking-wider">
-                    Live System Incident &amp; Auto-Recovery Feed ($0.00 Guard)
-                  </h4>
-                </div>
-                <button
-                  type="button"
-                  disabled={isLoadingIncidents}
-                  onClick={() => void refreshFounderIncidents()}
-                  className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3 py-1.5 text-[11px] font-mono font-bold text-[#06B6D4] transition"
-                >
-                  <RefreshCw className={`size-3.5 ${isLoadingIncidents ? 'animate-spin' : ''}`} />
-                  <span>{isLoadingIncidents ? 'Syncing...' : 'Refresh Feed'}</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 font-mono">
-                <div className="rounded-xl border border-[#116329] bg-[#0D3822]/50 p-3">
-                  <span className="text-[10px] text-[#3FB950] uppercase block">Auto-Resolved Incidents</span>
-                  <span className="text-base font-bold text-[#F0F6FC] tabular-nums">
-                    {incidentFeed?.summary.autoResolvedCount ?? 0}
-                  </span>
-                </div>
-                <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-3">
-                  <span className="text-[10px] text-[#8B949E] uppercase block">Avg Detection &amp; Recovery</span>
-                  <span className="text-base font-bold text-[#06B6D4] tabular-nums">
-                    {incidentFeed?.summary.avgRecoveryMs ?? 420} ms
-                  </span>
-                </div>
-                <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B]/50 p-3">
-                  <span className="text-[10px] text-[#D29922] uppercase block">Open Founder Alerts</span>
-                  <span className="text-base font-bold text-[#F0F6FC] tabular-nums">
-                    {incidentFeed?.summary.openActionCount ?? 0}
-                  </span>
-                </div>
-              </div>
-
-              {(!incidentFeed || incidentFeed.incidents.length === 0) ? (
-                <div className="rounded-xl border border-[#116329] bg-[#0D3822]/30 p-3.5 text-xs font-mono text-[#3FB950] flex items-center gap-2">
-                  <CheckCircle2 className="size-4 shrink-0" />
-                  <span>
-                    Zero unresolved incidents across Founder, Agent, Salon Owner &amp; End-User portals. Self-healing boundaries active (&lt;50ms detection · 800ms auto-recovery).
-                  </span>
-                </div>
-              ) : (
-                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {incidentFeed.incidents.map((inc) => {
-                    const needsAction = inc.resolutionStatus === 'NEEDS_FOUNDER_ACTION';
-                    return (
-                      <div
-                        key={inc.id}
-                        className={`rounded-xl border p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
-                          needsAction
-                            ? 'border-[#da3633] bg-[#4C1C1D]/50'
-                            : 'border-[#30363D] bg-[#161B22]'
-                        }`}
-                      >
-                        <div className="space-y-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-1.5 font-mono">
-                            <span
-                              className={`rounded px-2 py-0.5 text-[9px] font-bold uppercase border ${
-                                needsAction
-                                  ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149]'
-                                  : 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
-                              }`}
-                            >
-                              {inc.resolutionStatus === 'NEEDS_FOUNDER_ACTION'
-                                ? 'NEEDS ACTION'
-                                : inc.resolutionStatus === 'RESOLVED_BY_FOUNDER'
-                                ? 'FOUNDER RESOLVED ✓'
-                                : `AUTO-RESOLVED · ${inc.recoveryMs}ms ✓`}
-                            </span>
-                            <span className="rounded bg-[#0D1117] border border-[#30363D] px-2 py-0.5 text-[9px] font-bold text-[#06B6D4]">
-                              {inc.role} · {inc.area}
-                            </span>
-                            <span className="text-[10px] text-[#8B949E]">
-                              {new Date(inc.occurredAt).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                          </div>
-                          <p className="text-xs text-[#F0F6FC] font-sans break-words [overflow-wrap:break-word]">
-                            {inc.message}
-                          </p>
-                        </div>
-
-                        {needsAction && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                const res = await fetch(
-                                  `/api/founder/incidents/${encodeURIComponent(inc.id)}/resolve`,
-                                  { method: 'POST' }
-                                );
-                                if (res.ok) {
-                                  const nextData = await res.json();
-                                  setIncidentFeed({
-                                    incidents: nextData.incidents || [],
-                                    summary: nextData.summary,
-                                  });
-                                }
-                              } catch {}
-                            }}
-                            className="min-h-[40px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#3FB950] px-3 py-1.5 text-[11px] font-mono font-bold text-[#3FB950] shrink-0 transition"
-                          >
-                            Mark Resolved ✓
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Founder Access: PIN + Mobile Biometric Device Security */}
-            <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-[#06B6D4]">
-                  <Fingerprint className="size-4 shrink-0" />
-                  <h4 className="text-xs font-mono font-bold uppercase tracking-wider">
-                    Founder Access Security · PIN &amp; Mobile Biometric
-                  </h4>
-                </div>
-                <span
-                  className={`rounded-md border px-2.5 py-0.5 text-[10px] font-mono font-bold ${
-                    savedBiometric
-                      ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
-                      : 'border-[#9E6A03] bg-[#3B2E0B] text-[#D29922]'
-                  }`}
-                >
-                  {savedBiometric ? 'PIN + BIOMETRIC ACTIVE' : 'PIN ACTIVE (WC3118)'}
-                </span>
-              </div>
-              <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
-                Laptops &amp; new devices unlock via your 6-character Founder PIN (<strong className="text-[#F0F6FC] font-mono">WC3118</strong>). On mobile phones, after logging in with PIN once, you can save <strong className="text-[#F0F6FC]">Thumb / Face ID</strong> so future mobile logins offer both Biometric and PIN.
-              </p>
-
-              {biometricStatusMsg && (
-                <p className="text-xs font-mono text-[#06B6D4]">{biometricStatusMsg}</p>
-              )}
-
-              <div className="flex flex-wrap items-center gap-2.5">
-                {canBiometric && !savedBiometric && (
-                  <button
-                    type="button"
-                    disabled={isProcessingBiometric}
-                    onClick={async () => {
-                      setIsProcessingBiometric(true);
-                      setBiometricStatusMsg(null);
-                      const label = isMobileDevice ? 'Founder Mobile Biometric' : 'Founder Device Passkey';
-                      const res = await enrollFounderBiometricDevice(label);
-                      setIsProcessingBiometric(false);
-                      if (!res.ok) {
-                        setBiometricStatusMsg('error' in res ? res.error : 'Biometric setup failed.');
-                        return;
-                      }
-                      setSavedBiometric(res.stored);
-                      onBiometricUpdated?.();
-                      setBiometricStatusMsg('✓ Mobile Biometric (Thumb / Face ID) saved to this device!');
-                    }}
-                    className="min-h-[48px] inline-flex items-center gap-2 rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-60 px-4 py-2 text-xs font-mono font-black text-[#0D1117] uppercase transition"
-                  >
-                    <Fingerprint className="size-4" />
-                    <span>{isProcessingBiometric ? 'Scanning...' : 'Register Thumb / Face ID on This Device'}</span>
-                  </button>
-                )}
-                {savedBiometric && (
-                  <button
-                    type="button"
-                    disabled={isProcessingBiometric}
-                    onClick={async () => {
-                      setIsProcessingBiometric(true);
-                      try {
-                        await fetch('/api/auth/founder-webauthn/revoke', { method: 'POST' });
-                      } catch {}
-                      clearStoredFounderBiometric();
-                      setSavedBiometric(null);
-                      onBiometricUpdated?.();
-                      setIsProcessingBiometric(false);
-                      setBiometricStatusMsg('Mobile Biometric credential removed. Unlocking via PIN remains active.');
-                    }}
-                    className="min-h-[48px] inline-flex items-center gap-2 rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#612324] px-4 py-2 text-xs font-mono font-bold text-[#F85149] transition"
-                  >
-                    <span>Remove Saved Mobile Biometric</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
             {/* Single Founder Alert Phone Field */}
             <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
               <h4 className="text-xs font-mono font-bold text-[#06B6D4] uppercase tracking-wider">
@@ -1698,14 +1051,7 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                 </label>
                 <button
                   type="button"
-                  onClick={async () => {
-                    try {
-                      await fetch('/api/founder/settings/report-phone', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ phone: founderAlertPhone }),
-                      });
-                    } catch {}
+                  onClick={() => {
                     setSavedPhoneToast(true);
                     setTimeout(() => setSavedPhoneToast(false), 3000);
                   }}
@@ -1805,6 +1151,90 @@ export const TabsSection: React.FC<TabsSectionProps> = ({
                       Inspect live queue, voice alerts, rates, video deals &amp; PDF poster.
                     </p>
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* 24-Hour Public Inspection Window & Automatic Founder PIN Security */}
+            {auditWindowStatus && (
+              <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-[#06B6D4]">
+                    <Clock className="size-4 shrink-0" />
+                    <h4 className="text-xs font-mono font-bold uppercase tracking-wider">
+                      24-Hour Public &amp; AI Inspection Window
+                    </h4>
+                  </div>
+                  <span
+                    className={`rounded-md border px-2.5 py-0.5 text-[10px] font-mono font-bold ${
+                      auditWindowStatus.isAuditOpen
+                        ? 'bg-[#0D3822] border-[#116329] text-[#3FB950]'
+                        : 'bg-[#3B2E0B] border-[#9E6A03] text-[#D29922]'
+                    }`}
+                  >
+                    {auditWindowStatus.isAuditOpen
+                      ? `OPEN · ${formatRemainingAuditTime(auditWindowStatus.remainingMs)} LEFT`
+                      : 'LOCKED · PIN PROTECTED'}
+                  </span>
+                </div>
+
+                <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
+                  Public test links (<code className="text-[#F0F6FC] font-mono">?role=salon_owner</code> &amp;{' '}
+                  <code className="text-[#F0F6FC] font-mono">?role=agent</code>) and AI audit routes (<code className="text-[#F0F6FC] font-mono">/robots.txt</code>,{' '}
+                  <code className="text-[#F0F6FC] font-mono">/llms.txt</code>) remain open with sample data until{' '}
+                  <strong className="text-[#F0F6FC] font-mono">{auditWindowStatus.expiresAtIso}</strong>, then automatically lock behind your Founder PIN and block public role links.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs font-mono">
+                  {[
+                    { id: 'audit-salon-onboard', label: 'Salon Onboarding', path: '/?role=salon_owner' },
+                    { id: 'audit-salon-live', label: 'Salon Live + End-User Bot', path: '/?role=salon_owner&paired=true' },
+                    { id: 'audit-agent', label: 'Field Agent Hub', path: '/?role=agent' },
+                    { id: 'audit-llms', label: 'AI Guide (/llms.txt)', path: '/llms.txt' },
+                  ].map((item) => {
+                    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://workcraft-app.vercel.app';
+                    const fullUrl = `${origin}${item.path}`;
+                    const isCopied = copiedLinkId === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleCopyLink(item.id, fullUrl, item.label)}
+                        className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3 py-2 text-left flex items-center justify-between gap-2 transition"
+                      >
+                        <div className="min-w-0">
+                          <span className="block text-[10px] text-[#06B6D4] font-bold truncate">{item.label}</span>
+                          <span className="block text-[10px] text-[#8B949E] truncate">{item.path}</span>
+                        </div>
+                        {isCopied ? (
+                          <Check className="size-3.5 text-[#3FB950] shrink-0" />
+                        ) : (
+                          <Copy className="size-3.5 text-[#8B949E] shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                  {!auditWindowStatus.isAuditOpen && auditWindowStatus.isGenuineWindowOpen ? (
+                    <button
+                      type="button"
+                      onClick={auditWindowStatus.onResumeAuditWindow}
+                      className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] px-4 py-2 text-xs font-mono font-bold text-[#3FB950] transition"
+                    >
+                      Resume 24h Audit Window
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={auditWindowStatus.onTriggerLockNow}
+                      className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-4 py-2 text-xs font-mono font-bold text-[#D29922] transition"
+                    >
+                      <Lock className="size-3.5" />
+                      <span>Test Post-Expiry PIN Lock Now</span>
+                    </button>
+                  )}
                 </div>
               </div>
             )}
