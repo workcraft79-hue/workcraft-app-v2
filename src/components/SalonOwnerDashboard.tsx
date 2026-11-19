@@ -949,6 +949,13 @@ export const OWNER_UI_I18N: Record<
     urReplySampleBtn: string;
     arReplySampleBtn: string;
     playClientReplyBtn: string;
+    uploadDealVideoBtn: string;
+    videoDealsDrawerTitle: string;
+    upgradePlanBtn: string;
+    proofLedgerTitle: string;
+    proofLedgerSub: string;
+    videoBroadcastLockedTitle: string;
+    videoBroadcastLockedDesc: string;
   }
 > = {
   en: {
@@ -1116,6 +1123,14 @@ export const OWNER_UI_I18N: Record<
     urReplySampleBtn: '🔊 Listen Urdu Reply Sample',
     arReplySampleBtn: '🔊 Listen Arabic Reply Sample',
     playClientReplyBtn: 'Play Client Reply',
+    uploadDealVideoBtn: 'Upload Deal Video',
+    videoDealsDrawerTitle: 'Video Deals, Plan Upgrades & Monthly Maintenance',
+    upgradePlanBtn: 'Upgrade Plan',
+    proofLedgerTitle: 'Immutable Booking Proof Ledger · SHA-256',
+    proofLedgerSub: 'Tamper-proof WhatsApp price & slot confirmations protected against message deletion',
+    videoBroadcastLockedTitle: 'Video Broadcast Deals Locked on STARTER Tier',
+    videoBroadcastLockedDesc:
+      'Upgrade to PRO or PRO++ (VIP) to unlock Video QA Deal uploads, Google Maps Rating Booster, and Bridal Deposit SLA locks.',
   },
   ur: {
     whatsappConnected: 'واٹس ایپ گیٹ وے · فعال',
@@ -1282,6 +1297,14 @@ export const OWNER_UI_I18N: Record<
     urReplySampleBtn: '🔊 اردو کلائنٹ جواب سنیں',
     arReplySampleBtn: '🔊 عربی کلائنٹ جواب سنیں',
     playClientReplyBtn: 'کلائنٹ کا جواب سنیں',
+    uploadDealVideoBtn: 'ڈیل ویڈیو اپلوڈ کریں',
+    videoDealsDrawerTitle: 'ویڈیو ڈیلز، پیکیج اپگریڈ اور ماہانہ مینٹیننس',
+    upgradePlanBtn: 'پیکیج اپگریڈ کریں',
+    proofLedgerTitle: 'محفوظ بکنگ ثبوت لیجر · SHA-256',
+    proofLedgerSub: 'واٹس ایپ قیمت اور وقت کی محفوظ تصدیق جو پیغام ڈیلیٹ ہونے پر بھی باقی رہتی ہے',
+    videoBroadcastLockedTitle: 'اسٹارٹر پیکیج پر ویڈیو ڈیل براڈکاسٹ بند ہے',
+    videoBroadcastLockedDesc:
+      'ویڈیو ڈیل اپلوڈز، گوگل ریویو بوسٹر اور برائیڈل ایڈوانس لاک کھولنے کے لیے PRO یا VIP پیکیج پر اپگریڈ کریں۔',
   },
   ar: {
     whatsappConnected: 'بوابة واتساب · متصل',
@@ -1448,6 +1471,14 @@ export const OWNER_UI_I18N: Record<
     urReplySampleBtn: '🔊 استمع لرد العميل بالأردية',
     arReplySampleBtn: '🔊 استمع لرد العميل بالعربية',
     playClientReplyBtn: 'تشغيل رد العميل',
+    uploadDealVideoBtn: 'رفع فيديو العرض',
+    videoDealsDrawerTitle: 'عروض الفيديو، ترقية الباقة والصيانة الشهرية',
+    upgradePlanBtn: 'ترقية الباقة',
+    proofLedgerTitle: 'سجل إثباتات الحجز غير القابل للتعديل · SHA-256',
+    proofLedgerSub: 'تأكيدات الأسعار والمواعيد عبر واتساب محمية ضد الحذف أو التعديل',
+    videoBroadcastLockedTitle: 'عروض بث الفيديو مغلقة في باقة STARTER',
+    videoBroadcastLockedDesc:
+      'قم بالترقية إلى PRO أو VIP لفتح رفع فيديوهات العروض ومعزز تقييمات جوجل ومتابعة عربون العرائس.',
   },
 };
 
@@ -2128,6 +2159,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const hasFounderVoiceReply = activeFounderVoiceThread.messages.some(
     (m) => m.senderRole === 'FOUNDER'
   );
+
+  const videoDealsDrawerRef = useRef<HTMLDivElement | null>(null);
+
+  const jumpToVideoDealsSection = () => {
+    setSectionMode('MANAGE');
+    setManageSubSection('AUTOMATION');
+    setShowManageAdvancedTools(true);
+    window.setTimeout(() => {
+      videoDealsDrawerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  };
 
   const scrollToFounderVoiceSupport = () => {
     setVoiceSubTab('FOUNDER_HELP');
@@ -5185,6 +5227,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               ))}
             </div>
 
+            {/* Direct Video Deals Shortcut (Jumps cleanly into Manage -> Automation & opens Video Deals) */}
+            <button
+              type="button"
+              onClick={jumpToVideoDealsSection}
+              className="min-h-[42px] rounded-xl border border-[#06B6D4]/50 bg-[#0D2138] hover:border-[#06B6D4] px-3 py-1.5 text-xs font-mono font-bold text-[#06B6D4] transition flex items-center gap-1.5 shrink-0"
+              title={ui.uploadDealVideoBtn}
+            >
+              <Video className="size-4 shrink-0" />
+              <span className="hidden sm:inline">{ui.uploadDealVideoBtn}</span>
+            </button>
+
             {/* Top-Right Upgrade CTA (Shows only remaining higher tiers & difference amount) */}
             {higherPackages.length > 0 && (
               <button
@@ -7606,10 +7659,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 >
                   <div>
                     <span className="text-xs font-mono font-bold uppercase text-[#3FB950] block">
-                      Immutable Booking Proof Ledger · SHA-256 ({immutableProofs.length})
+                      {ui.proofLedgerTitle} ({immutableProofs.length})
                     </span>
                     <span className="text-[11px] font-sans text-[#8B949E]">
-                      Tamper-proof WhatsApp price &amp; slot confirmations protected against message deletion
+                      {ui.proofLedgerSub}
                     </span>
                   </div>
                   {showProofLedgerDrawer ? (
@@ -7660,8 +7713,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 )}
               </div>
 
-              {/* Collapsible 3: Plan, Billing & Video Broadcast Drawer inside Manage */}
-              <div className="rounded-2xl border border-[#30363D] bg-[#161B22] overflow-hidden">
+              {/* Collapsible 3: Video Deals, Plan & Billing Broadcast Drawer inside Manage */}
+              <div
+                ref={videoDealsDrawerRef}
+                className="rounded-2xl border border-[#30363D] bg-[#161B22] overflow-hidden"
+              >
                 <button
                   type="button"
                   onClick={() => setShowManageAdvancedTools(!showManageAdvancedTools)}
@@ -7669,9 +7725,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 >
                   <div>
                     <span className="text-xs font-mono font-bold uppercase text-[#D29922] block">
-                      Plan Upgrades, Monthly Maintenance &amp; Video Deals
+                      {ui.videoDealsDrawerTitle}
                     </span>
-                    <span className="text-[11px] font-sans text-[#8B949E]">
+                    <span className="text-[11px] font-sans text-[#8B949E]" dir="ltr">
                       {currentSalon.plan} · {regionConfig.symbol}
                       {currentSalon.maint.toLocaleString()}/mo (Due 5th)
                     </span>
@@ -7688,10 +7744,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5">
                       <div>
                         <p className="text-xs font-mono font-bold text-[#F0F6FC]">
-                          Owner Voice Language ({ownerLang.toUpperCase()}) · Plan: {currentSalon.plan}
+                          {ownerLang.toUpperCase()} · {currentSalon.plan}
                         </p>
                         <p className="text-[11px] text-[#8B949E] font-sans mt-0.5">
-                          Maintenance Status: {isMaintPaid ? `Paid (${maintTid})` : 'Payment Due'}
+                          {isMaintPaid ? `✓ (${maintTid})` : ui.pendingDeposits}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -7700,9 +7756,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           onChange={(e) => setOwnerLang(e.target.value as VoiceLang)}
                           className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono text-[#F0F6FC]"
                         >
-                          {allowedLangs.includes('ur') && <option value="ur">Owner Voice: Urdu</option>}
-                          {allowedLangs.includes('en') && <option value="en">Owner Voice: English</option>}
-                          {allowedLangs.includes('ar') && <option value="ar">Owner Voice: Arabic</option>}
+                          {allowedLangs.includes('ur') && <option value="ur">Urdu (اردو)</option>}
+                          {allowedLangs.includes('en') && <option value="en">English</option>}
+                          {allowedLangs.includes('ar') && <option value="ar">Arabic (العربية)</option>}
                         </select>
                         {higherPackages.length > 0 && (
                           <button
@@ -7713,7 +7769,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             }}
                             className="min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 text-xs font-mono font-bold uppercase transition"
                           >
-                            Upgrade Plan
+                            {ui.upgradePlanBtn}
                           </button>
                         )}
                       </div>
@@ -7722,10 +7778,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     {packageTier === 'STARTER' ? (
                       <div className="rounded-xl border border-[#9E6A03] bg-[#3B2E0B] p-4 space-y-2">
                         <p className="text-xs font-mono font-bold uppercase text-[#D29922]">
-                          Video Broadcast Deals Locked on STARTER Tier
+                          {ui.videoBroadcastLockedTitle}
                         </p>
                         <p className="text-xs text-[#F0F6FC] font-sans">
-                          Upgrade to PRO or PRO++ (VIP) to unlock Video QA Deal uploads, Google Maps Rating Booster, and Bridal Deposit SLA locks.
+                          {ui.videoBroadcastLockedDesc}
                         </p>
                       </div>
                     ) : (
@@ -7749,7 +7805,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           {/* 5. WINDOW QR POSTER (Print / Download PDF) */}
           {manageSubSection === 'POSTER' && (
             <PortalCard
-              title="Window QR Poster"
+              title={ui.windowQrPoster}
               kicker="PRINTABLE DOOR POSTER & CABIN PAMPHLET (PDF)"
             >
               <SalonWindowPosterPdf
