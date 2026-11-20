@@ -23,6 +23,42 @@ export interface SalonServiceRate {
   active?: boolean;
 }
 
+export interface SalonOperatingHours {
+  monThuOpen: string;
+  monThuClose: string;
+  monThuClosed: boolean;
+  fridayOpen: string;
+  fridayClose: string;
+  fridayBreakStart: string;
+  fridayBreakEnd: string;
+  fridayClosed: boolean;
+  satSunOpen: string;
+  satSunClose: string;
+  satSunClosed: boolean;
+}
+
+export type DealDiscountType = 'PCT' | 'FIXED' | 'BUNDLE_PRICE';
+
+export interface SalonDeal {
+  id: string;
+  salonId: string;
+  title: string;
+  description: string;
+  discountType: DealDiscountType;
+  discountValue: number;
+  serviceIds: string[];
+  serviceNames: string[];
+  startsAt: string;
+  expiresAt: string;
+  videoRetentionDaysAfterExpiry: number;
+  videoFileName?: string;
+  videoMimeType?: string;
+  videoUrl?: string;
+  videoDeletedAt?: string | null;
+  active: boolean;
+  createdAt: string;
+}
+
 export interface RetentionSettings {
   salonId: string;
   salonName: string;
@@ -34,6 +70,11 @@ export interface RetentionSettings {
   currencySymbol: string;
   salonCategory?: SalonCategory;
   enabledServices?: SalonServiceRate[];
+  address?: string;
+  googleMapsUrl?: string;
+  operatingHours?: SalonOperatingHours;
+  enabledClientLanguages?: ClientPreferredLang[];
+  videoRetentionDaysAfterExpiry?: number;
   packageTier?: SalonPackageTier;
   billingStatus?: SalonBillingStatus;
   counterSleptAt?: string | null;
@@ -109,10 +150,14 @@ export interface ConciergeAppointment {
   clientPhone: string;
   barberName: string;
   service: string;
+  serviceIds?: string[];
   price: number;
+  appointmentDate?: string; // YYYY-MM-DD in salon local time
   timeSlot: string;
   durationMins?: number;
   scheduledEndMs?: number;
+  dealId?: string;
+  bookedDealTitle?: string;
   flagged?: boolean;
   canceled?: boolean;
   sourceType?: 'WHATSAPP_BOT' | 'WALK_IN_BUSY';
@@ -237,4 +282,139 @@ export interface SalonConciergeStateResponse {
   walkInQueue?: WalkInQueueItem[];
   bridalBookings?: BridalBookingRecord[];
   servicePackages?: ServicePackagePass[];
+  deals?: SalonDeal[];
 }
+
+export type CustomerMenuActionId =
+  | 'BOOK_APPOINTMENT'
+  | 'SERVICES_PRICES'
+  | 'HOURS_LOCATION'
+  | 'CURRENT_DEALS';
+
+export interface CustomerLanguageChoice {
+  lang: ClientPreferredLang;
+  label: string;
+  nativeLabel: string;
+  dir: 'ltr' | 'rtl';
+}
+
+export interface CustomerExperienceConfig {
+  salonId: string;
+  salonName: string;
+  whatsappPhone: string;
+  currency: string;
+  currencySymbol: string;
+  region: SalonRegionCode;
+  address: string;
+  googleMapsUrl: string;
+  operatingHours: SalonOperatingHours;
+  services: SalonServiceRate[];
+  barbers: string[];
+  activeDeals: SalonDeal[];
+  availableLanguages: CustomerLanguageChoice[];
+  defaultLanguage: ClientPreferredLang;
+  customerProfile: {
+    phone: string;
+    hasSavedName: boolean;
+    savedName: string | null;
+    preferredLanguage: ClientPreferredLang;
+  };
+  todayDate: string; // YYYY-MM-DD in salon local time
+}
+
+export interface CustomerWelcomeMenuResponse {
+  language: ClientPreferredLang;
+  dir: 'ltr' | 'rtl';
+  welcomeText: string;
+  options: Array<{
+    id: CustomerMenuActionId;
+    label: string;
+  }>;
+  availableLanguages: CustomerLanguageChoice[];
+}
+
+export interface CustomerActionMessageResponse {
+  language: ClientPreferredLang;
+  dir: 'ltr' | 'rtl';
+  action: CustomerMenuActionId | 'WELCOME';
+  text: string;
+  openBookingFlow?: boolean;
+  welcome?: CustomerWelcomeMenuResponse;
+  services?: SalonServiceRate[];
+  hours?: SalonOperatingHours;
+  address?: string;
+  googleMapsUrl?: string;
+  deals?: Array<SalonDeal & { dealPagePath: string }>;
+}
+
+export interface CustomerBarberAvailability {
+  name: string;
+  available: boolean;
+  reason?: string;
+}
+
+export interface CustomerSlotAvailability {
+  timeSlot: string;
+  startMinutes: number;
+  availableBarberCount: number;
+  barbers: CustomerBarberAvailability[];
+}
+
+export interface CustomerAvailabilityResponse {
+  salonId: string;
+  date: string;
+  dayName: string;
+  isOpen: boolean;
+  closedReason?: string;
+  fridayBreakText?: string;
+  totalDurationMins: number;
+  slots: CustomerSlotAvailability[];
+  barbers: string[];
+}
+
+export interface CustomerFlowBookingRequest {
+  clientPhone: string;
+  clientName?: string;
+  preferredLanguage?: ClientPreferredLang;
+  serviceIds: string[];
+  appointmentDate: string;
+  timeSlot: string;
+  barberName: string;
+  dealId?: string;
+  isDemo?: boolean;
+  demoBusyBarber?: string;
+  demoBusyTimeSlot?: string;
+}
+
+export interface CustomerFlowBookingResponse {
+  ok: boolean;
+  isDemo?: boolean;
+  code?: 'SLOT_UNAVAILABLE' | 'SALON_CLOSED' | 'INVALID_DEAL' | 'NAME_REQUIRED' | 'VALIDATION_ERROR';
+  error?: string;
+  appointment?: ConciergeAppointment;
+  appliedDeal?: {
+    id: string;
+    title: string;
+    originalTotal: number;
+    finalTotal: number;
+    savings: number;
+  } | null;
+  currencySymbol?: string;
+  address?: string;
+  googleMapsUrl?: string;
+}
+
+export interface PublicDealPageResponse {
+  salonId: string;
+  salonName: string;
+  address: string;
+  googleMapsUrl: string;
+  currencySymbol: string;
+  deal: SalonDeal;
+  isExpired: boolean;
+  videoPurged: boolean;
+  retentionDaysAfterExpiry: number;
+  matchedServices: SalonServiceRate[];
+  availableLanguages: CustomerLanguageChoice[];
+}
+
