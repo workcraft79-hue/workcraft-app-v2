@@ -57,6 +57,8 @@ import {
   PaymentRoutingModal,
   NotificationsDrawer,
 } from './components/Modals';
+import { CustomerBookingFlow } from './components/CustomerBookingFlow';
+import { PublicSalonDealPage } from './components/PublicSalonDealPage';
 
 const SOCIAL_CAMPAIGN_SOURCE_MAP: Record<string, string> = {
   fb: 'Facebook Ads Campaign',
@@ -75,6 +77,8 @@ function getInitialRouteIntent() {
       inviteTokenParam: '',
       socialSource: null as string | null,
       sessionOnboardingLocked: false,
+      publicDealRoute: null as { salonId: string; dealId: string } | null,
+      publicFlowRoute: null as { salonId: string; dealId: string | null; phone?: string } | null,
     };
   }
   const params = new URLSearchParams(window.location.search);
@@ -85,6 +89,37 @@ function getInitialRouteIntent() {
   const onboardParam = (params.get('onboard') || '').trim().toLowerCase();
   const sourceKey = refParam || utmSource || (onboardParam === 'true' ? 'social' : '');
   const socialSource = sourceKey ? SOCIAL_CAMPAIGN_SOURCE_MAP[sourceKey] || null : null;
+
+  let publicDealRoute: { salonId: string; dealId: string } | null = null;
+  const dealMatch = pathname.match(/^\/deal\/([^/]+)\/([^/]+)$/);
+  if (dealMatch) {
+    publicDealRoute = {
+      salonId: decodeURIComponent(dealMatch[1]),
+      dealId: decodeURIComponent(dealMatch[2]),
+    };
+  } else if (params.get('dealSalon') && params.get('dealId')) {
+    publicDealRoute = {
+      salonId: params.get('dealSalon')!.trim(),
+      dealId: params.get('dealId')!.trim(),
+    };
+  }
+
+  let publicFlowRoute: { salonId: string; dealId: string | null; phone?: string } | null = null;
+  const flowMatch = pathname.match(/^\/flow\/([^/]+)$/);
+  if (flowMatch) {
+    publicFlowRoute = {
+      salonId: decodeURIComponent(flowMatch[1]),
+      dealId: params.get('dealId')?.trim() || null,
+      phone: params.get('phone')?.trim() || undefined,
+    };
+  } else if (params.get('flowSalon')) {
+    publicFlowRoute = {
+      salonId: params.get('flowSalon')!.trim(),
+      dealId: params.get('dealId')?.trim() || null,
+      phone: params.get('phone')?.trim() || undefined,
+    };
+  }
+
   let sessionOnboardingLocked = false;
   try {
     sessionOnboardingLocked = Boolean(sessionStorage.getItem('wcl_salon_onboarding_locked_v1'));
@@ -96,6 +131,8 @@ function getInitialRouteIntent() {
     inviteTokenParam,
     socialSource,
     sessionOnboardingLocked,
+    publicDealRoute,
+    publicFlowRoute,
   };
 }
 
@@ -764,6 +801,26 @@ export default function App() {
           ['Marketing', Megaphone, 'Marketing'],
           ['Revenue', WalletCards, 'Revenue'],
         ];
+
+  const publicIntent = getInitialRouteIntent();
+  if (publicIntent.publicDealRoute) {
+    return (
+      <PublicSalonDealPage
+        salonId={publicIntent.publicDealRoute.salonId}
+        dealId={publicIntent.publicDealRoute.dealId}
+      />
+    );
+  }
+  if (publicIntent.publicFlowRoute) {
+    return (
+      <CustomerBookingFlow
+        salonId={publicIntent.publicFlowRoute.salonId}
+        initialDealId={publicIntent.publicFlowRoute.dealId}
+        initialClientPhone={publicIntent.publicFlowRoute.phone}
+        standalone={true}
+      />
+    );
+  }
 
   if (isCheckingSession) {
     return (
