@@ -52,11 +52,13 @@ import {
   Flag,
   Play,
   Pause,
+  ExternalLink,
 } from 'lucide-react';
 import { PortalCard } from './PortalCard';
 import { BroadcastTab } from './Tabs/BroadcastTab';
 import { SalonWindowPosterPdf } from './SalonWindowPosterPdf';
 import { SalonRetentionSettingsPanel } from './SalonRetentionSettingsPanel';
+import { CustomerWhatsAppDemoModal } from './CustomerWhatsAppDemoModal';
 import { VoiceRecorder, type RecordedOpusClip, type VoiceRecorderHandle } from './VoiceRecorder';
 import {
   INITIAL_VOICE_THREADS,
@@ -1956,6 +1958,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     };
   });
   const [conciergeState, setConciergeState] = useState<SalonConciergeStateResponse | null>(null);
+  const [isLiveWhatsAppDemoOpen, setIsLiveWhatsAppDemoOpen] = useState(false);
   const seenLogIdsRef = useRef<Set<string>>(new Set());
   const seenApptIdsRef = useRef<Set<string>>(new Set());
   const hasHydratedConciergeRef = useRef<boolean>(false);
@@ -5567,6 +5570,43 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       {/* ========================================================================= */}
       {currentSectionMode === 'LIVE' && (
         <div className="space-y-4">
+          {/* TEMP TEST LAUNCHER ON LIVE DASHBOARD (Easy to remove cleanly once verified) */}
+          <section
+            aria-label="Customer WhatsApp Live Demo Shortcut"
+            className="rounded-2xl border border-[#116329] bg-[#0D2118] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+          >
+            <div className="space-y-0.5 min-w-0">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#3FB950] block">
+                CUSTOMER WHATSAPP EXPERIENCE · LIVE SANDBOX
+              </span>
+              <h2 className="text-sm font-black text-[#F0F6FC]">
+                Test &ldquo;Hi&rdquo; Welcome, Services, Timing, Deals &amp; Booking Flow
+              </h2>
+              <p className="text-xs text-[#8B949E] font-sans">
+                Opens the complete end-user WhatsApp conversation &amp; booking confirmation Flow using your live salon setup without altering real bookings.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <a
+                href={`/flow/${encodeURIComponent(currentSalon.id)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] inline-flex items-center gap-1.5 transition"
+              >
+                <ExternalLink className="size-3.5" />
+                <span>Open Public Flow</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => setIsLiveWhatsAppDemoOpen(true)}
+                className="min-h-[46px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-4 py-2 text-xs font-mono font-black uppercase tracking-wide inline-flex items-center gap-2 shadow-lg transition active:scale-95"
+              >
+                <MessageSquare className="size-4 shrink-0" />
+                <span>Launch Live Demo</span>
+              </button>
+            </div>
+          </section>
+
           {/* 1. URGENT ALERTS CARD (TOP PRIORITY · GATED BY PACKAGE TIER) */}
           {totalUrgentCount > 0 && (
             <section
@@ -8443,6 +8483,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           </div>
         </div>
       )}
+      <CustomerWhatsAppDemoModal
+        salonId={currentSalon.id}
+        isOpen={isLiveWhatsAppDemoOpen}
+        onClose={() => setIsLiveWhatsAppDemoOpen(false)}
+      />
     </div>
   );
 };
