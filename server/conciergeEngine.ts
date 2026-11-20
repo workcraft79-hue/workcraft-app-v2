@@ -6,12 +6,26 @@ import type {
   ClientPreferredLang,
   ConciergeAppointment,
   ConciergeClientProfile,
+  CustomerActionMessageResponse,
+  CustomerAvailabilityResponse,
+  CustomerBarberAvailability,
+  CustomerExperienceConfig,
+  CustomerFlowBookingRequest,
+  CustomerFlowBookingResponse,
+  CustomerLanguageChoice,
+  CustomerMenuActionId,
+  CustomerSlotAvailability,
+  CustomerWelcomeMenuResponse,
+  DealDiscountType,
   LanguageMenuOption,
   OwnerInterventionAlert,
+  PublicDealPageResponse,
   RetentionSettings,
   SalonBillingStatus,
   SalonCategory,
   SalonConciergeStateResponse,
+  SalonDeal,
+  SalonOperatingHours,
   SalonPackageTier,
   SalonRegionCode,
   SalonServiceRate,
@@ -41,6 +55,7 @@ interface ConciergeStoreData {
   walkInQueue: WalkInQueueItem[];
   bridalBookings: BridalBookingRecord[];
   servicePackages: ServicePackagePass[];
+  deals: SalonDeal[];
 }
 
 const DEFAULT_SALON_BARBERS = ['Master Aslam', 'Tariq Mehmood', 'Ali Raza', 'Bilal Tariq'];
@@ -70,6 +85,72 @@ const DATA_DIR = process.env.VERCEL
   ? path.join('/tmp', 'workcraft-data')
   : path.resolve(process.cwd(), '.data');
 const STORE_FILE = path.join(DATA_DIR, 'concierge-store.json');
+const DEAL_VIDEO_DIR = path.join(DATA_DIR, 'deal-videos');
+
+const DEFAULT_SALON_OPERATING_HOURS: SalonOperatingHours = {
+  monThuOpen: '11:00 AM',
+  monThuClose: '11:00 PM',
+  monThuClosed: false,
+  fridayOpen: '11:00 AM',
+  fridayClose: '11:30 PM',
+  fridayBreakStart: '01:00 PM',
+  fridayBreakEnd: '02:30 PM',
+  fridayClosed: false,
+  satSunOpen: '10:30 AM',
+  satSunClose: '11:30 PM',
+  satSunClosed: false,
+};
+
+const SEEDED_SALON_ADDRESSES: Record<string, string> = {
+  '1': 'Plot 42-C, Commercial Sector, DHA Phase 5, Lahore',
+  '2': 'Shop 14, Main Boulevard, Gulberg III, Lahore',
+  '3': 'Al Wasl Plaza, Jumeirah 1, Dubai, UAE',
+  '4': '28 Brewer Street, Soho, London W1F 0SR, UK',
+  '5': 'Building 9-B, Clifton Block 4, Karachi',
+};
+
+function buildGoogleMapsSearchUrl(salonName: string, address: string): string {
+  return `https://maps.google.com/?q=${encodeURIComponent(`${salonName} ${address}`.trim())}`;
+}
+
+export function getDefaultClientLanguagesForRegion(region: SalonRegionCode): ClientPreferredLang[] {
+  if (region === 'PK') return ['en', 'roman_ur', 'ur'];
+  if (region === 'MENA') return ['en', 'ar', 'ur'];
+  return ['en', 'ur', 'ar'];
+}
+
+function normalizeClientLanguageList(
+  langs: unknown,
+  region: SalonRegionCode
+): ClientPreferredLang[] {
+  const validSet = new Set<ClientPreferredLang>(['en', 'roman_ur', 'ur', 'ar']);
+  if (!Array.isArray(langs) || langs.length === 0) {
+    return getDefaultClientLanguagesForRegion(region);
+  }
+  const cleaned = langs.filter((l): l is ClientPreferredLang => validSet.has(l as ClientPreferredLang));
+  if (!cleaned.includes('en')) cleaned.unshift('en');
+  return Array.from(new Set(cleaned));
+}
+
+function getSalonLocalDateParts(offsetHours: number, nowDate = new Date()) {
+  const utcMs = nowDate.getTime() + nowDate.getTimezoneOffset() * 60000;
+  const local = new Date(utcMs + offsetHours * 3600000);
+  const yyyy = local.getFullYear();
+  const mm = String(local.getMonth() + 1).padStart(2, '0');
+  const dd = String(local.getDate()).padStart(2, '0');
+  return {
+    dateStr: `${yyyy}-${mm}-${dd}`,
+    minutesOfDay: local.getHours() * 60 + local.getMinutes(),
+    dayOfWeek: local.getDay(), // 0=Sun .. 5=Fri .. 6=Sat
+  };
+}
+
+function getIsoLocalDateStr(iso: string | undefined | null, offsetHours: number): string | null {
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return getSalonLocalDateParts(offsetHours, parsed).dateStr;
+}
 
 export function extractCountryCode(phone: string): string {
   const cleaned = phone.replace(/[^\d+]/g, '');
@@ -222,6 +303,13 @@ function defaultSettingsForSalon(
   const regionMeta = detectRegionFromPhone(phone);
   const isPk = regionMeta.region === 'PK';
   const resolvedCategory = inferSalonCategory(salonName, salonId, salonCategory);
+  const address =
+    SEEDED_SALON_ADDRESSES[salonId] ||
+    (regionMeta.region === 'MENA'
+      ? 'Central Commercial Avenue, Dubai, UAE'
+      : regionMeta.region === 'PK'
+      ? 'Main Commercial Market, Lahore'
+      : 'High Street Studio, London');
   return {
     salonId,
     salonName,
@@ -236,6 +324,11 @@ function defaultSettingsForSalon(
       Array.isArray(enabledServices) && enabledServices.length > 0
         ? enabledServices
         : getDefaultServicesForCategory(resolvedCategory, regionMeta.currency),
+    address,
+    googleMapsUrl: buildGoogleMapsSearchUrl(salonName, address),
+    operatingHours: { ...DEFAULT_SALON_OPERATING_HOURS },
+    enabledClientLanguages: getDefaultClientLanguagesForRegion(regionMeta.region),
+    videoRetentionDaysAfterExpiry: 30,
     packageTier,
     billingStatus,
     counterSleptAt: null,
@@ -460,6 +553,57 @@ function createInitialSeedData(): ConciergeStoreData {
     },
   ];
 
+  const deals: SalonDeal[] = [
+    {
+      id: 'deal-1-vip',
+      salonId: '1',
+      title: 'Executive Haircut & Facial Combo (20% OFF)',
+      description: 'Includes Master Haircut & Skin Fade + Charcoal Deep Detox Facial with priority chair access.',
+      discountType: 'PCT',
+      discountValue: 20,
+      serviceIds: ['s1', 's4'],
+      serviceNames: ['Master Haircut & Skin Fade', 'Charcoal Deep Detox Facial'],
+      startsAt: daysAgoIso(1),
+      expiresAt: new Date(now + 10 * 86400000).toISOString(),
+      videoRetentionDaysAfterExpiry: 30,
+      videoDeletedAt: null,
+      active: true,
+      createdAt: daysAgoIso(1),
+    },
+    {
+      id: 'deal-3-dubai',
+      salonId: '3',
+      title: 'Jumeirah Executive Grooming Package',
+      description: 'Signature haircut, beard sculpt, and hot towel shave bundle.',
+      discountType: 'PCT',
+      discountValue: 15,
+      serviceIds: ['s1', 's2', 's3'],
+      serviceNames: ['Master Haircut & Skin Fade', 'Classic Beard Trim & Sculpt', 'Hot Towel Steam Shave'],
+      startsAt: daysAgoIso(1),
+      expiresAt: new Date(now + 14 * 86400000).toISOString(),
+      videoRetentionDaysAfterExpiry: 30,
+      videoDeletedAt: null,
+      active: true,
+      createdAt: daysAgoIso(1),
+    },
+    {
+      id: 'deal-5-bridal',
+      salonId: '5',
+      title: 'Hydra-Facial + Party Styling Glow Deal',
+      description: 'Limited-time salon glow offer for ladies parlor bookings.',
+      discountType: 'PCT',
+      discountValue: 20,
+      serviceIds: ['l1', 'l3'],
+      serviceNames: ['Signature Party Makeup & Styling', 'Hydra-Facial & Skin Polish'],
+      startsAt: daysAgoIso(1),
+      expiresAt: new Date(now + 12 * 86400000).toISOString(),
+      videoRetentionDaysAfterExpiry: 30,
+      videoDeletedAt: null,
+      active: true,
+      createdAt: daysAgoIso(1),
+    },
+  ];
+
   return {
     settingsBySalon,
     barbersBySalon,
@@ -471,6 +615,7 @@ function createInitialSeedData(): ConciergeStoreData {
     walkInQueue,
     bridalBookings,
     servicePackages,
+    deals,
   };
 }
 
@@ -489,6 +634,7 @@ function normalizeLoadedConciergeStore(parsed: Partial<ConciergeStoreData>): Con
     walkInQueue: Array.isArray(parsed.walkInQueue) ? parsed.walkInQueue : seed.walkInQueue,
     bridalBookings: Array.isArray(parsed.bridalBookings) ? parsed.bridalBookings : seed.bridalBookings,
     servicePackages: Array.isArray(parsed.servicePackages) ? parsed.servicePackages : seed.servicePackages,
+    deals: Array.isArray(parsed.deals) ? parsed.deals : seed.deals,
   };
   const defaultTiers: Record<string, SalonPackageTier> = {
     '1': 'PRO++',
@@ -503,11 +649,34 @@ function normalizeLoadedConciergeStore(parsed: Partial<ConciergeStoreData>): Con
     }
   }
   for (const s of Object.values(normalized.settingsBySalon)) {
+    const regionMeta = detectRegionFromPhone(s.whatsappPhone || '+92');
     if (!s.salonCategory) {
       s.salonCategory = inferSalonCategory(s.salonName, s.salonId);
     }
     if (!Array.isArray(s.enabledServices) || s.enabledServices.length === 0) {
       s.enabledServices = getDefaultServicesForCategory(s.salonCategory, s.currency);
+    }
+    if (!s.address) {
+      s.address =
+        SEEDED_SALON_ADDRESSES[s.salonId] ||
+        (regionMeta.region === 'MENA'
+          ? 'Central Commercial Avenue, Dubai, UAE'
+          : regionMeta.region === 'PK'
+          ? 'Main Commercial Market, Lahore'
+          : 'High Street Studio, London');
+    }
+    if (!s.googleMapsUrl) {
+      s.googleMapsUrl = buildGoogleMapsSearchUrl(s.salonName, s.address);
+    }
+    if (!s.operatingHours) {
+      s.operatingHours = { ...DEFAULT_SALON_OPERATING_HOURS };
+    }
+    s.enabledClientLanguages = normalizeClientLanguageList(
+      s.enabledClientLanguages,
+      regionMeta.region
+    );
+    if (typeof s.videoRetentionDaysAfterExpiry !== 'number') {
+      s.videoRetentionDaysAfterExpiry = 30;
     }
   }
   return normalized;
@@ -524,6 +693,7 @@ interface ShardedSalonConciergeDoc {
   walkInQueue: WalkInQueueItem[];
   bridalBookings: BridalBookingRecord[];
   servicePackages: ServicePackagePass[];
+  deals: SalonDeal[];
 }
 
 export async function hydrateConciergeStoreFromKv(): Promise<void> {
@@ -543,6 +713,7 @@ export async function hydrateConciergeStoreFromKv(): Promise<void> {
       walkInQueue: [],
       bridalBookings: [],
       servicePackages: [],
+      deals: [],
     };
     let loadedAny = false;
     indexIds.forEach((sid, idx) => {
@@ -559,6 +730,7 @@ export async function hydrateConciergeStoreFromKv(): Promise<void> {
       if (Array.isArray(doc.walkInQueue)) merged.walkInQueue!.push(...doc.walkInQueue);
       if (Array.isArray(doc.bridalBookings)) merged.bridalBookings!.push(...doc.bridalBookings);
       if (Array.isArray(doc.servicePackages)) merged.servicePackages!.push(...doc.servicePackages);
+      if (Array.isArray(doc.deals)) merged.deals!.push(...doc.deals);
     });
     if (loadedAny) {
       cachedStore = normalizeLoadedConciergeStore(merged);
@@ -616,6 +788,7 @@ function persistStore(changedSalonId?: string) {
       walkInQueue: cachedStore.walkInQueue.filter((w) => w.salonId === sid),
       bridalBookings: cachedStore.bridalBookings.filter((b) => b.salonId === sid),
       servicePackages: cachedStore.servicePackages.filter((p) => p.salonId === sid),
+      deals: (cachedStore.deals || []).filter((d) => d.salonId === sid),
     };
     void kvSetJson(`wc:concierge:salon:${sid}`, doc);
   }
@@ -938,27 +1111,70 @@ function isBarberBusyAtWindow(
   salonId: string,
   barberName: string,
   startMinutes: number,
-  durationMins = 35
-): { busy: boolean; busyUntilMinutes: number } {
+  durationMins = 35,
+  targetDateStr?: string,
+  demoBusyBarber?: string,
+  demoBusyTimeSlot?: string
+): { busy: boolean; busyUntilMinutes: number; reason?: string } {
   const store = ensureStoreLoaded();
+  const settings = ensureSalonExists(salonId);
+  const todayDateStr = getSalonLocalDateParts(settings.timezoneOffsetHours).dateStr;
+  const resolvedTargetDate = targetDateStr || todayDateStr;
   const endMinutes = startMinutes + durationMins;
   const normTarget = barberName.toLowerCase();
 
+  if (demoBusyBarber) {
+    const normDemo = demoBusyBarber.trim().toLowerCase();
+    const matchesDemoBarber =
+      normDemo === normTarget ||
+      normTarget.includes(normDemo) ||
+      normDemo.includes(normTarget.split(' ')[0]);
+    if (matchesDemoBarber) {
+      if (!demoBusyTimeSlot) {
+        return {
+          busy: true,
+          busyUntilMinutes: endMinutes,
+          reason: 'Barber Busy (Demo Test)',
+        };
+      }
+      const demoStart = parseTimeSlotToMinutes(demoBusyTimeSlot);
+      if (demoStart >= 0 && startMinutes < demoStart + 45 && endMinutes > demoStart) {
+        return {
+          busy: true,
+          busyUntilMinutes: demoStart + 45,
+          reason: `Booked at ${demoBusyTimeSlot} (Demo Test)`,
+        };
+      }
+    }
+  }
+
   for (const lock of store.chairLocks) {
     if (lock.salonId !== salonId) continue;
+    const lockDateStr = getIsoLocalDateStr(lock.createdAt, settings.timezoneOffsetHours) || todayDateStr;
+    if (lockDateStr !== resolvedTargetDate) continue;
     if (
       lock.barberName.toLowerCase() === normTarget ||
       lock.barberName.toLowerCase().includes(normTarget) ||
       normTarget.includes(lock.barberName.toLowerCase().split(' ')[0])
     ) {
       if (startMinutes < lock.endMinutes && endMinutes > lock.startMinutes) {
-        return { busy: true, busyUntilMinutes: lock.endMinutes };
+        return {
+          busy: true,
+          busyUntilMinutes: lock.endMinutes,
+          reason: `Chair Locked (${lock.startTimeSlot}–${lock.endTimeSlot})`,
+        };
       }
     }
   }
 
   for (const appt of store.appointments) {
     if (appt.salonId !== salonId || appt.status === 'COMPLETED' || appt.canceled) continue;
+    const apptDateStr =
+      appt.appointmentDate ||
+      getIsoLocalDateStr(appt.scheduledForIso, settings.timezoneOffsetHours) ||
+      todayDateStr;
+    if (apptDateStr !== resolvedTargetDate) continue;
+
     if (
       appt.barberName.toLowerCase() === normTarget ||
       appt.barberName.toLowerCase().includes(normTarget) ||
@@ -968,7 +1184,11 @@ function isBarberBusyAtWindow(
       if (apptStart >= 0) {
         const apptEnd = apptStart + (appt.durationMins || 35);
         if (startMinutes < apptEnd && endMinutes > apptStart) {
-          return { busy: true, busyUntilMinutes: apptEnd };
+          return {
+            busy: true,
+            busyUntilMinutes: apptEnd,
+            reason: `Booked (${appt.timeSlot})`,
+          };
         }
       }
     }
@@ -1039,6 +1259,7 @@ export function getSalonConciergeState(
     settings.enabledServices = getDefaultServicesForCategory(settings.salonCategory, settings.currency);
   }
   runAutoCompleteAppointmentsCron(salonId);
+  runDealExpiryAndVideoRetentionCron(salonId);
   const regionMeta = detectRegionFromPhone(settings.whatsappPhone);
   const languageOptions = getLanguageMenuForRegion(regionMeta.region);
   const greetingPromptPreview = buildGreetingMenuText(settings.salonName, regionMeta.region);
@@ -1058,6 +1279,7 @@ export function getSalonConciergeState(
     walkInQueue: (store.walkInQueue || []).filter((w) => w.salonId === salonId),
     bridalBookings: (store.bridalBookings || []).filter((b) => b.salonId === salonId),
     servicePackages: (store.servicePackages || []).filter((p) => p.salonId === salonId),
+    deals: (store.deals || []).filter((d) => d.salonId === salonId),
   };
 }
 
@@ -1067,6 +1289,7 @@ export function updateRetentionSettings(
 ): SalonConciergeStateResponse {
   const store = ensureStoreLoaded();
   const current = ensureSalonExists(salonId);
+  const regionMeta = detectRegionFromPhone(patch.whatsappPhone || current.whatsappPhone);
   const cleanCategory: SalonCategory | undefined =
     patch.salonCategory === 'LADIES' || patch.salonCategory === 'MENS' ? patch.salonCategory : undefined;
   const cleanServices: SalonServiceRate[] | undefined = Array.isArray(patch.enabledServices)
@@ -1082,12 +1305,51 @@ export function updateRetentionSettings(
         .filter((s) => Boolean(s.name))
     : undefined;
 
+  const cleanOperatingHours: SalonOperatingHours | undefined = patch.operatingHours
+    ? {
+        monThuOpen: sanitizePlainText(patch.operatingHours.monThuOpen, 20) || current.operatingHours?.monThuOpen || '11:00 AM',
+        monThuClose: sanitizePlainText(patch.operatingHours.monThuClose, 20) || current.operatingHours?.monThuClose || '11:00 PM',
+        monThuClosed: Boolean(patch.operatingHours.monThuClosed),
+        fridayOpen: sanitizePlainText(patch.operatingHours.fridayOpen, 20) || current.operatingHours?.fridayOpen || '11:00 AM',
+        fridayClose: sanitizePlainText(patch.operatingHours.fridayClose, 20) || current.operatingHours?.fridayClose || '11:30 PM',
+        fridayBreakStart: sanitizePlainText(patch.operatingHours.fridayBreakStart, 20) || current.operatingHours?.fridayBreakStart || '01:00 PM',
+        fridayBreakEnd: sanitizePlainText(patch.operatingHours.fridayBreakEnd, 20) || current.operatingHours?.fridayBreakEnd || '02:30 PM',
+        fridayClosed: Boolean(patch.operatingHours.fridayClosed),
+        satSunOpen: sanitizePlainText(patch.operatingHours.satSunOpen, 20) || current.operatingHours?.satSunOpen || '10:30 AM',
+        satSunClose: sanitizePlainText(patch.operatingHours.satSunClose, 20) || current.operatingHours?.satSunClose || '11:30 PM',
+        satSunClosed: Boolean(patch.operatingHours.satSunClosed),
+      }
+    : current.operatingHours;
+
+  const nextAddress =
+    patch.address !== undefined
+      ? sanitizePlainText(patch.address, 220) || current.address || ''
+      : current.address;
+  const nextSalonName =
+    patch.salonName !== undefined
+      ? sanitizePlainText(patch.salonName, 100) || current.salonName
+      : current.salonName;
+
   const safePatch: Partial<RetentionSettings> = {
-    salonName: patch.salonName !== undefined ? sanitizePlainText(patch.salonName, 100) || current.salonName : current.salonName,
+    salonName: nextSalonName,
     ownerName: patch.ownerName !== undefined ? sanitizePlainText(patch.ownerName, 80) || current.ownerName : current.ownerName,
     whatsappPhone: patch.whatsappPhone !== undefined ? sanitizePhone(patch.whatsappPhone) || current.whatsappPhone : current.whatsappPhone,
     salonCategory: cleanCategory || current.salonCategory || inferSalonCategory(current.salonName, salonId),
     enabledServices: cleanServices && cleanServices.length > 0 ? cleanServices : current.enabledServices,
+    address: nextAddress,
+    googleMapsUrl:
+      patch.googleMapsUrl !== undefined
+        ? sanitizeHttpUrl(patch.googleMapsUrl, buildGoogleMapsSearchUrl(nextSalonName, nextAddress || ''))
+        : current.googleMapsUrl || buildGoogleMapsSearchUrl(nextSalonName, nextAddress || ''),
+    operatingHours: cleanOperatingHours,
+    enabledClientLanguages:
+      patch.enabledClientLanguages !== undefined
+        ? normalizeClientLanguageList(patch.enabledClientLanguages, regionMeta.region)
+        : normalizeClientLanguageList(current.enabledClientLanguages, regionMeta.region),
+    videoRetentionDaysAfterExpiry:
+      patch.videoRetentionDaysAfterExpiry !== undefined
+        ? clampInteger(patch.videoRetentionDaysAfterExpiry, 1, 365, 30)
+        : current.videoRetentionDaysAfterExpiry ?? 30,
     birthdayEnabled: patch.birthdayEnabled !== undefined ? Boolean(patch.birthdayEnabled) : current.birthdayEnabled,
     birthdayEventName:
       patch.birthdayEventName !== undefined
@@ -1147,14 +1409,13 @@ export function updateRetentionSettings(
     updatedAt: new Date().toISOString(),
   };
   if (safePatch.whatsappPhone && patch.whatsappPhone) {
-    const meta = detectRegionFromPhone(safePatch.whatsappPhone);
-    updated.countryCode = meta.countryCode;
-    updated.timezoneOffsetHours = meta.timezoneOffsetHours;
-    updated.currency = meta.currency;
-    updated.currencySymbol = meta.currencySymbol;
+    updated.countryCode = regionMeta.countryCode;
+    updated.timezoneOffsetHours = regionMeta.timezoneOffsetHours;
+    updated.currency = regionMeta.currency;
+    updated.currencySymbol = regionMeta.currencySymbol;
   }
   store.settingsBySalon[salonId] = updated;
-  persistStore();
+  persistStore(salonId);
   return getSalonConciergeState(salonId);
 }
 
@@ -1590,75 +1851,81 @@ export function processWhatsAppWebhook(payload: {
     });
   }
 
-  // 1. Trigger Region-Aware Language Selector Menu on initial "Hi"/Greeting or explicit reset
+  // 1. Single Welcome Message on "Hi"/Greeting with Salon Name, Language Selector (EN default), and 4 Options
   if (
     payload.forceLanguagePrompt ||
-    (!hasStructuredAction &&
-      ((!client.preferredLanguage && !client.awaitingLanguageSelection) ||
-        (isGreeting && !client.preferredLanguage)))
+    (!hasStructuredAction && isGreeting) ||
+    (!hasStructuredAction && !client.preferredLanguage && !client.awaitingLanguageSelection)
   ) {
-    client.awaitingLanguageSelection = true;
-    const greetingText = buildGreetingMenuText(settings.salonName, regionMeta.region);
+    const chosenLang: ClientPreferredLang = client.preferredLanguage || 'en';
+    client.awaitingLanguageSelection = false;
+    const welcome = buildCustomerWelcomeMenu(settings, chosenLang);
     appendLog(payload.salonId, {
       direction: 'OUTBOUND',
       module: 'LANGUAGE_MENU',
       clientName: client.name,
       clientPhone: client.phone,
-      language: 'en',
-      dir: 'ltr',
-      body: greetingText,
+      language: welcome.language,
+      dir: welcome.dir,
+      body: welcome.welcomeText,
     });
-    persistStore();
+    persistStore(payload.salonId);
     return {
-      replyText: greetingText,
-      replyDir: 'ltr',
-      lockedLanguage: client.preferredLanguage,
-      routedAction: 'LANGUAGE_MENU_SENT',
+      replyText: welcome.welcomeText,
+      replyDir: welcome.dir,
+      lockedLanguage: welcome.language,
+      routedAction: 'WELCOME_MENU_SENT',
       state: getSalonConciergeState(payload.salonId),
     };
   }
 
-  // 2. Lock preferred_language when client responds with 1 / 2 / 3 (or language name)
-  if (client.awaitingLanguageSelection && (!hasStructuredAction || Boolean(matchedLangOpt))) {
-    if (matchedLangOpt) {
-      client.preferredLanguage = matchedLangOpt.lang;
-      client.awaitingLanguageSelection = false;
-      const dir = getLangDirection(matchedLangOpt.lang);
-
-      const confirmationMap: Record<ClientPreferredLang, string> = {
-        en: `Language locked: English. Welcome to ${settings.salonName}! Choose an option:\n1. Book Appointment\n2. Service Rates\n3. Location & Hours`,
-        roman_ur: `Zuban set ho gayi: Roman Urdu. ${settings.salonName} mein khush amdeed! Option chunein:\n1. Appointment Book Karein\n2. Rates List\n3. Location aur Timing`,
-        ur: `زبان محفوظ کر لی گئی: اردو۔ ${settings.salonName} میں خوش آمدید! منتخب کریں:\n1. اپائنٹمنٹ بک کریں\n2. ریٹ لسٹ\n3. لوکیشن اور اوقات`,
-        ar: `تم تثبيت اللغة: العربية. أهلاً بك في ${settings.salonName}! اختر:\n1. حجز موعد\n2. قائمة الأسعار\n3. الموقع وساعات العمل`,
-      };
-      const replyText = confirmationMap[matchedLangOpt.lang];
-      appendLog(payload.salonId, {
-        direction: 'OUTBOUND',
-        module: 'LANGUAGE_MENU',
-        clientName: client.name,
-        clientPhone: client.phone,
-        language: matchedLangOpt.lang,
-        dir,
-        body: replyText,
-      });
-      persistStore();
-      return {
-        replyText,
-        replyDir: dir,
-        lockedLanguage: matchedLangOpt.lang,
-        routedAction: `LANGUAGE_LOCKED_${matchedLangOpt.lang.toUpperCase()}`,
-        state: getSalonConciergeState(payload.salonId),
-      };
-    }
-
-    // Re-prompt menu if invalid option
-    const retryText = buildGreetingMenuText(settings.salonName, regionMeta.region);
-    persistStore();
+  // 2. Quick language switch or menu option pick from single Welcome message (1..4)
+  if (!hasStructuredAction && matchedLangOpt) {
+    client.preferredLanguage = matchedLangOpt.lang;
+    client.awaitingLanguageSelection = false;
+    const welcome = buildCustomerWelcomeMenu(settings, matchedLangOpt.lang);
+    appendLog(payload.salonId, {
+      direction: 'OUTBOUND',
+      module: 'LANGUAGE_MENU',
+      clientName: client.name,
+      clientPhone: client.phone,
+      language: welcome.language,
+      dir: welcome.dir,
+      body: welcome.welcomeText,
+    });
+    persistStore(payload.salonId);
     return {
-      replyText: retryText,
-      replyDir: 'ltr',
-      lockedLanguage: null,
-      routedAction: 'LANGUAGE_MENU_REPROMPT',
+      replyText: welcome.welcomeText,
+      replyDir: welcome.dir,
+      lockedLanguage: matchedLangOpt.lang,
+      routedAction: `LANGUAGE_LOCKED_${matchedLangOpt.lang.toUpperCase()}`,
+      state: getSalonConciergeState(payload.salonId),
+    };
+  }
+
+  // Handle direct 1-4 option picks from Welcome screen
+  if (!hasStructuredAction && (raw === '1' || raw === '3' || raw === '4' || /\b(hours|timing|location|address|map|deal|offer|promo)\b/i.test(lower))) {
+    const targetLang: ClientPreferredLang = client.preferredLanguage || 'en';
+    let actionId: CustomerMenuActionId = 'BOOK_APPOINTMENT';
+    if (raw === '3' || /\b(hours|timing|location|address|map)\b/i.test(lower)) {
+      actionId = 'HOURS_LOCATION';
+    } else if (raw === '4' || /\b(deal|offer|promo)\b/i.test(lower)) {
+      actionId = 'CURRENT_DEALS';
+    }
+    const resAction = handleCustomerWhatsAppAction({
+      salonId: payload.salonId,
+      fromPhone: cleanPhone,
+      messageText: raw,
+      actionId,
+      preferredLang: targetLang,
+      clientName: cleanClientName,
+      isDemo: false,
+    });
+    return {
+      replyText: resAction.text,
+      replyDir: resAction.dir,
+      lockedLanguage: resAction.language,
+      routedAction: actionId,
       state: getSalonConciergeState(payload.salonId),
     };
   }
@@ -2562,8 +2829,9 @@ export function resolveOwnerAlert(salonId: string, alertId: string): SalonConcie
 
 export function startConciergeSchedulers() {
   ensureStoreLoaded();
-  // Run initial sweep on boot for Auto-Complete + T+2h / 30d dormant / 9:00 AM window
+  // Run initial sweep on boot for Auto-Complete + Deal Retention + T+2h / 30d dormant / 9:00 AM window
   runAutoCompleteAppointmentsCron(undefined);
+  runDealExpiryAndVideoRetentionCron(undefined);
   runBirthdayCron(undefined, false);
   runWinBackCron(undefined, false);
   runPostServiceReviewCron(undefined, false);
@@ -2571,6 +2839,7 @@ export function startConciergeSchedulers() {
   return setInterval(() => {
     try {
       runAutoCompleteAppointmentsCron(undefined);
+      runDealExpiryAndVideoRetentionCron(undefined);
       runBirthdayCron(undefined, false);
       runWinBackCron(undefined, false);
       runPostServiceReviewCron(undefined, false);
@@ -2579,3 +2848,1010 @@ export function startConciergeSchedulers() {
     }
   }, 60 * 1000);
 }
+
+// ============================================================================
+// PHASE 1: CUSTOMER-FACING WHATSAPP EXPERIENCE, FLOW BOOKING & DEAL VIDEOS
+// ============================================================================
+
+const LANGUAGE_CHOICE_META: Record<ClientPreferredLang, CustomerLanguageChoice> = {
+  en: { lang: 'en', label: 'English', nativeLabel: 'English', dir: 'ltr' },
+  roman_ur: { lang: 'roman_ur', label: 'Roman Urdu', nativeLabel: 'Roman Urdu', dir: 'ltr' },
+  ur: { lang: 'ur', label: 'Urdu', nativeLabel: 'اردو', dir: 'rtl' },
+  ar: { lang: 'ar', label: 'Arabic', nativeLabel: 'العربية', dir: 'rtl' },
+};
+
+function getConfiguredLanguageChoices(settings: RetentionSettings): CustomerLanguageChoice[] {
+  const regionMeta = detectRegionFromPhone(settings.whatsappPhone);
+  const langs = normalizeClientLanguageList(settings.enabledClientLanguages, regionMeta.region);
+  return langs.map((l) => LANGUAGE_CHOICE_META[l]);
+}
+
+function resolveSavedNameStatus(client: ConciergeClientProfile | undefined): {
+  hasSavedName: boolean;
+  savedName: string | null;
+} {
+  if (!client || !client.name) return { hasSavedName: false, savedName: null };
+  const trimmed = client.name.trim();
+  const placeholders = new Set(['salon client', 'whatsapp client', 'guest', 'walk-in guest', '']);
+  if (placeholders.has(trimmed.toLowerCase())) {
+    return { hasSavedName: false, savedName: null };
+  }
+  return { hasSavedName: true, savedName: trimmed };
+}
+
+function isDealCurrentlyActive(deal: SalonDeal, nowMs = Date.now()): boolean {
+  if (!deal.active) return false;
+  const expMs = new Date(deal.expiresAt).getTime();
+  if (Number.isNaN(expMs)) return false;
+  return expMs > nowMs;
+}
+
+export function runDealExpiryAndVideoRetentionCron(salonId?: string): {
+  expiredDealsCount: number;
+  purgedVideosCount: number;
+} {
+  const store = ensureStoreLoaded();
+  const nowMs = Date.now();
+  let expiredDealsCount = 0;
+  let purgedVideosCount = 0;
+  let changed = false;
+
+  for (const deal of store.deals || []) {
+    if (salonId && deal.salonId !== salonId) continue;
+    const expMs = new Date(deal.expiresAt).getTime();
+    if (!Number.isNaN(expMs) && expMs <= nowMs) {
+      expiredDealsCount += 1;
+      if (deal.active) {
+        deal.active = false;
+        changed = true;
+      }
+      const settings = store.settingsBySalon[deal.salonId];
+      const retentionDays = clampInteger(
+        deal.videoRetentionDaysAfterExpiry ?? settings?.videoRetentionDaysAfterExpiry ?? 30,
+        1,
+        365,
+        30
+      );
+      const deleteAfterMs = expMs + retentionDays * 86400000;
+      if (nowMs >= deleteAfterMs && (deal.videoFileName || deal.videoUrl)) {
+        if (deal.videoFileName) {
+          const safePath = path.join(DEAL_VIDEO_DIR, path.basename(deal.videoFileName));
+          try {
+            if (fs.existsSync(safePath)) {
+              fs.unlinkSync(safePath);
+            }
+          } catch (err) {
+            console.warn('Could not unlink expired deal video:', err);
+          }
+        }
+        deal.videoFileName = undefined;
+        deal.videoMimeType = undefined;
+        deal.videoUrl = undefined;
+        deal.videoDeletedAt = new Date(nowMs).toISOString();
+        purgedVideosCount += 1;
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    persistStore(salonId);
+  }
+  return { expiredDealsCount, purgedVideosCount };
+}
+
+export function listSalonDeals(salonId: string, activeOnly = false): SalonDeal[] {
+  ensureSalonExists(salonId);
+  runDealExpiryAndVideoRetentionCron(salonId);
+  const store = ensureStoreLoaded();
+  const nowMs = Date.now();
+  return (store.deals || [])
+    .filter((d) => d.salonId === salonId && (!activeOnly || isDealCurrentlyActive(d, nowMs)))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export function createSalonDeal(
+  salonId: string,
+  input: {
+    title: string;
+    description?: string;
+    discountType?: DealDiscountType;
+    discountValue?: number;
+    serviceIds?: string[];
+    expiresAt: string;
+    videoRetentionDaysAfterExpiry?: number;
+    videoBuffer?: Buffer;
+    videoOriginalName?: string;
+    videoMimeType?: string;
+  }
+): { deal: SalonDeal; state: SalonConciergeStateResponse } {
+  const store = ensureStoreLoaded();
+  const settings = ensureSalonExists(salonId);
+  const cleanTitle = sanitizePlainText(input.title, 100);
+  if (!cleanTitle) {
+    throw new Error('Deal title is required.');
+  }
+  const expDate = new Date(input.expiresAt);
+  if (Number.isNaN(expDate.getTime())) {
+    throw new Error('Valid deal expiry date is required.');
+  }
+
+  const discountType: DealDiscountType =
+    input.discountType === 'FIXED' || input.discountType === 'BUNDLE_PRICE'
+      ? input.discountType
+      : 'PCT';
+  const discountValue =
+    discountType === 'PCT'
+      ? clampInteger(input.discountValue ?? 15, 1, 90, 15)
+      : clampInteger(input.discountValue ?? 500, 0, 500000, 500);
+
+  const configuredServices = settings.enabledServices || [];
+  const requestedIds = Array.isArray(input.serviceIds) ? input.serviceIds : [];
+  const matchedServices = configuredServices.filter(
+    (s) => s.active !== false && s.id && requestedIds.includes(s.id)
+  );
+  const finalServices =
+    matchedServices.length > 0
+      ? matchedServices
+      : configuredServices.filter((s) => s.active !== false).slice(0, 2);
+
+  const retentionDays = clampInteger(
+    input.videoRetentionDaysAfterExpiry ?? settings.videoRetentionDaysAfterExpiry ?? 30,
+    1,
+    365,
+    30
+  );
+
+  const dealId = `deal-${salonId}-${Date.now().toString(36)}`;
+  let videoFileName: string | undefined;
+  let videoMimeType: string | undefined;
+  let videoUrl: string | undefined;
+
+  if (input.videoBuffer && input.videoBuffer.length > 0) {
+    const allowedMimeMap: Record<string, string> = {
+      'video/mp4': '.mp4',
+      'video/webm': '.webm',
+      'video/quicktime': '.mov',
+    };
+    const rawMime = (input.videoMimeType || 'video/mp4').toLowerCase().split(';')[0].trim();
+    const ext = allowedMimeMap[rawMime] || '.mp4';
+    if (!fs.existsSync(DEAL_VIDEO_DIR)) {
+      fs.mkdirSync(DEAL_VIDEO_DIR, { recursive: true });
+    }
+    videoFileName = `${dealId}${ext}`.replace(/[^a-zA-Z0-9._-]/g, '');
+    videoMimeType = allowedMimeMap[rawMime] ? rawMime : 'video/mp4';
+    fs.writeFileSync(path.join(DEAL_VIDEO_DIR, videoFileName), input.videoBuffer);
+    videoUrl = `/api/public/deal-videos/${encodeURIComponent(videoFileName)}`;
+  }
+
+  const deal: SalonDeal = {
+    id: dealId,
+    salonId,
+    title: cleanTitle,
+    description:
+      sanitizePlainText(input.description || '', 300) ||
+      `Special salon offer valid until ${expDate.toLocaleDateString()}.`,
+    discountType,
+    discountValue,
+    serviceIds: finalServices.map((s) => s.id || s.name),
+    serviceNames: finalServices.map((s) => s.name),
+    startsAt: new Date().toISOString(),
+    expiresAt: expDate.toISOString(),
+    videoRetentionDaysAfterExpiry: retentionDays,
+    videoFileName,
+    videoMimeType,
+    videoUrl,
+    videoDeletedAt: null,
+    active: expDate.getTime() > Date.now(),
+    createdAt: new Date().toISOString(),
+  };
+
+  store.deals = [deal, ...(store.deals || [])];
+  persistStore(salonId);
+  return { deal, state: getSalonConciergeState(salonId) };
+}
+
+export function deleteSalonDeal(salonId: string, dealId: string): SalonConciergeStateResponse {
+  const store = ensureStoreLoaded();
+  const target = (store.deals || []).find((d) => d.salonId === salonId && d.id === dealId);
+  if (target?.videoFileName) {
+    try {
+      const p = path.join(DEAL_VIDEO_DIR, path.basename(target.videoFileName));
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    } catch {}
+  }
+  store.deals = (store.deals || []).filter((d) => !(d.salonId === salonId && d.id === dealId));
+  persistStore(salonId);
+  return getSalonConciergeState(salonId);
+}
+
+export function getDealVideoFileInfo(
+  fileName: string
+): { filePath: string; mimeType: string } | null {
+  runDealExpiryAndVideoRetentionCron();
+  const safeName = path.basename(fileName || '');
+  if (!safeName || safeName.includes('..')) return null;
+  const fullPath = path.join(DEAL_VIDEO_DIR, safeName);
+  if (!fs.existsSync(fullPath)) return null;
+  const ext = path.extname(safeName).toLowerCase();
+  const mimeType =
+    ext === '.webm' ? 'video/webm' : ext === '.mov' ? 'video/quicktime' : 'video/mp4';
+  return { filePath: fullPath, mimeType };
+}
+
+export function getPublicDealPayload(
+  salonId: string,
+  dealId: string
+): PublicDealPageResponse | null {
+  const settings = ensureSalonExists(salonId);
+  runDealExpiryAndVideoRetentionCron(salonId);
+  const store = ensureStoreLoaded();
+  const deal = (store.deals || []).find((d) => d.salonId === salonId && d.id === dealId);
+  if (!deal) return null;
+
+  const isExpired = !isDealCurrentlyActive(deal);
+  const videoPurged = Boolean(deal.videoDeletedAt);
+  const activeServices = (settings.enabledServices || []).filter((s) => s.active !== false);
+  const matchedServices = activeServices.filter(
+    (s) => (s.id && deal.serviceIds.includes(s.id)) || deal.serviceNames.includes(s.name)
+  );
+  const address = settings.address || SEEDED_SALON_ADDRESSES[salonId] || 'Salon Location';
+  const googleMapsUrl =
+    settings.googleMapsUrl || buildGoogleMapsSearchUrl(settings.salonName, address);
+
+  return {
+    salonId,
+    salonName: settings.salonName,
+    address,
+    googleMapsUrl,
+    currencySymbol: settings.currencySymbol,
+    deal,
+    isExpired,
+    videoPurged,
+    retentionDaysAfterExpiry:
+      deal.videoRetentionDaysAfterExpiry ?? settings.videoRetentionDaysAfterExpiry ?? 30,
+    matchedServices: matchedServices.length > 0 ? matchedServices : activeServices.slice(0, 2),
+    availableLanguages: getConfiguredLanguageChoices(settings),
+  };
+}
+
+function getScheduleForDate(
+  hours: SalonOperatingHours,
+  dateStr: string
+): {
+  isOpen: boolean;
+  dayName: string;
+  openMins: number;
+  closeMins: number;
+  breakStartMins?: number;
+  breakEndMins?: number;
+  closedReason?: string;
+  fridayBreakText?: string;
+} {
+  const parts = dateStr.split('-').map((n) => parseInt(n, 10));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) {
+    return {
+      isOpen: false,
+      dayName: 'Invalid Date',
+      openMins: 0,
+      closeMins: 0,
+      closedReason: 'Invalid date selected.',
+    };
+  }
+  const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0));
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dow = dt.getUTCDay();
+  const dayName = dayNames[dow];
+
+  if (dow === 5) {
+    if (hours.fridayClosed) {
+      return {
+        isOpen: false,
+        dayName,
+        openMins: 0,
+        closeMins: 0,
+        closedReason: 'Salon is closed on Friday.',
+      };
+    }
+    const openMins = parseTimeSlotToMinutes(hours.fridayOpen);
+    const closeMins = parseTimeSlotToMinutes(hours.fridayClose);
+    const bStart = parseTimeSlotToMinutes(hours.fridayBreakStart);
+    const bEnd = parseTimeSlotToMinutes(hours.fridayBreakEnd);
+    return {
+      isOpen: openMins >= 0 && closeMins > openMins,
+      dayName,
+      openMins: openMins >= 0 ? openMins : 660,
+      closeMins: closeMins > 0 ? closeMins : 1380,
+      breakStartMins: bStart >= 0 ? bStart : undefined,
+      breakEndMins: bEnd > bStart ? bEnd : undefined,
+      fridayBreakText:
+        hours.fridayBreakStart && hours.fridayBreakEnd
+          ? `Friday Prayer Break: ${hours.fridayBreakStart} – ${hours.fridayBreakEnd}`
+          : undefined,
+    };
+  }
+
+  if (dow === 0 || dow === 6) {
+    if (hours.satSunClosed) {
+      return {
+        isOpen: false,
+        dayName,
+        openMins: 0,
+        closeMins: 0,
+        closedReason: `Salon is closed on ${dayName}.`,
+      };
+    }
+    const openMins = parseTimeSlotToMinutes(hours.satSunOpen);
+    const closeMins = parseTimeSlotToMinutes(hours.satSunClose);
+    return {
+      isOpen: openMins >= 0 && closeMins > openMins,
+      dayName,
+      openMins: openMins >= 0 ? openMins : 630,
+      closeMins: closeMins > 0 ? closeMins : 1380,
+    };
+  }
+
+  if (hours.monThuClosed) {
+    return {
+      isOpen: false,
+      dayName,
+      openMins: 0,
+      closeMins: 0,
+      closedReason: `Salon is closed on ${dayName}.`,
+    };
+  }
+  const openMins = parseTimeSlotToMinutes(hours.monThuOpen);
+  const closeMins = parseTimeSlotToMinutes(hours.monThuClose);
+  return {
+    isOpen: openMins >= 0 && closeMins > openMins,
+    dayName,
+    openMins: openMins >= 0 ? openMins : 660,
+    closeMins: closeMins > 0 ? closeMins : 1320,
+  };
+}
+
+export function getCustomerExperienceConfig(
+  salonId: string,
+  clientPhone?: string,
+  requestedLang?: ClientPreferredLang
+): CustomerExperienceConfig {
+  const settings = ensureSalonExists(salonId);
+  runDealExpiryAndVideoRetentionCron(salonId);
+  const store = ensureStoreLoaded();
+  const regionMeta = detectRegionFromPhone(settings.whatsappPhone);
+  const availableLanguages = getConfiguredLanguageChoices(settings);
+  const cleanPhone = clientPhone ? sanitizePhone(clientPhone) : '';
+  const normPhone = cleanPhone.replace(/\s+/g, '');
+  const client = normPhone
+    ? store.clients.find(
+        (c) => c.salonId === salonId && c.phone.replace(/\s+/g, '') === normPhone
+      )
+    : undefined;
+  const savedInfo = resolveSavedNameStatus(client);
+  const defaultLanguage: ClientPreferredLang =
+    requestedLang && availableLanguages.some((l) => l.lang === requestedLang)
+      ? requestedLang
+      : 'en';
+  const activeServices = (settings.enabledServices || []).filter((s) => s.active !== false);
+  const activeDeals = listSalonDeals(salonId, true);
+  const address = settings.address || SEEDED_SALON_ADDRESSES[salonId] || 'Salon Location';
+  const googleMapsUrl =
+    settings.googleMapsUrl || buildGoogleMapsSearchUrl(settings.salonName, address);
+
+  return {
+    salonId,
+    salonName: settings.salonName,
+    whatsappPhone: settings.whatsappPhone,
+    currency: settings.currency,
+    currencySymbol: settings.currencySymbol,
+    region: regionMeta.region,
+    address,
+    googleMapsUrl,
+    operatingHours: settings.operatingHours || { ...DEFAULT_SALON_OPERATING_HOURS },
+    services: activeServices,
+    barbers: getSalonBarbers(salonId),
+    activeDeals,
+    availableLanguages,
+    defaultLanguage,
+    customerProfile: {
+      phone: cleanPhone || '+92 300 0000000',
+      hasSavedName: savedInfo.hasSavedName,
+      savedName: savedInfo.savedName,
+      preferredLanguage: defaultLanguage,
+    },
+    todayDate: getSalonLocalDateParts(settings.timezoneOffsetHours).dateStr,
+  };
+}
+
+function buildCustomerWelcomeMenu(
+  settings: RetentionSettings,
+  lang: ClientPreferredLang
+): CustomerWelcomeMenuResponse {
+  const availableLanguages = getConfiguredLanguageChoices(settings);
+  const resolvedLang = availableLanguages.some((l) => l.lang === lang) ? lang : 'en';
+  const dir = getLangDirection(resolvedLang);
+
+  const copyMap: Record<
+    ClientPreferredLang,
+    {
+      welcome: string;
+      book: string;
+      services: string;
+      hours: string;
+      deals: string;
+    }
+  > = {
+    en: {
+      welcome: `Welcome to ${settings.salonName}! Choose a language below or pick an option to get started:`,
+      book: 'Book Appointment',
+      services: 'Services & Prices',
+      hours: 'Opening Hours & Location',
+      deals: 'Current Deals & Offers',
+    },
+    roman_ur: {
+      welcome: `${settings.salonName} mein khush amdeed! Language select karein ya neeche diye gaye option chunein:`,
+      book: 'Appointment Book Karein',
+      services: 'Services aur Prices',
+      hours: 'Opening Hours aur Location',
+      deals: 'Current Deals aur Offers',
+    },
+    ur: {
+      welcome: `${settings.salonName} میں خوش آمدید! اپنی زبان منتخب کریں یا نیچے دیے گئے آپشنز میں سے انتخاب کریں:`,
+      book: 'اپائنٹمنٹ بک کریں',
+      services: 'سروسز اور قیمتیں',
+      hours: 'اوقات اور لوکیشن',
+      deals: 'موجودہ ڈیلز اور آفرز',
+    },
+    ar: {
+      welcome: `أهلاً بك في ${settings.salonName}! اختر لغتك المفضلة أو حدد أحد الخيارات التالية:`,
+      book: 'حجز موعد',
+      services: 'الخدمات والأسعار',
+      hours: 'ساعات العمل والموقع',
+      deals: 'العروض والباقات الحالية',
+    },
+  };
+
+  const c = copyMap[resolvedLang];
+  return {
+    language: resolvedLang,
+    dir,
+    welcomeText: c.welcome,
+    options: [
+      { id: 'BOOK_APPOINTMENT', label: c.book },
+      { id: 'SERVICES_PRICES', label: c.services },
+      { id: 'HOURS_LOCATION', label: c.hours },
+      { id: 'CURRENT_DEALS', label: c.deals },
+    ],
+    availableLanguages,
+  };
+}
+
+export function handleCustomerWhatsAppAction(input: {
+  salonId: string;
+  fromPhone?: string;
+  messageText?: string;
+  actionId?: CustomerMenuActionId | 'WELCOME';
+  preferredLang?: ClientPreferredLang;
+  clientName?: string;
+  isDemo?: boolean;
+}): CustomerActionMessageResponse {
+  const settings = ensureSalonExists(input.salonId);
+  runDealExpiryAndVideoRetentionCron(input.salonId);
+  const store = ensureStoreLoaded();
+  const isDemo = Boolean(input.isDemo);
+  const cleanPhone = sanitizePhone(input.fromPhone || '+92 300 0000000') || '+92 300 0000000';
+  const raw = sanitizePlainText(input.messageText || '', 300);
+  const lower = raw.toLowerCase();
+
+  let client = store.clients.find(
+    (c) => c.salonId === input.salonId && c.phone.replace(/\s+/g, '') === cleanPhone.replace(/\s+/g, '')
+  );
+  if (!isDemo && !client) {
+    client = upsertClientProfile(input.salonId, {
+      phone: cleanPhone,
+      name: input.clientName || 'WhatsApp Client',
+      preferredLanguage: input.preferredLang || 'en',
+    });
+  }
+
+  const availableLanguages = getConfiguredLanguageChoices(settings);
+  const activeLang: ClientPreferredLang =
+    input.preferredLang && availableLanguages.some((l) => l.lang === input.preferredLang)
+      ? input.preferredLang
+      : client?.preferredLanguage && availableLanguages.some((l) => l.lang === client.preferredLanguage)
+      ? client.preferredLanguage
+      : 'en';
+  const dir = getLangDirection(activeLang);
+
+  if (!isDemo && client && input.preferredLang) {
+    client.preferredLanguage = activeLang;
+    client.awaitingLanguageSelection = false;
+  }
+
+  let resolvedAction: CustomerMenuActionId | 'WELCOME' = input.actionId || 'WELCOME';
+  if (!input.actionId) {
+    if (/^(hi|hello|hey|salam|assalam|marhaba|السلام|مرحبا)\b/i.test(lower)) {
+      resolvedAction = 'WELCOME';
+    } else if (/book|appointment|reserve|حجز|بک/i.test(lower) || raw === '1') {
+      resolvedAction = 'BOOK_APPOINTMENT';
+    } else if (/service|price|rate|menu|سروس|قیمت|أسعار/i.test(lower) || raw === '2') {
+      resolvedAction = 'SERVICES_PRICES';
+    } else if (/hour|timing|open|location|address|map|اوقات|لوکیشن|موقع|ساعات/i.test(lower) || raw === '3') {
+      resolvedAction = 'HOURS_LOCATION';
+    } else if (/deal|offer|promo|video|آفر|ڈیل|عرض/i.test(lower) || raw === '4') {
+      resolvedAction = 'CURRENT_DEALS';
+    }
+  }
+
+  const activeServices = (settings.enabledServices || []).filter((s) => s.active !== false);
+  const hours = settings.operatingHours || { ...DEFAULT_SALON_OPERATING_HOURS };
+  const address = settings.address || SEEDED_SALON_ADDRESSES[input.salonId] || 'Salon Location';
+  const googleMapsUrl =
+    settings.googleMapsUrl || buildGoogleMapsSearchUrl(settings.salonName, address);
+  const activeDeals = listSalonDeals(input.salonId, true).map((d) => ({
+    ...d,
+    dealPagePath: `/deal/${encodeURIComponent(input.salonId)}/${encodeURIComponent(d.id)}`,
+  }));
+
+  if (resolvedAction === 'WELCOME') {
+    const welcome = buildCustomerWelcomeMenu(settings, activeLang);
+    return {
+      language: welcome.language,
+      dir: welcome.dir,
+      action: 'WELCOME',
+      text: welcome.welcomeText,
+      welcome,
+    };
+  }
+
+  if (resolvedAction === 'BOOK_APPOINTMENT') {
+    const openFlowLabel: Record<ClientPreferredLang, string> = {
+      en: `Opening the instant booking form for ${settings.salonName}...`,
+      roman_ur: `${settings.salonName} ka booking form khul raha hai...`,
+      ur: `${settings.salonName} کا بکنگ فارم کھل رہا ہے...`,
+      ar: `جاري فتح نموذج الحجز الفوري لـ ${settings.salonName}...`,
+    };
+    return {
+      language: activeLang,
+      dir,
+      action: 'BOOK_APPOINTMENT',
+      text: openFlowLabel[activeLang],
+      openBookingFlow: true,
+    };
+  }
+
+  if (resolvedAction === 'SERVICES_PRICES') {
+    const lines = activeServices.map(
+      (s) => `• ${s.name} — ${settings.currencySymbol}${s.price.toLocaleString()} (${s.durationMins || 35} min)`
+    );
+    const header: Record<ClientPreferredLang, string> = {
+      en: `${settings.salonName} — Services & Prices:\n${lines.join('\n')}`,
+      roman_ur: `${settings.salonName} — Services aur Prices:\n${lines.join('\n')}`,
+      ur: `${settings.salonName} — سروسز اور قیمتیں:\n${lines.join('\n')}`,
+      ar: `${settings.salonName} — الخدمات والأسعار:\n${lines.join('\n')}`,
+    };
+    const text = header[activeLang];
+    if (!isDemo && client) {
+      appendLog(input.salonId, {
+        direction: 'OUTBOUND',
+        module: 'BOOKING',
+        clientName: client.name,
+        clientPhone: client.phone,
+        language: activeLang,
+        dir,
+        body: text,
+      });
+      persistStore(input.salonId);
+    }
+    return {
+      language: activeLang,
+      dir,
+      action: 'SERVICES_PRICES',
+      text,
+      services: activeServices,
+    };
+  }
+
+  if (resolvedAction === 'HOURS_LOCATION') {
+    const monThu = hours.monThuClosed ? 'Closed' : `${hours.monThuOpen} – ${hours.monThuClose}`;
+    const fri = hours.fridayClosed
+      ? 'Closed'
+      : `${hours.fridayOpen} – ${hours.fridayClose} (Break: ${hours.fridayBreakStart} – ${hours.fridayBreakEnd})`;
+    const satSun = hours.satSunClosed ? 'Closed' : `${hours.satSunOpen} – ${hours.satSunClose}`;
+
+    const header: Record<ClientPreferredLang, string> = {
+      en: `${settings.salonName} — Opening Hours & Location:\nMon–Thu: ${monThu}\nFriday: ${fri}\nSat–Sun: ${satSun}\nAddress: ${address}\nGoogle Maps: ${googleMapsUrl}`,
+      roman_ur: `${settings.salonName} — Opening Hours aur Location:\nMon–Thu: ${monThu}\nJumma (Friday): ${fri}\nSat–Sun: ${satSun}\nAddress: ${address}\nGoogle Maps: ${googleMapsUrl}`,
+      ur: `${settings.salonName} — کھلنے کے اوقات اور لوکیشن:\nپیر تا جمعرات: ${monThu}\nجمعہ: ${fri}\nہفتہ اور اتوار: ${satSun}\nپتہ: ${address}\nگوگل میپس: ${googleMapsUrl}`,
+      ar: `${settings.salonName} — ساعات العمل والموقع:\nالإثنين – الخميس: ${monThu}\nالجمعة: ${fri}\nالسبت – الأحد: ${satSun}\nالعنوان: ${address}\nخرائط جوجل: ${googleMapsUrl}`,
+    };
+    const text = header[activeLang];
+    if (!isDemo && client) {
+      appendLog(input.salonId, {
+        direction: 'OUTBOUND',
+        module: 'BOOKING',
+        clientName: client.name,
+        clientPhone: client.phone,
+        language: activeLang,
+        dir,
+        body: text,
+      });
+      persistStore(input.salonId);
+    }
+    return {
+      language: activeLang,
+      dir,
+      action: 'HOURS_LOCATION',
+      text,
+      hours,
+      address,
+      googleMapsUrl,
+    };
+  }
+
+  // CURRENT_DEALS — strictly active non-expired deals only
+  let text = '';
+  if (activeDeals.length === 0) {
+    const emptyMap: Record<ClientPreferredLang, string> = {
+      en: `${settings.salonName}: No active deals right now. You can still book any regular service anytime!`,
+      roman_ur: `${settings.salonName}: Is waqt koi active deal nahi hai. Aap regular service book kar sakte hain!`,
+      ur: `${settings.salonName}: اس وقت کوئی فعال ڈیل دستیاب نہیں ہے۔ آپ باقاعدہ سروس بک کر سکتے ہیں!`,
+      ar: `${settings.salonName}: لا توجد عروض سارية حالياً. يمكنك حجز أي خدمة اعتيادية في أي وقت!`,
+    };
+    text = emptyMap[activeLang];
+  } else {
+    const dealLines = activeDeals.map((d) => {
+      const badge =
+        d.discountType === 'PCT'
+          ? `${d.discountValue}% OFF`
+          : d.discountType === 'FIXED'
+          ? `${settings.currencySymbol}${d.discountValue.toLocaleString()} OFF`
+          : `Bundle ${settings.currencySymbol}${d.discountValue.toLocaleString()}`;
+      return `• ${d.title} (${badge}) — Expires ${new Date(d.expiresAt).toLocaleDateString()}`;
+    });
+    const prefix: Record<ClientPreferredLang, string> = {
+      en: `${settings.salonName} — Active Deals & Offers:\n${dealLines.join('\n')}`,
+      roman_ur: `${settings.salonName} — Active Deals aur Offers:\n${dealLines.join('\n')}`,
+      ur: `${settings.salonName} — موجودہ فعال ڈیلز:\n${dealLines.join('\n')}`,
+      ar: `${settings.salonName} — العروض السارية حالياً:\n${dealLines.join('\n')}`,
+    };
+    text = prefix[activeLang];
+  }
+
+  if (!isDemo && client) {
+    appendLog(input.salonId, {
+      direction: 'OUTBOUND',
+      module: 'BOOKING',
+      clientName: client.name,
+      clientPhone: client.phone,
+      language: activeLang,
+      dir,
+      body: text,
+    });
+    persistStore(input.salonId);
+  }
+  return {
+    language: activeLang,
+    dir,
+    action: 'CURRENT_DEALS',
+    text,
+    deals: activeDeals,
+  };
+}
+
+export function getAvailableSlotsAndBarbers(input: {
+  salonId: string;
+  date: string;
+  durationMins?: number;
+  demoBusyBarber?: string;
+  demoBusyTimeSlot?: string;
+}): CustomerAvailabilityResponse {
+  const settings = ensureSalonExists(input.salonId);
+  const hours = settings.operatingHours || { ...DEFAULT_SALON_OPERATING_HOURS };
+  const barbers = getSalonBarbers(input.salonId);
+  const durationMins = clampInteger(input.durationMins ?? 40, 10, 300, 40);
+  const cleanDate = /^\d{4}-\d{2}-\d{2}$/.test(input.date)
+    ? input.date
+    : getSalonLocalDateParts(settings.timezoneOffsetHours).dateStr;
+
+  const schedule = getScheduleForDate(hours, cleanDate);
+  if (!schedule.isOpen) {
+    return {
+      salonId: input.salonId,
+      date: cleanDate,
+      dayName: schedule.dayName,
+      isOpen: false,
+      closedReason: schedule.closedReason || 'Salon is closed on this date.',
+      totalDurationMins: durationMins,
+      slots: [],
+      barbers,
+    };
+  }
+
+  const localNow = getSalonLocalDateParts(settings.timezoneOffsetHours);
+  const isToday = cleanDate === localNow.dateStr;
+  const slots: CustomerSlotAvailability[] = [];
+
+  for (let start = schedule.openMins; start + durationMins <= schedule.closeMins; start += 30) {
+    const end = start + durationMins;
+    // Skip slots in the past if booking for today (+15m buffer)
+    if (isToday && start < localNow.minutesOfDay + 15) {
+      continue;
+    }
+    // Skip slots overlapping Friday prayer break
+    if (
+      schedule.breakStartMins !== undefined &&
+      schedule.breakEndMins !== undefined &&
+      start < schedule.breakEndMins &&
+      end > schedule.breakStartMins
+    ) {
+      continue;
+    }
+
+    const timeSlot = formatMinutesToTimeSlot(start);
+    const barberStatuses: CustomerBarberAvailability[] = barbers.map((barberName) => {
+      const check = isBarberBusyAtWindow(
+        input.salonId,
+        barberName,
+        start,
+        durationMins,
+        cleanDate,
+        input.demoBusyBarber,
+        input.demoBusyTimeSlot
+      );
+      return {
+        name: barberName,
+        available: !check.busy,
+        reason: check.reason,
+      };
+    });
+
+    const availableBarberCount = barberStatuses.filter((b) => b.available).length;
+    if (availableBarberCount > 0 || input.demoBusyBarber) {
+      slots.push({
+        timeSlot,
+        startMinutes: start,
+        availableBarberCount,
+        barbers: barberStatuses,
+      });
+    }
+  }
+
+  return {
+    salonId: input.salonId,
+    date: cleanDate,
+    dayName: schedule.dayName,
+    isOpen: true,
+    fridayBreakText: schedule.fridayBreakText,
+    totalDurationMins: durationMins,
+    slots,
+    barbers,
+  };
+}
+
+export function createCustomerFlowBooking(
+  salonId: string,
+  input: CustomerFlowBookingRequest
+): { statusCode: number; payload: CustomerFlowBookingResponse } {
+  const store = ensureStoreLoaded();
+  const settings = ensureSalonExists(salonId);
+  runDealExpiryAndVideoRetentionCron(salonId);
+
+  const isDemo = Boolean(input.isDemo);
+  const cleanPhone = sanitizePhone(input.clientPhone || '');
+  if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 6) {
+    return {
+      statusCode: 400,
+      payload: { ok: false, code: 'VALIDATION_ERROR', error: 'Valid phone number is required.' },
+    };
+  }
+
+  const configuredServices = (settings.enabledServices || []).filter((s) => s.active !== false);
+  const requestedIds = Array.isArray(input.serviceIds) ? input.serviceIds : [];
+  const selectedServices = configuredServices.filter(
+    (s) => (s.id && requestedIds.includes(s.id)) || requestedIds.includes(s.name)
+  );
+  if (selectedServices.length === 0) {
+    return {
+      statusCode: 400,
+      payload: {
+        ok: false,
+        code: 'VALIDATION_ERROR',
+        error: 'Please select at least one active salon service.',
+      },
+    };
+  }
+
+  const originalTotal = selectedServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
+  const totalDurationMins = Math.max(
+    15,
+    selectedServices.reduce((sum, s) => sum + (Number(s.durationMins) || 35), 0)
+  );
+  let finalTotal = originalTotal;
+  let appliedDeal: CustomerFlowBookingResponse['appliedDeal'] = null;
+
+  if (input.dealId) {
+    const deal = (store.deals || []).find((d) => d.salonId === salonId && d.id === input.dealId);
+    if (!deal || !isDealCurrentlyActive(deal)) {
+      return {
+        statusCode: 400,
+        payload: {
+          ok: false,
+          code: 'INVALID_DEAL',
+          error: 'This promotional deal has expired and is no longer available.',
+        },
+      };
+    }
+    if (deal.discountType === 'PCT') {
+      finalTotal = Math.max(0, Math.round(originalTotal * (1 - deal.discountValue / 100)));
+    } else if (deal.discountType === 'FIXED') {
+      finalTotal = Math.max(0, originalTotal - deal.discountValue);
+    } else if (deal.discountType === 'BUNDLE_PRICE') {
+      finalTotal = Math.max(0, Math.min(originalTotal, deal.discountValue));
+    }
+    appliedDeal = {
+      id: deal.id,
+      title: deal.title,
+      originalTotal,
+      finalTotal,
+      savings: Math.max(0, originalTotal - finalTotal),
+    };
+  }
+
+  // Check saved client name status
+  const normPhone = cleanPhone.replace(/\s+/g, '');
+  const existingClient = store.clients.find(
+    (c) => c.salonId === salonId && c.phone.replace(/\s+/g, '') === normPhone
+  );
+  const savedInfo = resolveSavedNameStatus(existingClient);
+  const providedName = sanitizePlainText(input.clientName || '', 80);
+  const finalClientName = savedInfo.hasSavedName ? savedInfo.savedName! : providedName;
+
+  if (!finalClientName) {
+    return {
+      statusCode: 400,
+      payload: {
+        ok: false,
+        code: 'NAME_REQUIRED',
+        error: 'Please enter your name to complete this booking.',
+      },
+    };
+  }
+
+  const cleanDate = sanitizePlainText(input.appointmentDate || '', 20);
+  const cleanTimeSlot = sanitizePlainText(input.timeSlot || '', 24);
+  const cleanBarber = sanitizePlainText(input.barberName || '', 60);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) || !cleanTimeSlot || !cleanBarber) {
+    return {
+      statusCode: 400,
+      payload: {
+        ok: false,
+        code: 'VALIDATION_ERROR',
+        error: 'Date, time slot, and barber selection are required.',
+      },
+    };
+  }
+
+  // Re-validate availability right before confirmation (prevents double bookings!)
+  const availability = getAvailableSlotsAndBarbers({
+    salonId,
+    date: cleanDate,
+    durationMins: totalDurationMins,
+    demoBusyBarber: isDemo ? input.demoBusyBarber : undefined,
+    demoBusyTimeSlot: isDemo ? input.demoBusyTimeSlot : undefined,
+  });
+
+  if (!availability.isOpen) {
+    return {
+      statusCode: 409,
+      payload: {
+        ok: false,
+        code: 'SALON_CLOSED',
+        error: availability.closedReason || 'Salon is closed on the selected date.',
+      },
+    };
+  }
+
+  const startMinutes = parseTimeSlotToMinutes(cleanTimeSlot);
+  const formattedTime = startMinutes >= 0 ? formatMinutesToTimeSlot(startMinutes) : cleanTimeSlot;
+  const matchedSlot = availability.slots.find(
+    (s) => s.startMinutes === startMinutes || s.timeSlot === formattedTime
+  );
+
+  if (!matchedSlot) {
+    return {
+      statusCode: 409,
+      payload: {
+        ok: false,
+        code: 'SLOT_UNAVAILABLE',
+        error: `Time slot ${formattedTime} is no longer available for ${totalDurationMins} mins on ${cleanDate}. Please pick another slot.`,
+      },
+    };
+  }
+
+  const matchedBarber = matchedSlot.barbers.find(
+    (b) => b.name.toLowerCase() === cleanBarber.toLowerCase()
+  );
+  if (!matchedBarber || !matchedBarber.available) {
+    return {
+      statusCode: 409,
+      payload: {
+        ok: false,
+        code: 'SLOT_UNAVAILABLE',
+        error: `${cleanBarber} is unavailable at ${formattedTime}${matchedBarber?.reason ? ` (${matchedBarber.reason})` : ''}. Please choose another available barber or slot.`,
+      },
+    };
+  }
+
+  // Construct scheduledForIso using cleanDate and startMinutes adjusted by salon timezoneOffsetHours
+  const [y, m, d] = cleanDate.split('-').map((n) => parseInt(n, 10));
+  const startUtcMs =
+    Date.UTC(y, m - 1, d, Math.floor(startMinutes / 60), startMinutes % 60, 0) -
+    settings.timezoneOffsetHours * 3600000;
+
+  const address = settings.address || SEEDED_SALON_ADDRESSES[salonId] || 'Salon Location';
+  const googleMapsUrl =
+    settings.googleMapsUrl || buildGoogleMapsSearchUrl(settings.salonName, address);
+
+  const serviceNamesSummary = selectedServices.map((s) => s.name).join(' + ');
+  const apptId = isDemo
+    ? `DEMO-${Date.now().toString().slice(-4)}`
+    : `BK-FLW-${Date.now().toString().slice(-4)}`;
+
+  let clientId = existingClient?.id || `demo-cli-${Date.now().toString(36)}`;
+  if (!isDemo) {
+    const savedClient = upsertClientProfile(salonId, {
+      phone: cleanPhone,
+      name: savedInfo.hasSavedName ? undefined : finalClientName,
+      preferredLanguage: input.preferredLanguage || existingClient?.preferredLanguage || 'en',
+    });
+    clientId = savedClient.id;
+  }
+
+  const newAppointment: ConciergeAppointment = {
+    id: apptId,
+    salonId,
+    clientId,
+    clientName: finalClientName,
+    clientPhone: cleanPhone,
+    barberName: matchedBarber.name,
+    service: serviceNamesSummary,
+    serviceIds: selectedServices.map((s) => s.id || s.name),
+    price: finalTotal,
+    appointmentDate: cleanDate,
+    timeSlot: formattedTime,
+    durationMins: totalDurationMins,
+    scheduledEndMs: startUtcMs + totalDurationMins * 60000,
+    dealId: appliedDeal?.id,
+    bookedDealTitle: appliedDeal?.title,
+    sourceType: 'WHATSAPP_BOT',
+    status: 'CONFIRMED',
+    scheduledForIso: new Date(startUtcMs).toISOString(),
+    completedAt: null,
+    reviewPromptSentAt: null,
+    rating: null,
+    ratingComment: null,
+    reviewRoutedStatus: 'PENDING',
+  };
+
+  if (!isDemo) {
+    // Save in backend WITHOUT sending a separate WhatsApp confirmation message by default
+    store.appointments.unshift(newAppointment);
+    persistStore(salonId);
+  }
+
+  return {
+    statusCode: 201,
+    payload: {
+      ok: true,
+      isDemo,
+      appointment: newAppointment,
+      appliedDeal,
+      currencySymbol: settings.currencySymbol,
+      address,
+      googleMapsUrl,
+    },
+  };
+}
+
