@@ -6,22 +6,31 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Copy,
+  ExternalLink,
+  Film,
   Globe,
   Link2,
+  MapPin,
   MessageSquare,
   Play,
   RefreshCw,
   Save,
   Send,
   Star,
+  Tag,
+  Trash2,
+  Upload,
   UserPlus,
 } from 'lucide-react';
 import type {
   ClientPreferredLang,
+  DealDiscountType,
   RetentionSettings,
   SalonConciergeStateResponse,
   SalonPackageTier,
 } from '../types/concierge';
+import { CustomerWhatsAppDemoModal } from './CustomerWhatsAppDemoModal';
 
 interface SalonRetentionSettingsPanelProps {
   salonId: string;
@@ -265,6 +274,24 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
     replyText: string;
     replyDir: 'ltr' | 'rtl';
   } | null>(null);
+
+  // Phase 1: Customer WhatsApp Experience Live Demo & Deals Manager State
+  const [isLiveDemoOpen, setIsLiveDemoOpen] = useState(false);
+  const [dealTitle, setDealTitle] = useState('');
+  const [dealDesc, setDealDesc] = useState('');
+  const [dealDiscountType, setDealDiscountType] = useState<DealDiscountType>('PCT');
+  const [dealDiscountValue, setDealDiscountValue] = useState(20);
+  const [dealExpiresAt, setDealExpiresAt] = useState(() => {
+    const d = new Date(Date.now() + 7 * 86400000);
+    return d.toISOString().slice(0, 10);
+  });
+  const [dealServiceIds, setDealServiceIds] = useState<string[]>([]);
+  const [dealVideoFile, setDealVideoFile] = useState<{
+    name: string;
+    mimeType: string;
+    base64: string;
+  } | null>(null);
+  const [isCreatingDeal, setIsCreatingDeal] = useState(false);
 
   useEffect(() => {
     if (!conciergeState?.settings) return;
@@ -510,6 +537,102 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
 
   const activeDir = PREVIEW_LANG_TABS.find((t) => t.id === previewLang)?.dir ?? 'ltr';
 
+  const handleDealVideoPicked = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      setDealVideoFile(null);
+      return;
+    }
+    if (file.size > 18 * 1024 * 1024) {
+      onShowToast('Please choose a promotional video under 18 MB.');
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const b64 = result.includes(',') ? result.split(',')[1] : result;
+      setDealVideoFile({
+        name: file.name,
+        mimeType: file.type || 'video/mp4',
+        base64: b64,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCreateDeal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dealTitle.trim()) {
+      onShowToast('Please enter a deal title.');
+      return;
+    }
+    setIsCreatingDeal(true);
+    try {
+      const expiresIso = new Date(`${dealExpiresAt}T23:59:59`).toISOString();
+      const res = await fetch(`/api/salons/${encodeURIComponent(salonId)}/deals`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: dealTitle.trim(),
+          description: dealDesc.trim(),
+          discountType: dealDiscountType,
+          discountValue: Number(dealDiscountValue || 0),
+          serviceIds: dealServiceIds,
+          expiresAt: expiresIso,
+          videoRetentionDaysAfterExpiry: draft.videoRetentionDaysAfterExpiry ?? 30,
+          videoBase64: dealVideoFile?.base64,
+          videoMimeType: dealVideoFile?.mimeType,
+          videoOriginalName: dealVideoFile?.name,
+        }),
+      });
+      const data = (await res.json()) as { state?: SalonConciergeStateResponse; error?: string };
+      if (!res.ok) {
+        onShowToast(data.error || 'Could not create deal.');
+        return;
+      }
+      if (data.state) onStateUpdated(data.state);
+      setDealTitle('');
+      setDealDesc('');
+      setDealServiceIds([]);
+      setDealVideoFile(null);
+      onShowToast('✓ Promotional deal & video saved!');
+    } catch {
+      onShowToast('Failed to save promotional deal.');
+    } finally {
+      setIsCreatingDeal(false);
+    }
+  };
+
+  const handleDeleteDeal = async (dealId: string) => {
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(salonId)}/deals/${encodeURIComponent(dealId)}`,
+        { method: 'DELETE', credentials: 'include' }
+      );
+      const data = (await res.json()) as { state?: SalonConciergeStateResponse };
+      if (res.ok && data.state) {
+        onStateUpdated(data.state);
+        onShowToast('✓ Deal & video removed.');
+      }
+    } catch {
+      onShowToast('Failed to remove deal.');
+    }
+  };
+
+  const handleToggleClientLanguage = (lang: ClientPreferredLang) => {
+    if (lang === 'en') return; // English is always default
+    const current = draft.enabledClientLanguages || ['en'];
+    const next = current.includes(lang)
+      ? current.filter((l) => l !== lang)
+      : [...current, lang];
+    updateDraft({ ...draft, enabledClientLanguages: next });
+  };
+
+  const allServices = (draft.enabledServices || []).filter((s) => s.active !== false);
+  const salonDeals = conciergeState.deals || [];
+
   return (
     <div dir={isOwnerRtl ? 'rtl' : 'ltr'} className="space-y-6 pb-28 min-w-0">
       {savedBanner && (
@@ -518,6 +641,338 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           <span>{savedBanner}</span>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* PHASE 1: CUSTOMER WHATSAPP EXPERIENCE — LIVE DEMO & PUBLIC FLOW LINKS     */}
+      {/* ========================================================================= */}
+      <section className="rounded-2xl border border-[#116329] bg-[#0D2118] p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#3FB950]">
+              WHATSAPP CUSTOMER EXPERIENCE · INTERACTIVE SANDBOX
+            </span>
+            <h3 className="text-base font-black text-[#F0F6FC]">
+              Customer WhatsApp Experience — Live Demo
+            </h3>
+            <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
+              Test the complete customer journey (&ldquo;Hi&rdquo; welcome, English/Urdu/Roman Urdu/Arabic switching, real Services, Hours, Location/Maps, Deals &amp; embedded Booking Flow) without altering real appointments.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <a
+              href={`/flow/${encodeURIComponent(salonId)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="min-h-[46px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-4 py-2 text-xs font-mono font-bold text-[#06B6D4] inline-flex items-center gap-2 transition"
+            >
+              <ExternalLink className="size-3.5" />
+              <span>Open Public Flow</span>
+            </a>
+            <button
+              type="button"
+              onClick={() => setIsLiveDemoOpen(true)}
+              className="min-h-[48px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-5 py-2.5 text-xs font-mono font-black uppercase tracking-wide inline-flex items-center gap-2 shadow-lg transition active:scale-95"
+            >
+              <MessageSquare className="size-4" />
+              <span>Launch Live Demo</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* CUSTOMER STOREFRONT INFO, CLIENT LANGUAGES & DEALS / VIDEO MANAGER        */}
+      {/* ========================================================================= */}
+      <section className="rounded-2xl border border-[#30363D] bg-[#161B22] p-5 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#30363D] pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <MapPin className="size-4 text-[#06B6D4] shrink-0" />
+              <h3 className="text-base font-bold text-[#F0F6FC]">
+                Customer WhatsApp Location, Languages &amp; Promo Deals
+              </h3>
+            </div>
+            <p className="text-xs text-[#8B949E] font-sans">
+              Configure the address, Google Maps pin, client language options, active video deals, and post-expiry video auto-delete period.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={savingSection === 'ALL'}
+            onClick={() => handleSaveSettings('ALL')}
+            className="min-h-[46px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 py-2 text-xs font-mono font-bold uppercase inline-flex items-center gap-2 shrink-0"
+          >
+            {savingSection === 'ALL' ? (
+              <RefreshCw className="size-4 animate-spin" />
+            ) : (
+              <Save className="size-4" />
+            )}
+            <span>Save Location &amp; Languages</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label className="space-y-1.5 block">
+            <span className="text-xs font-mono text-[#8B949E] block">
+              Salon Street Address (Shown in WhatsApp &amp; Flow)
+            </span>
+            <input
+              type="text"
+              value={draft.address || ''}
+              onChange={(e) => updateDraft({ ...draft, address: e.target.value })}
+              placeholder="Plot 42-C, DHA Phase 5, Lahore"
+              className="w-full min-h-[46px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+            />
+          </label>
+          <label className="space-y-1.5 block">
+            <span className="text-xs font-mono text-[#8B949E] block">
+              Google Maps URL
+            </span>
+            <input
+              type="url"
+              dir="ltr"
+              value={draft.googleMapsUrl || ''}
+              onChange={(e) => updateDraft({ ...draft, googleMapsUrl: e.target.value })}
+              placeholder="https://maps.google.com/?q=..."
+              className="w-full min-h-[46px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono text-[#06B6D4] focus:border-[#06B6D4] focus:outline-none"
+            />
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-3 items-start">
+          <div className="space-y-2">
+            <span className="text-xs font-mono text-[#8B949E] block">
+              Customer Welcome Languages (English is always default)
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {PREVIEW_LANG_TABS.map((t) => {
+                const enabled =
+                  t.id === 'en' ||
+                  (draft.enabledClientLanguages || ['en']).includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    disabled={t.id === 'en'}
+                    onClick={() => handleToggleClientLanguage(t.id)}
+                    className={`min-h-[40px] rounded-xl border px-3 text-xs font-semibold flex items-center gap-2 transition ${
+                      enabled
+                        ? 'border-[#06B6D4] bg-[#06B6D4]/15 text-[#F0F6FC]'
+                        : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
+                    }`}
+                  >
+                    <Check className={`size-3.5 ${enabled ? 'text-[#06B6D4]' : 'opacity-25'}`} />
+                    <span>{t.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <label className="space-y-1.5 block">
+            <span className="text-xs font-mono text-[#8B949E] block">
+              Auto-Delete Deal Video (Days After Expiry)
+            </span>
+            <input
+              type="number"
+              dir="ltr"
+              min={1}
+              max={365}
+              value={draft.videoRetentionDaysAfterExpiry ?? 30}
+              onChange={(e) =>
+                updateDraft({
+                  ...draft,
+                  videoRetentionDaysAfterExpiry: Math.max(1, Number(e.target.value) || 30),
+                })
+              }
+              className="w-full min-h-[46px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono font-bold text-[#D29922] focus:border-[#06B6D4] focus:outline-none"
+            />
+          </label>
+        </div>
+
+        {/* Create New Promotional Deal + Video Upload */}
+        <form
+          onSubmit={handleCreateDeal}
+          className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-mono font-bold uppercase text-[#D29922] flex items-center gap-1.5">
+              <Tag className="size-3.5" />
+              <span>Add Active Deal &amp; Promotional Video</span>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+            <input
+              type="text"
+              required
+              value={dealTitle}
+              onChange={(e) => setDealTitle(e.target.value)}
+              placeholder="Deal Title (e.g. Weekend Grooming Combo)"
+              className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+            />
+            <select
+              value={dealDiscountType}
+              onChange={(e) => setDealDiscountType(e.target.value as DealDiscountType)}
+              className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-xs font-mono text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+            >
+              <option value="PCT">Percentage OFF (%)</option>
+              <option value="FIXED">Fixed Cash OFF ({draft.currency})</option>
+              <option value="BUNDLE_PRICE">Bundle Price ({draft.currency})</option>
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="number"
+                dir="ltr"
+                min={1}
+                value={dealDiscountValue}
+                onChange={(e) => setDealDiscountValue(Number(e.target.value) || 0)}
+                placeholder="Value"
+                className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-sm font-mono font-bold text-[#3FB950] focus:border-[#06B6D4] focus:outline-none"
+              />
+              <input
+                type="date"
+                dir="ltr"
+                required
+                value={dealExpiresAt}
+                onChange={(e) => setDealExpiresAt(e.target.value)}
+                className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#161B22] px-2.5 text-xs font-mono text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <input
+            type="text"
+            value={dealDesc}
+            onChange={(e) => setDealDesc(e.target.value)}
+            placeholder="Offer description shown on the mobile deal video page"
+            className="w-full min-h-[42px] rounded-xl border border-[#30363D] bg-[#161B22] px-3 text-xs text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+          />
+
+          {/* Included Services */}
+          <div className="flex flex-wrap gap-1.5">
+            {allServices.map((svc) => {
+              const id = svc.id || svc.name;
+              const picked = dealServiceIds.includes(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() =>
+                    setDealServiceIds((prev) =>
+                      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+                    )
+                  }
+                  className={`min-h-[34px] rounded-lg border px-2.5 text-[11px] font-medium transition ${
+                    picked
+                      ? 'border-[#3FB950] bg-[#0D3822] text-[#F0F6FC]'
+                      : 'border-[#30363D] bg-[#161B22] text-[#8B949E]'
+                  }`}
+                >
+                  {svc.name}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <label className="min-h-[44px] rounded-xl border border-dashed border-[#30363D] hover:border-[#06B6D4] bg-[#161B22] px-3.5 py-2 text-xs font-mono text-[#8B949E] cursor-pointer inline-flex items-center gap-2">
+              <Upload className="size-3.5 text-[#06B6D4]" />
+              <span>
+                {dealVideoFile ? `Attached: ${dealVideoFile.name}` : 'Upload Promo Video (MP4/WebM ≤18MB)'}
+              </span>
+              <input
+                type="file"
+                accept="video/mp4,video/webm,video/quicktime"
+                onChange={handleDealVideoPicked}
+                className="sr-only"
+              />
+            </label>
+
+            <button
+              type="submit"
+              disabled={isCreatingDeal}
+              className="min-h-[44px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] text-[#0D1117] px-5 text-xs font-mono font-black uppercase transition"
+            >
+              {isCreatingDeal ? 'Saving Deal...' : 'Publish Active Deal'}
+            </button>
+          </div>
+        </form>
+
+        {/* Configured Deals List */}
+        {salonDeals.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {salonDeals.map((deal) => {
+              const expired = !deal.active || new Date(deal.expiresAt).getTime() <= Date.now();
+              const dealPath = `/deal/${encodeURIComponent(salonId)}/${encodeURIComponent(deal.id)}`;
+              return (
+                <div
+                  key={deal.id}
+                  className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2 text-xs"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <span
+                        className={`text-[10px] font-mono font-bold uppercase ${
+                          expired ? 'text-[#F85149]' : 'text-[#3FB950]'
+                        }`}
+                      >
+                        {expired ? 'EXPIRED' : 'ACTIVE'} · Expires{' '}
+                        {new Date(deal.expiresAt).toLocaleDateString()}
+                      </span>
+                      <p className="font-bold text-[#F0F6FC] truncate">{deal.title}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteDeal(deal.id)}
+                      aria-label="Delete deal"
+                      className="size-8 rounded-lg border border-[#30363D] text-[#8B949E] hover:text-[#F85149] grid place-items-center shrink-0"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] text-[#8B949E] line-clamp-2">{deal.description}</p>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[#21262D]">
+                    <span className="text-[10px] font-mono text-[#8B949E] flex items-center gap-1">
+                      <Film className="size-3 text-[#06B6D4]" />
+                      {deal.videoDeletedAt
+                        ? 'Video purged after retention'
+                        : deal.videoUrl
+                        ? 'Promo video attached'
+                        : 'No video attached'}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const fullUrl = `${window.location.origin}${dealPath}`;
+                          void navigator.clipboard?.writeText(fullUrl);
+                          onShowToast('✓ Deal page link copied.');
+                        }}
+                        className="min-h-[30px] rounded-lg border border-[#30363D] bg-[#161B22] px-2 text-[10px] font-mono text-[#8B949E] hover:text-[#F0F6FC] inline-flex items-center gap-1"
+                      >
+                        <Copy className="size-3" />
+                        <span>Copy Link</span>
+                      </button>
+                      <a
+                        href={dealPath}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="min-h-[30px] rounded-lg border border-[#30363D] bg-[#161B22] px-2 text-[10px] font-mono text-[#06B6D4] inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="size-3" />
+                        <span>Open</span>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* ========================================================================= */}
       {/* MODULE 1: REGION-AWARE LANGUAGE SELECTOR MENU                             */}
@@ -1447,6 +1902,12 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           </div>
         )}
       </section>
+
+      <CustomerWhatsAppDemoModal
+        salonId={salonId}
+        isOpen={isLiveDemoOpen}
+        onClose={() => setIsLiveDemoOpen(false)}
+      />
     </div>
   );
 };
