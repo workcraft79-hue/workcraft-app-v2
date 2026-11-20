@@ -2530,6 +2530,20 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           if (data.settings?.salonCategory) {
             setPersistedCategory(data.settings.salonCategory);
           }
+          if (data.settings?.operatingHours) {
+            setSalonHours(data.settings.operatingHours);
+          }
+          if (Array.isArray(data.settings?.enabledServices) && data.settings.enabledServices.length > 0) {
+            setServices(
+              data.settings.enabledServices.map((svc, idx) => ({
+                id: svc.id || `svc-${idx + 1}`,
+                name: svc.name,
+                price: svc.price,
+                durationMins: svc.durationMins || 35,
+                active: svc.active !== false,
+              }))
+            );
+          }
           if (data.settings?.salonId) {
             setSalonsState((prev) =>
               prev.map((s) => {
@@ -2547,6 +2561,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   name: data.settings.salonName || s.name,
                   owner: data.settings.ownerName || s.owner,
                   phone: data.settings.whatsappPhone || s.phone,
+                  location: data.settings.address || s.location,
                   planId: mappedPlanId,
                 };
               })
@@ -3743,11 +3758,32 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     );
   };
 
-  const handleSaveSalonHours = (e: React.FormEvent) => {
+  const syncSalonConfigToBackend = async (patch: Record<string, unknown>) => {
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/retention-settings`,
+        {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        }
+      );
+      if (res.ok) {
+        const updated = (await res.json()) as SalonConciergeStateResponse;
+        setConciergeState(updated);
+      }
+    } catch {
+      // Non-fatal fallback retains local state
+    }
+  };
+
+  const handleSaveSalonHours = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       localStorage.setItem('wcl_salon_hours', JSON.stringify(salonHours));
     } catch {}
+    await syncSalonConfigToBackend({ operatingHours: salonHours });
     setMaintToast('✓ Salon operating hours saved and synced to WhatsApp Concierge.');
     setTimeout(() => setMaintToast(null), 4000);
   };
@@ -4098,9 +4134,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             clientName: a.clientName,
             barberName: a.barberName,
             phone: a.clientPhone,
-            service: a.service,
+            service: a.bookedDealTitle ? `${a.service} · ${a.bookedDealTitle}` : a.service,
             price: a.price,
-            timeSlot: a.timeSlot,
+            timeSlot: a.appointmentDate ? `${a.appointmentDate} · ${a.timeSlot}` : a.timeSlot,
             durationMins: a.durationMins || 35,
             scheduledEndMs: a.scheduledEndMs || Date.now() + (a.durationMins || 35) * 60000,
             sourceType: a.sourceType || 'WHATSAPP_BOT',
@@ -7232,7 +7268,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         active: true,
                       };
                       setIsTranslatingCustomService(true);
-                      setServices((prev) => [...prev, newSvc]);
+                      const nextServices = [...services, newSvc];
+                      setServices(nextServices);
+                      void syncSalonConfigToBackend({ enabledServices: nextServices });
                       try {
                         const trRes = await fetch('/api/translate-service', {
                           method: 'POST',
@@ -7261,7 +7299,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                       setCustomServiceDuration('35');
                       setCustomServicePrice('1500');
                       setIsAddingCustom(false);
-                      setMaintToast(`✓ Service "${newSvc.name}" added & translated.`);
+                      setMaintToast(`✓ Service "${newSvc.name}" added & synced to WhatsApp.`);
                       setTimeout(() => setMaintToast(null), 4000);
                     }}
                     className="p-4 rounded-2xl border border-[#9E6A03] bg-[#0D1117] space-y-3"
@@ -7380,6 +7418,21 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                       </div>
                     );
                   })}
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await syncSalonConfigToBackend({ enabledServices: services });
+                      setMaintToast('✓ Service menu, prices & durations synced to WhatsApp Concierge.');
+                      setTimeout(() => setMaintToast(null), 4000);
+                    }}
+                    className="min-h-[46px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-5 py-2 text-xs font-mono font-black uppercase transition inline-flex items-center gap-2"
+                  >
+                    <Save className="size-4" />
+                    <span>{ui.saveAndSyncBtn}</span>
+                  </button>
                 </div>
               </div>
             </PortalCard>
@@ -8231,7 +8284,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
 
             <div className="flex flex-col sm:flex-row gap-2 pt-1">
               <a
-                href={`https://maps.google.com/?q=${encodeURIComponent(currentSalon.name + ' ' + currentSalon.location)}`}
+                href={
+                  conciergeState?.settings?.googleMapsUrl ||
+                  `https://maps.google.com/?q=${encodeURIComponent(currentSalon.name + ' ' + currentSalon.location)}`
+                }
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex-1 min-h-[44px] rounded-xl bg-[#3FB950] hover:bg-[#2ea043] text-[#0D1117] font-mono font-bold text-xs uppercase grid place-items-center shadow-lg transition"
