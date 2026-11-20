@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+import fs from 'fs';
 import express from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import QRCode from 'qrcode';
@@ -6,13 +8,23 @@ import {
   addWalkInQueueItem,
   completeAppointmentAndRecordVisit,
   consumeServicePackageSession,
+  createCustomerFlowBooking,
+  createSalonDeal,
+  deleteSalonDeal,
+  getAvailableSlotsAndBarbers,
+  getCustomerExperienceConfig,
+  getDealVideoFileInfo,
+  getPublicDealPayload,
   getSalonConciergeState,
+  handleCustomerWhatsAppAction,
   hydrateConciergeStoreFromKv,
+  listSalonDeals,
   listSalonsForAgent,
   processWhatsAppWebhook,
   removeChairLock,
   resolveOwnerAlert,
   runBirthdayCron,
+  runDealExpiryAndVideoRetentionCron,
   runPostServiceReviewCron,
   runWinBackCron,
   setCounterSleepState,
@@ -297,6 +309,14 @@ const telemetryRateBuckets = new Map<string, { count: number; resetAt: number }>
 export function createApiApp(port = 3000): express.Express {
   const app = express();
   app.disable('x-powered-by');
+  // Allow larger JSON payloads specifically for deal promo video uploads (<=25MB)
+  app.use('/api/salons/:salonId/deals', express.json({ limit: '25mb' }));
+  app.use('/api/whatsapp/meta-webhook', express.json({
+    limit: '2mb',
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  }));
   app.use(express.json({ limit: '4mb' }));
 
   app.use('/api', async (_req, _res, next) => {
@@ -1139,7 +1159,14 @@ export function createApiApp(port = 3000): express.Express {
       return res.status(401).json({ error: 'Unauthorized cron trigger.' });
     }
     const usage = sweepExpiredVoiceBlobs();
-    return res.json({ ok: true, sweptAt: usage.lastCleanupAt, purgedClipCount: usage.purgedCount });
+    const dealsSweep = runDealExpiryAndVideoRetentionCron();
+    return res.json({
+      ok: true,
+      sweptAt: usage.lastCleanupAt,
+      purgedClipCount: usage.purgedCount,
+      expiredDealsCount: dealsSweep.expiredDealsCount,
+      purgedDealVideoCount: dealsSweep.purgedVideosCount,
+    });
   });
 
   // ===========================================================================
@@ -1350,6 +1377,296 @@ export function createApiApp(port = 3000): express.Express {
       }
     }
   );
+
+  // ===========================================================================
+  // PHASE 1: PUBLIC CUSTOMER WHATSAPP EXPERIENCE, FLOW BOOKING & DEAL VIDEOS
+  // ===========================================================================
+  app.get('/api/public/salons/:salonId/customer-experience', (req, res) => {
+    try {
+      const salonId = sanitizePlainText(req.params.salonId, 60);
+      const phone = typeof req.query.phone === 'string' ? req.query.phone : undefined;
+      const rawLang = typeof req.query.lang === 'string' ? req.query.lang : undefined;
+      const lang =
+        rawLang === 'en' || rawLang === 'roman_ur' || rawLang === 'ur' || rawLang === 'ar'
+          ? rawLang
+          : undefined;
+      const config = getCustomerExperienceConfig(salonId, phone, lang);
+      return res.json(config);
+    } catch (err) {
+      console.error('Customer experience config error:', err);
+      return res.status(500).json({ error: 'Failed to load salon experience.' });
+    }
+  });
+
+  app.post('/api/public/salons/:salonId/customer-message', (req, res) => {
+    try {
+      const salonId = sanitizePlainText(req.params.salonId, 60);
+      const body = req.body || {};
+      const preferredLang =
+        body.preferredLang === 'en' ||
+        body.preferredLang === 'roman_ur' ||
+        body.preferredLang === 'ur' ||
+        body.preferredLang === 'ar'
+          ? body.preferredLang
+          : undefined;
+      const actionId =
+        body.actionId === 'WELCOME' ||
+        body.actionId === 'BOOK_APPOINTMENT' ||
+        body.actionId === 'SERVICES_PRICES' ||
+        body.actionId === 'HOURS_LOCATION' ||
+        body.actionId === 'CURRENT_DEALS'
+          ? body.actionId
+          : undefined;
+
+      const outcome = handleCustomerWhatsAppAction({
+        salonId,
+        fromPhone: typeof body.fromPhone === 'string' ? body.fromPhone : undefined,
+        messageText: typeof body.messageText === 'string' ? body.messageText : 'Hi',
+        actionId,
+        preferredLang,
+        clientName: typeof body.clientName === 'string' ? body.clientName : undefined,
+        isDemo: Boolean(body.isDemo),
+      });
+      return res.json(outcome);
+    } catch (err) {
+      console.error('Customer message handler error:', err);
+      return res.status(500).json({ error: 'Failed to handle customer message.' });
+    }
+  });
+
+  app.get('/api/public/salons/:salonId/availability', (req, res) => {
+    try {
+      const salonId = sanitizePlainText(req.params.salonId, 60);
+      const date = typeof req.query.date === 'string' ? req.query.date : '';
+      const durationMins = Number(req.query.durationMins || 40);
+      const isDemo = req.query.isDemo === 'true' || req.query.isDemo === '1';
+      const demoBusyBarber =
+        isDemo && typeof req.query.demoBusyBarber === 'string'
+          ? req.query.demoBusyBarber
+          : undefined;
+      const demoBusyTimeSlot =
+        isDemo && typeof req.query.demoBusyTimeSlot === 'string'
+          ? req.query.demoBusyTimeSlot
+          : undefined;
+
+      const availability = getAvailableSlotsAndBarbers({
+        salonId,
+        date,
+        durationMins,
+        demoBusyBarber,
+        demoBusyTimeSlot,
+      });
+      return res.json(availability);
+    } catch (err) {
+      console.error('Customer availability error:', err);
+      return res.status(500).json({ error: 'Failed to calculate slot availability.' });
+    }
+  });
+
+  app.post('/api/public/salons/:salonId/flow/book', (req, res) => {
+    try {
+      const salonId = sanitizePlainText(req.params.salonId, 60);
+      const result = createCustomerFlowBooking(salonId, req.body || {});
+      return res.status(result.statusCode).json(result.payload);
+    } catch (err) {
+      console.error('Customer Flow booking error:', err);
+      return res.status(500).json({ ok: false, error: 'Failed to submit booking Flow.' });
+    }
+  });
+
+  app.get('/api/public/salons/:salonId/deals/:dealId', (req, res) => {
+    try {
+      const salonId = sanitizePlainText(req.params.salonId, 60);
+      const dealId = sanitizePlainText(req.params.dealId, 80);
+      const payload = getPublicDealPayload(salonId, dealId);
+      if (!payload) {
+        return res.status(404).json({ error: 'Deal not found.' });
+      }
+      return res.json(payload);
+    } catch (err) {
+      console.error('Public deal load error:', err);
+      return res.status(500).json({ error: 'Failed to load deal details.' });
+    }
+  });
+
+  app.get('/api/public/deal-videos/:fileName', (req, res) => {
+    try {
+      const info = getDealVideoFileInfo(req.params.fileName);
+      if (!info) {
+        return res.status(410).json({ error: 'Promotional video has expired and been removed.' });
+      }
+      const stat = fs.statSync(info.filePath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        if (Number.isNaN(start) || start >= fileSize) {
+          return res.status(416).send('Requested range not satisfiable');
+        }
+        const safeEnd = Math.min(end, fileSize - 1);
+        const chunkSize = safeEnd - start + 1;
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${safeEnd}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunkSize,
+          'Content-Type': info.mimeType,
+        });
+        return fs.createReadStream(info.filePath, { start, end: safeEnd }).pipe(res);
+      }
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': info.mimeType,
+        'Accept-Ranges': 'bytes',
+      });
+      return fs.createReadStream(info.filePath).pipe(res);
+    } catch (err) {
+      console.error('Deal video stream error:', err);
+      return res.status(500).json({ error: 'Could not stream promotional video.' });
+    }
+  });
+
+  // Owner Deal Management & Video Retention Config
+  app.get(
+    '/api/salons/:salonId/deals',
+    requireAuth,
+    requireSalonTenantAccess(true),
+    (req, res) => {
+      const deals = listSalonDeals(req.params.salonId, false);
+      return res.json({ deals });
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/deals',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const { salonId } = req.params;
+        const body = req.body || {};
+        let videoBuffer: Buffer | undefined;
+        if (typeof body.videoBase64 === 'string' && body.videoBase64.trim()) {
+          const rawB64 = body.videoBase64.replace(/^data:[^;]+;base64,/, '');
+          videoBuffer = Buffer.from(rawB64, 'base64');
+          if (videoBuffer.length > 20 * 1024 * 1024) {
+            return res.status(400).json({ error: 'Video must be 20 MB or smaller.' });
+          }
+        }
+        const created = createSalonDeal(salonId, {
+          title: String(body.title || ''),
+          description: typeof body.description === 'string' ? body.description : undefined,
+          discountType: body.discountType,
+          discountValue: Number(body.discountValue || 15),
+          serviceIds: Array.isArray(body.serviceIds) ? body.serviceIds : undefined,
+          expiresAt: String(body.expiresAt || ''),
+          videoRetentionDaysAfterExpiry:
+            body.videoRetentionDaysAfterExpiry !== undefined
+              ? Number(body.videoRetentionDaysAfterExpiry)
+              : undefined,
+          videoBuffer,
+          videoMimeType: typeof body.videoMimeType === 'string' ? body.videoMimeType : undefined,
+          videoOriginalName:
+            typeof body.videoOriginalName === 'string' ? body.videoOriginalName : undefined,
+        });
+        return res.status(201).json(created);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to create deal.';
+        return res.status(400).json({ error: msg });
+      }
+    }
+  );
+
+  app.delete(
+    '/api/salons/:salonId/deals/:dealId',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      const state = deleteSalonDeal(req.params.salonId, sanitizePlainText(req.params.dealId, 80));
+      return res.json({ ok: true, state });
+    }
+  );
+
+  // Meta WhatsApp Cloud API Webhook Verification & Live Handler (active when Meta env vars are set)
+  app.get('/api/whatsapp/meta-webhook', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+    const expectedToken = (process.env.WHATSAPP_VERIFY_TOKEN || '').trim();
+    if (mode === 'subscribe' && expectedToken && token === expectedToken) {
+      return res.status(200).send(String(challenge || ''));
+    }
+    return res.status(403).json({
+      error: 'Meta WhatsApp webhook verification token mismatch or WHATSAPP_VERIFY_TOKEN not configured.',
+    });
+  });
+
+  app.post('/api/whatsapp/meta-webhook', async (req, res) => {
+    const appSecret = (process.env.WHATSAPP_APP_SECRET || '').trim();
+    if (appSecret) {
+      const sigHeader = req.header('x-hub-signature-256') || '';
+      const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody;
+      if (!rawBody || !sigHeader.startsWith('sha256=')) {
+        return res.status(401).json({ error: 'Missing Meta webhook signature.' });
+      }
+      const expectedSig =
+        'sha256=' + crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
+      if (sigHeader !== expectedSig) {
+        return res.status(401).json({ error: 'Invalid Meta webhook signature.' });
+      }
+    }
+
+    try {
+      const entry = req.body?.entry?.[0]?.changes?.[0]?.value;
+      const msg = entry?.messages?.[0];
+      const contact = entry?.contacts?.[0];
+      if (!msg) {
+        return res.status(200).json({ ok: true, ignored: true });
+      }
+      const fromPhone = String(msg.from || '');
+      const textBody =
+        msg.text?.body ||
+        msg.interactive?.button_reply?.id ||
+        msg.interactive?.list_reply?.id ||
+        'Hi';
+      const salonId = sanitizePlainText(String(req.query.salonId || '1'), 60);
+      const outcome = processWhatsAppWebhook({
+        salonId,
+        fromPhone,
+        messageText: String(textBody),
+        clientName: contact?.profile?.name,
+      });
+
+      const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || '').trim();
+      const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
+      let sentViaMeta = false;
+      if (accessToken && phoneNumberId && fromPhone) {
+        const metaRes = await fetch(
+          `https://graph.facebook.com/v20.0/${encodeURIComponent(phoneNumberId)}/messages`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              to: fromPhone,
+              type: 'text',
+              text: { body: outcome.replyText },
+            }),
+          }
+        );
+        sentViaMeta = metaRes.ok;
+      }
+
+      return res.status(200).json({ ok: true, sentViaMeta, routedAction: outcome.routedAction });
+    } catch (err) {
+      console.error('Meta WhatsApp webhook processing error:', err);
+      return res.status(200).json({ ok: false });
+    }
+  });
 
   app.post(
     '/api/salons/:salonId/concierge/trigger-cron',
