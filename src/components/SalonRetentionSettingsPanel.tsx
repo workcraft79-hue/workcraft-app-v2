@@ -741,11 +741,22 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
 
         <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-3 items-start">
           <div className="space-y-2">
-            <span className="text-xs font-mono text-[#8B949E] block">
-              Customer Welcome Languages (English is always default)
-            </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-mono text-[#8B949E] block">
+                Customer Welcome Languages (English is always default)
+              </span>
+              <span className="text-[11px] font-mono text-[#06B6D4]">
+                {conciergeState.region === 'PK'
+                  ? 'Asia (Pakistan / India): English · Roman Urdu · اردو'
+                  : 'MENA & Europe: English · اردو · العربية'}
+              </span>
+            </div>
             <div className="flex flex-wrap gap-2">
-              {PREVIEW_LANG_TABS.map((t) => {
+              {PREVIEW_LANG_TABS.filter((t) =>
+                conciergeState.region === 'PK'
+                  ? t.id === 'en' || t.id === 'roman_ur' || t.id === 'ur'
+                  : t.id === 'en' || t.id === 'ur' || t.id === 'ar'
+              ).map((t) => {
                 const enabled =
                   t.id === 'en' ||
                   (draft.enabledClientLanguages || ['en']).includes(t.id);
