@@ -163,7 +163,11 @@ function getIsoLocalDateStr(iso: string | undefined | null, offsetHours: number)
 
 export function extractCountryCode(phone: string): string {
   const cleaned = phone.replace(/[^\d+]/g, '');
-  const prefixes = ['+971', '+966', '+974', '+965', '+968', '+973', '+92', '+91', '+44', '+33', '+49', '+1'];
+  const prefixes = [
+    '+971', '+966', '+974', '+965', '+968', '+973',
+    '+351', '+353', '+358',
+    '+92', '+91', '+44', '+33', '+49', '+34', '+39', '+31', '+32', '+43', '+30', '+1',
+  ];
   for (const prefix of prefixes) {
     if (cleaned.startsWith(prefix)) return prefix;
   }
@@ -219,13 +223,34 @@ export function detectRegionFromPhone(phone: string): {
       currencySymbol: info.sym,
     };
   }
+  const euroZoneCodes = new Set(['+33', '+49', '+34', '+39', '+31', '+32', '+43', '+351', '+353', '+30', '+358']);
+  if (cc === '+44') {
+    return {
+      region: 'INTL',
+      regionLabel: 'United Kingdom (+44)',
+      countryCode: cc,
+      timezoneOffsetHours: 0,
+      currency: 'GBP',
+      currencySymbol: '£',
+    };
+  }
+  if (euroZoneCodes.has(cc)) {
+    return {
+      region: 'INTL',
+      regionLabel: `Europe (${cc})`,
+      countryCode: cc,
+      timezoneOffsetHours: 1,
+      currency: 'EUR',
+      currencySymbol: '€',
+    };
+  }
   return {
     region: 'INTL',
-    regionLabel: `Europe / UK / International (${cc})`,
+    regionLabel: cc === '+1' ? 'USA / Canada (+1)' : `International (${cc})`,
     countryCode: cc,
-    timezoneOffsetHours: cc === '+44' ? 0 : cc === '+1' ? -5 : 1,
-    currency: cc === '+44' ? 'GBP' : 'USD',
-    currencySymbol: cc === '+44' ? '£' : '$',
+    timezoneOffsetHours: cc === '+1' ? -5 : 1,
+    currency: 'USD',
+    currencySymbol: '$',
   };
 }
 
@@ -3058,6 +3083,144 @@ function enrichServicesWithTranslations(services: SalonServiceRate[]): SalonServ
   }));
 }
 
+const CUSTOMER_DEAL_EXACT_TRANSLATIONS: Record<
+  string,
+  { roman_ur: string; ur: string; ar: string }
+> = {
+  'executive haircut & facial combo (20% off)': {
+    roman_ur: 'Executive Haircut & Facial Combo (20% OFF)',
+    ur: 'ایگزیکٹو ہیئر کٹ اور فیشل کومبو (20% رعایت)',
+    ar: 'باقة قص الشعر وتنظيف البشرة التنفيذية (خصم 20%)',
+  },
+  'includes master haircut + skin fade + charcoal deep detox facial with priority chair access.': {
+    roman_ur: 'Master Haircut, Skin Fade aur Charcoal Facial ke sath priority chair shamil hai.',
+    ur: 'اس آفر میں ماسٹر ہیئر کٹ، اسکن فیڈ اور چارکول ڈیپ ڈیٹوکس فیشل ترجیحی کرسی کے ساتھ شامل ہیں۔',
+    ar: 'تتضمن الباقة قص شعر احترافي وتدريج الشعر وتنظيف عميق للبشرة بالفحم مع أولوية الجلوس.',
+  },
+  'jumeirah executive grooming package': {
+    roman_ur: 'Jumeirah Executive Grooming Package',
+    ur: 'جمیرہ ایگزیکٹو گرومنگ پیکیج',
+    ar: 'باقة جميرا للعناية التنفيذية',
+  },
+  'master haircut, skin fade, classic beard trim, and hot towel shave bundle.': {
+    roman_ur: 'Master Haircut, Skin Fade, Classic Beard Trim aur Hot Towel Shave ka mukammal bundle.',
+    ur: 'ماسٹر ہیئر کٹ، اسکن فیڈ، کلاسک داڑھی ٹرم اور ہاٹ ٹاول شیو کا مکمل پیکیج۔',
+    ar: 'باقة شاملة تتضمن قص شعر احترافي، تدريج الشعر، تشذيب اللحية، وحلاقة بالمنشفة الساخنة.',
+  },
+  'hydra-facial + party styling glow deal': {
+    roman_ur: 'Hydra-Facial + Party Styling Glow Deal',
+    ur: 'ہائیڈرا فیشل + پارٹی اسٹائلنگ گلو ڈیل',
+    ar: 'عرض الهيدرافيشل وتصفيف السهرة المتألق',
+  },
+  'limited-time salon glow offer for ladies parlor bookings.': {
+    roman_ur: 'Ladies parlor bookings ke liye mehdood muddat ki glow offer.',
+    ur: 'لیڈیز پارلر بکنگز کے لیے محدود مدت کی خصوصی گلو آفر۔',
+    ar: 'عرض إشراقة خاص لفترة محدودة لحجوزات صالون السيدات.',
+  },
+  'weekend grooming combo': {
+    roman_ur: 'Weekend Grooming Combo',
+    ur: 'ویک اینڈ گرومنگ کومبو',
+    ar: 'باقة العناية لعطلة نهاية الأسبوع',
+  },
+};
+
+function localizeDealText(text: string, lang: ClientPreferredLang): string {
+  const clean = (text || '').trim();
+  if (!clean || lang === 'en') return clean;
+  const exact = CUSTOMER_DEAL_EXACT_TRANSLATIONS[clean.toLowerCase()];
+  if (exact) return exact[lang];
+
+  if (lang === 'roman_ur') {
+    return clean
+      .replace(/\bvalid until\b/gi, 'Aakhri tareekh')
+      .replace(/\bspecial salon offer\b/gi, 'Khas Salon Offer')
+      .replace(/\bwith\b/gi, 'ke sath');
+  }
+
+  const urRules: Array<[RegExp, string]> = [
+    [/\bcharcoal deep detox facial\b/gi, 'چارکول ڈیپ ڈیٹوکس فیشل'],
+    [/\bhot towel steam shave\b/gi, 'ہاٹ ٹاول اسٹیم شیو'],
+    [/\bsignature party makeup & styling\b/gi, 'سگنیچر پارٹی میک اپ اور اسٹائلنگ'],
+    [/\bhydra-facial & skin polish\b/gi, 'ہائیڈرا فیشل اور اسکن پالش'],
+    [/\bmaster haircut\b/gi, 'ماسٹر ہیئر کٹ'],
+    [/\bskin fade\b/gi, 'اسکن فیڈ'],
+    [/\bclassic beard trim\b/gi, 'کلاسک داڑھی ٹرم'],
+    [/\bpriority chair access\b/gi, 'ترجیحی کرسی'],
+    [/\bspecial salon offer\b/gi, 'خصوصی سیلون آفر'],
+    [/\blimited-time\b/gi, 'محدود مدت'],
+    [/\bvalid until\b/gi, 'آخری تاریخ'],
+    [/\bincludes\b/gi, 'شامل ہیں:'],
+    [/\bweekend\b/gi, 'ویک اینڈ'],
+    [/\bgrooming\b/gi, 'گرومنگ'],
+    [/\bexecutive\b/gi, 'ایگزیکٹو'],
+    [/\bcombo\b/gi, 'کومبو'],
+    [/\bpackage\b/gi, 'پیکیج'],
+    [/\bbundle\b/gi, 'پیکیج'],
+    [/\boffer\b/gi, 'آفر'],
+    [/\bdeal\b/gi, 'ڈیل'],
+    [/\bhaircut\b/gi, 'ہیئر کٹ'],
+    [/\bbeard\b/gi, 'داڑھی'],
+    [/\bfacial\b/gi, 'فیشل'],
+    [/\bbridal\b/gi, 'برائیڈل'],
+    [/\boff\b/gi, 'رعایت'],
+  ];
+
+  const arRules: Array<[RegExp, string]> = [
+    [/\bcharcoal deep detox facial\b/gi, 'تنظيف عميق للبشرة بالفحم'],
+    [/\bhot towel steam shave\b/gi, 'حلاقة بالمنشفة الساخنة والبخار'],
+    [/\bsignature party makeup & styling\b/gi, 'مكياج سهرة مميز وتصفيف'],
+    [/\bhydra-facial & skin polish\b/gi, 'هيدرافيشل وصنفرة البشرة'],
+    [/\bmaster haircut\b/gi, 'قص شعر احترافي'],
+    [/\bskin fade\b/gi, 'تدريج الشعر'],
+    [/\bclassic beard trim\b/gi, 'تشذيب اللحية الكلاسيكي'],
+    [/\bpriority chair access\b/gi, 'أولوية الجلوس'],
+    [/\bspecial salon offer\b/gi, 'عرض صالون خاص'],
+    [/\blimited-time\b/gi, 'لفترة محدودة'],
+    [/\bvalid until\b/gi, 'صالح حتى'],
+    [/\bincludes\b/gi, 'يشمل:'],
+    [/\bweekend\b/gi, 'نهاية الأسبوع'],
+    [/\bgrooming\b/gi, 'عناية'],
+    [/\bexecutive\b/gi, 'تنفيذي'],
+    [/\bcombo\b/gi, 'باقة'],
+    [/\bpackage\b/gi, 'باقة'],
+    [/\bbundle\b/gi, 'باقة'],
+    [/\boffer\b/gi, 'عرض'],
+    [/\bdeal\b/gi, 'عرض'],
+    [/\bhaircut\b/gi, 'قص شعر'],
+    [/\bbeard\b/gi, 'لحية'],
+    [/\bfacial\b/gi, 'تنظيف بشرة'],
+    [/\bbridal\b/gi, 'عروس'],
+    [/\boff\b/gi, 'خصم'],
+  ];
+
+  let out = clean;
+  const rules = lang === 'ur' ? urRules : arRules;
+  for (const [rx, replacement] of rules) {
+    out = out.replace(rx, replacement);
+  }
+  return out;
+}
+
+function enrichDealWithTranslations<T extends SalonDeal>(deal: T): T {
+  return {
+    ...deal,
+    titleTranslations: {
+      en: deal.title,
+      roman_ur: deal.titleTranslations?.roman_ur || localizeDealText(deal.title, 'roman_ur'),
+      ur: deal.titleTranslations?.ur || localizeDealText(deal.title, 'ur'),
+      ar: deal.titleTranslations?.ar || localizeDealText(deal.title, 'ar'),
+    },
+    descriptionTranslations: {
+      en: deal.description,
+      roman_ur:
+        deal.descriptionTranslations?.roman_ur ||
+        localizeDealText(deal.description, 'roman_ur'),
+      ur: deal.descriptionTranslations?.ur || localizeDealText(deal.description, 'ur'),
+      ar: deal.descriptionTranslations?.ar || localizeDealText(deal.description, 'ar'),
+    },
+  };
+}
+
 function isUniformDailySchedule(hours: SalonOperatingHours): boolean {
   if (hours.monThuClosed || hours.fridayClosed || hours.satSunClosed) return false;
   const sameOpen =
@@ -3166,7 +3329,8 @@ export function listSalonDeals(salonId: string, activeOnly = false): SalonDeal[]
   const nowMs = Date.now();
   return (store.deals || [])
     .filter((d) => d.salonId === salonId && (!activeOnly || isDealCurrentlyActive(d, nowMs)))
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .map((d) => enrichDealWithTranslations(d));
 }
 
 export function createSalonDeal(
@@ -3324,7 +3488,7 @@ export function getPublicDealPayload(
     address,
     googleMapsUrl,
     currencySymbol: settings.currencySymbol,
-    deal,
+    deal: enrichDealWithTranslations(deal),
     isExpired,
     videoPurged,
     retentionDaysAfterExpiry:
@@ -3828,7 +3992,8 @@ export function handleCustomerWhatsAppAction(input: {
           : activeLang === 'roman_ur'
           ? `Aakhri tareekh ${expDate}`
           : `Expires ${expDate}`;
-      return `• ${d.title} (${badge}) — ${expLabel}`;
+      const localizedDealTitle = d.titleTranslations?.[activeLang] || d.title;
+      return `• ${localizedDealTitle} (${badge}) — ${expLabel}`;
     });
     const prefix: Record<ClientPreferredLang, string> = {
       en: `${settings.salonName} — Active Deals & Offers:\n${dealLines.join('\n')}`,
