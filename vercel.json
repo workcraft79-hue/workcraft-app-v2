@@ -1,7 +1,20 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 30,
+      "includeFiles": "server/**"
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/daily-maintenance",
+      "schedule": "0 4 * * *"
+    }
+  ],
   "rewrites": [
-    { "source": "/robots.txt", "destination": "/api/robots" },
-    { "source": "/llms.txt", "destination": "/api/llms" },
-    { "source": "/((?!api/|assets/|icon\\.svg|manifest\\.json|apple-touch-icon\\.png|pwa-.*).*)", "destination": "/index.html" }
+    { "source": "/api/translate-voice", "destination": "/api/translate-voice" },
+    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/((?!api/|assets/|.*\\..*).*)", "destination": "/index.html" }
   ]
 }
