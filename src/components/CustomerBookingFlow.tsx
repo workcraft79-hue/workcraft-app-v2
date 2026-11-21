@@ -117,7 +117,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     changeBtn: 'Change',
     noSlotsForDate: 'No open slots left for this date & duration. Try another date.',
     closedOnDate: 'Salon is closed on this date.',
-    noBarberAtSlot: 'No barber is available at this arrival time. Please choose another time slot above.',
+    noBarberAtSlot: 'Everyone is booked at this exact time. Please pick another time slot above — a slot right before or after is usually open.',
     availableLabel: 'Available',
     freeShort: 'free',
     checkingSlots: 'Checking live salon slots...',
@@ -140,7 +140,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     errSelectSlotBarber: 'Please select an available date, arrival time, and barber.',
     errEnterName: 'Please enter your name before confirming.',
     demoHiddenBarberNote: (barber, slot) =>
-      `Demo note: ${barber} is marked busy at ${slot} and hidden from client view.`,
+      `${barber} is busy at ${slot}. You can pick another available stylist below, or choose an earlier or later time slot.`,
   },
   roman_ur: {
     flowTitle: 'Appointment Book Karein',
@@ -168,7 +168,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     changeBtn: 'Tabdeel',
     noSlotsForDate: 'Is tareekh par koi slot khali nahi. Doosri tareekh dekhein.',
     closedOnDate: 'Is din salon band hai.',
-    noBarberAtSlot: 'Is waqt koi barber farigh nahi hai. Upar se doosra waqt chunein.',
+    noBarberAtSlot: 'Is waqt tamam stylists masroof hain. Upar se thora aage ya peeche ka waqt chunein.',
     availableLabel: 'Available',
     freeShort: 'free',
     checkingSlots: 'Khali slots check ho rahe hain...',
@@ -191,7 +191,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     errSelectSlotBarber: 'Tareekh, waqt aur barber muntakhib karein.',
     errEnterName: 'Confirm karne se pehle apna naam likhein.',
     demoHiddenBarberNote: (barber, slot) =>
-      `Demo note: ${barber} ${slot} par masroof hai aur client screen se chhupa diya gaya hai.`,
+      `${barber} is waqt (${slot}) masroof hain. Aap neeche se kisi doosre stylist ko chunein ya time slot aage peeche kar lein.`,
   },
   ur: {
     flowTitle: 'اپائنٹمنٹ بک کریں',
@@ -219,7 +219,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     changeBtn: 'تبدیل کریں',
     noSlotsForDate: 'اس تاریخ پر کوئی وقت دستیاب نہیں۔ دوسری تاریخ منتخب کریں۔',
     closedOnDate: 'اس دن سیلون بند ہے۔',
-    noBarberAtSlot: 'اس وقت کوئی باربر دستیاب نہیں۔ براہ کرم اوپر سے دوسرا وقت منتخب کریں۔',
+    noBarberAtSlot: 'اس وقت تمام اسٹائلسٹ مصروف ہیں۔ براہِ کرم اوپر سے تھوڑا پہلے یا بعد کا وقت منتخب کریں۔',
     availableLabel: 'دستیاب',
     freeShort: 'دستیاب',
     checkingSlots: 'دستیاب اوقات چیک ہو رہے ہیں...',
@@ -242,7 +242,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     errSelectSlotBarber: 'براہ کرم دستیاب تاریخ، وقت اور باربر منتخب کریں۔',
     errEnterName: 'تصدیق سے پہلے اپنا نام درج کریں۔',
     demoHiddenBarberNote: (barber, slot) =>
-      `ڈیمو نوٹ: ${barber} (${slot}) مصروف ہے اور گاہک کی فہرست سے چھپایا گیا ہے۔`,
+      `${barber} اس وقت (${slot}) مصروف ہیں۔ آپ نیچے کسی دوسرے دستیاب اسٹائلسٹ کا انتخاب کر سکتے ہیں یا اپنا وقت تھوڑا آگے پیچھے کر لیں۔`,
   },
   ar: {
     flowTitle: 'حجز موعد',
@@ -270,7 +270,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     changeBtn: 'تعديل',
     noSlotsForDate: 'لا توجد أوقات متاحة لهذا التاريخ. اختر يوماً آخر.',
     closedOnDate: 'الصالون مغلق في هذا اليوم.',
-    noBarberAtSlot: 'لا يوجد حلاق متاح في هذا الوقت. يرجى اختيار وقت آخر أعلاه.',
+    noBarberAtSlot: 'جميع المصففين مشغولون في هذا الوقت. يرجى اختيار موعد آخر قبل أو بعد هذا الوقت أعلاه.',
     availableLabel: 'متاح',
     freeShort: 'متاح',
     checkingSlots: 'جاري فحص المواعيد المتاحة...',
@@ -293,7 +293,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     errSelectSlotBarber: 'يرجى اختيار التاريخ والوقت والحلاق المتاح.',
     errEnterName: 'يرجى إدخال اسمك قبل التأكيد.',
     demoHiddenBarberNote: (barber, slot) =>
-      `ملاحظة تجريبية: ${barber} غير متاح في ${slot} وتم إخفاؤه من قائمة العميل.`,
+      `${barber} مشغول في تمام الساعة ${slot}. يمكنك اختيار مصفف آخر متاح أدناه، أو تعديل وقت الحجز قبل أو بعد هذا الموعد.`,
   },
 };
 
@@ -560,6 +560,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
     setErrorMsg(null);
     setSelectedTimeSlot(slotTime);
     setServicesCollapsed(true);
+    setDateCollapsed(true);
     const slot = availability?.slots.find((s) => s.timeSlot === slotTime);
     if (slot) {
       const avail = slot.barbers.filter((b) => b.available);
@@ -669,19 +670,17 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
             : 'h-full'
         }`}
       >
-        {/* Top WhatsApp Flow Bar — WorkCraft Brand Mark always crisp in top-left corner */}
+        {/* Top WhatsApp Flow Bar — Larger Transparent WorkCraft Logo in top-left corner */}
         <header
           dir="ltr"
           className="sticky top-0 z-20 bg-[#202C33] border-b border-[#2A3942] px-3.5 py-2.5 flex items-center justify-between gap-2"
         >
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="size-8 rounded-lg bg-[#0D1117] border border-[#2A3942] p-1 flex items-center justify-center shrink-0">
-              <img
-                src={LOGO_URL}
-                alt="WorkCraft"
-                className="size-full object-contain"
-              />
-            </div>
+            <img
+              src={LOGO_URL}
+              alt="WorkCraft"
+              className="size-10 sm:size-11 bg-transparent object-contain shrink-0"
+            />
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#25D366]">
@@ -776,7 +775,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
               {confirmedResult.appliedDeal && (
                 <div className="rounded-xl bg-[#111B21] border border-[#2A3942] px-3 py-2 text-xs flex items-center justify-between">
                   <span className="text-[#25D366] font-semibold">
-                    {confirmedResult.appliedDeal.title}
+                    {activeDeal?.titleTranslations?.[activeLang] || confirmedResult.appliedDeal.title}
                   </span>
                   <span dir="ltr" className="font-mono text-[#25D366] tabular-nums">
                     -{config.currencySymbol}
@@ -876,7 +875,9 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                       <Tag className="size-3" />
                       <span>{copy.dealAppliedLabel}</span>
                     </span>
-                    <p className="text-xs font-bold text-[#E9EDEF]">{activeDeal.title}</p>
+                    <p className="text-xs font-bold text-[#E9EDEF]">
+                      {activeDeal.titleTranslations?.[activeLang] || activeDeal.title}
+                    </p>
                   </div>
                   {savings > 0 && (
                     <span dir="ltr" className="font-mono text-xs font-bold text-[#25D366] shrink-0 tabular-nums">
@@ -981,8 +982,8 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                     })}
                   </div>
 
-                  {/* Live Total Bar right under Services + Continue button */}
-                  <div className="rounded-xl border border-[#2A3942] bg-[#182229] p-3 space-y-2.5">
+                  {/* Live Total Bar right under Services (No redundant Continue button — clicking a Date below shrinks Services) */}
+                  <div className="rounded-xl border border-[#2A3942] bg-[#182229] p-3 space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-[#8696A0]">{copy.totalAmountLabel}</span>
                       <span dir="ltr" className="font-mono font-bold text-sm text-[#25D366] tabular-nums">
@@ -996,18 +997,11 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                         {totalDurationMins} {copy.minShort}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setServicesCollapsed(true)}
-                      className="w-full min-h-[38px] rounded-lg border border-[#25D366]/60 bg-[#0B2E1E] hover:bg-[#14532D] text-xs font-bold text-[#25D366] transition"
-                    >
-                      {copy.continueBtn} →
-                    </button>
                   </div>
                 </section>
               )}
 
-              {/* 2. Date Selection (Collapses cleanly into summary chip once picked) */}
+              {/* 2. Date Selection (Picking a date shrinks Services; picking a time slot shrinks Date) */}
               {dateCollapsed && selectedDate ? (
                 <div className="rounded-xl border border-[#14532D] bg-[#0B2E1E]/40 px-3.5 py-2.5 flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -1044,7 +1038,6 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                         setErrorMsg(null);
                         setSelectedDate(e.target.value);
                         setServicesCollapsed(true);
-                        setDateCollapsed(true);
                         setTimeCollapsed(false);
                       }}
                       className="min-h-[36px] rounded-lg border border-[#2A3942] bg-[#202C33] px-2.5 text-xs font-mono text-[#E9EDEF] focus:outline-none focus:border-[#25D366]"
@@ -1061,7 +1054,6 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                             setErrorMsg(null);
                             setSelectedDate(d.date);
                             setServicesCollapsed(true);
-                            setDateCollapsed(true);
                             setTimeCollapsed(false);
                           }}
                           className={`shrink-0 min-w-[78px] min-h-[54px] rounded-xl border px-2.5 py-1.5 flex flex-col items-center justify-center transition ${
@@ -1205,62 +1197,49 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                 </section>
               )}
 
-              {/* 5. Customer Name (ONLY if first time; returning client greeted by saved name; phone auto-detected inside WhatsApp) */}
-              <section className="space-y-2">
-                <h2 className="text-xs font-mono font-bold uppercase tracking-wide text-[#8696A0] flex items-center gap-1.5">
-                  <User className="size-3.5 text-[#25D366]" />
-                  <span>{copy.yourDetails}</span>
-                </h2>
-                <div className="rounded-xl border border-[#2A3942] bg-[#202C33] p-3.5 space-y-3">
-                  {effectiveSavedName ? (
-                    <div className="space-y-1.5 text-xs">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[#8696A0]">{copy.bookedForLabel}</span>
-                        <span className="font-bold text-[#25D366]">
-                          {copy.returningWelcome}, {effectiveSavedName}
+              {/* 5. Customer Name / Phone — Hidden completely for returning WhatsApp clients whose identity is already saved */}
+              {(!effectiveSavedName || standalone) && (
+                <section className="space-y-2">
+                  <h2 className="text-xs font-mono font-bold uppercase tracking-wide text-[#8696A0] flex items-center gap-1.5">
+                    <User className="size-3.5 text-[#25D366]" />
+                    <span>{copy.yourDetails}</span>
+                  </h2>
+                  <div className="rounded-xl border border-[#2A3942] bg-[#202C33] p-3.5 space-y-3">
+                    {!effectiveSavedName && (
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-mono text-[#8696A0]">
+                          {copy.yourNamePlaceholder} *
                         </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[#8696A0]">{copy.phoneRow}</span>
-                        <span dir="ltr" className="font-mono text-[#D1D7DB] tabular-nums">
-                          {clientPhone}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <label className="block space-y-1">
-                      <span className="text-[11px] font-mono text-[#8696A0]">
-                        {copy.yourNamePlaceholder} *
-                      </span>
-                      <input
-                        type="text"
-                        required
-                        value={clientNameInput}
-                        onChange={(e) => setClientNameInput(e.target.value)}
-                        placeholder={copy.yourNamePlaceholder}
-                        className="w-full min-h-[44px] rounded-xl border border-[#2A3942] bg-[#111B21] px-3 text-sm text-[#E9EDEF] placeholder:text-[#8696A0]/60 focus:outline-none focus:border-[#25D366]"
-                      />
-                    </label>
-                  )}
+                        <input
+                          type="text"
+                          required
+                          value={clientNameInput}
+                          onChange={(e) => setClientNameInput(e.target.value)}
+                          placeholder={copy.yourNamePlaceholder}
+                          className="w-full min-h-[44px] rounded-xl border border-[#2A3942] bg-[#111B21] px-3 text-sm text-[#E9EDEF] placeholder:text-[#8696A0]/60 focus:outline-none focus:border-[#25D366]"
+                        />
+                      </label>
+                    )}
 
-                  {standalone && (
-                    <label className="block space-y-1">
-                      <span className="text-[11px] font-mono text-[#8696A0]">
-                        {copy.yourPhoneLabel}
-                      </span>
-                      <input
-                        type="tel"
-                        dir="ltr"
-                        required
-                        value={clientPhone}
-                        onChange={(e) => setClientPhone(e.target.value)}
-                        placeholder="+92 300 1234567"
-                        className="w-full min-h-[44px] rounded-xl border border-[#2A3942] bg-[#111B21] px-3 text-sm font-mono text-[#E9EDEF] focus:outline-none focus:border-[#25D366]"
-                      />
-                    </label>
-                  )}
-                </div>
-              </section>
+                    {standalone && (
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-mono text-[#8696A0]">
+                          {copy.yourPhoneLabel}
+                        </span>
+                        <input
+                          type="tel"
+                          dir="ltr"
+                          required
+                          value={clientPhone}
+                          onChange={(e) => setClientPhone(e.target.value)}
+                          placeholder="+92 300 1234567"
+                          className="w-full min-h-[44px] rounded-xl border border-[#2A3942] bg-[#111B21] px-3 text-sm font-mono text-[#E9EDEF] focus:outline-none focus:border-[#25D366]"
+                        />
+                      </label>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {/* Final Summary Card — Includes Name & Phone, Separate Total Amount & Total Time, NO Pay-at-Salon note */}
               <section className="rounded-2xl border border-[#2A3942] bg-[#182229] p-3.5 space-y-2 text-xs">
