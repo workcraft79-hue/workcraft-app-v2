@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
   Calendar,
+  Check,
   Clock,
+  Copy,
   ExternalLink,
   Film,
   MapPin,
@@ -15,6 +17,7 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
+import { LOGO_URL } from '../data/portalData';
 import type {
   ClientPreferredLang,
   CustomerActionMessageResponse,
@@ -33,6 +36,7 @@ interface CustomerWhatsAppDemoModalProps {
 interface ChatBubbleItem {
   id: string;
   from: 'CUSTOMER' | 'SALON';
+  action?: CustomerMenuActionId | 'WELCOME';
   text: string;
   dir: 'ltr' | 'rtl';
   lang: ClientPreferredLang;
@@ -42,7 +46,54 @@ interface ChatBubbleItem {
   address?: string;
   googleMapsUrl?: string;
   deals?: CustomerActionMessageResponse['deals'];
+  showBookCta?: boolean;
+  bookCtaLabel?: string;
 }
+
+const DEMO_UI_LABELS: Record<
+  ClientPreferredLang,
+  {
+    mapsDirections: string;
+    copyBtn: string;
+    copiedBtn: string;
+    bookAppointment: string;
+    watchVideo: string;
+    bookDeal: string;
+  }
+> = {
+  en: {
+    mapsDirections: 'Google Maps Directions',
+    copyBtn: 'Copy',
+    copiedBtn: 'Copied',
+    bookAppointment: 'Book Appointment',
+    watchVideo: 'Watch Video',
+    bookDeal: 'Book Deal',
+  },
+  roman_ur: {
+    mapsDirections: 'Google Maps Directions',
+    copyBtn: 'Copy',
+    copiedBtn: 'Copied',
+    bookAppointment: 'Appointment Book Karein',
+    watchVideo: 'Video Dekhein',
+    bookDeal: 'Deal Book Karein',
+  },
+  ur: {
+    mapsDirections: 'گوگل میپس ڈائریکشنز',
+    copyBtn: 'کاپی',
+    copiedBtn: 'کاپی ہو گیا',
+    bookAppointment: 'اپائنٹمنٹ بک کریں',
+    watchVideo: 'ویڈیو دیکھیں',
+    bookDeal: 'ڈیل بک کریں',
+  },
+  ar: {
+    mapsDirections: 'اتجاهات خرائط جوجل',
+    copyBtn: 'نسخ',
+    copiedBtn: 'تم النسخ',
+    bookAppointment: 'احجز موعداً',
+    watchVideo: 'شاهد الفيديو',
+    bookDeal: 'احجز العرض',
+  },
+};
 
 export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps> = ({
   salonId,
@@ -56,25 +107,68 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
   const [simulateBusyBarber, setSimulateBusyBarber] = useState<string>('');
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState<ChatBubbleItem[]>([]);
+  const [copiedBubbleId, setCopiedBubbleId] = useState<string | null>(null);
   const [activeSheet, setActiveSheet] = useState<
     | null
     | { kind: 'FLOW'; dealId?: string | null }
     | { kind: 'DEAL'; dealId: string }
   >(null);
 
-  const loadConfigAndStartHi = async (langOverride?: ClientPreferredLang) => {
+  const getDemoClientIdentity = (
+    mode: 'NEW' | 'SAVED',
+    cfg?: CustomerExperienceConfig | null
+  ) => {
+    if (mode === 'SAVED') {
+      return {
+        fromPhone: '+92 300 1234567',
+        clientName: cfg?.customerProfile?.savedName || 'Bilal Ahmed',
+      };
+    }
+    return {
+      fromPhone: '+92 300 0009999',
+      clientName: '',
+    };
+  };
+
+  const handleCopyText = async (bubbleId: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedBubbleId(bubbleId);
+      setTimeout(() => {
+        setCopiedBubbleId((prev) => (prev === bubbleId ? null : prev));
+      }, 2200);
+    } catch {
+      // Fallback ignored inside restricted sandbox
+    }
+  };
+
+  const loadConfigAndStartHi = async (
+    langOverride?: ClientPreferredLang,
+    modeOverride?: 'NEW' | 'SAVED'
+  ) => {
     setLoading(true);
     setActiveSheet(null);
     const chosenLang = langOverride || activeLang || 'en';
+    const useMode = modeOverride || customerMode;
+    const identity = getDemoClientIdentity(useMode, config);
     try {
       const cfgRes = await fetch(
-        `/api/public/salons/${encodeURIComponent(salonId)}/customer-experience?lang=${encodeURIComponent(chosenLang)}`
+        `/api/public/salons/${encodeURIComponent(salonId)}/customer-experience?lang=${encodeURIComponent(
+          chosenLang
+        )}&clientPhone=${encodeURIComponent(identity.fromPhone)}`
       );
+      let loadedCfg = config;
       if (cfgRes.ok) {
         const cfgData = (await cfgRes.json()) as CustomerExperienceConfig;
+        loadedCfg = cfgData;
         setConfig(cfgData);
+        const allowedLangs = (cfgData.availableLanguages || []).map((l) => l.lang);
+        if (allowedLangs.length > 0 && !allowedLangs.includes(chosenLang)) {
+          setActiveLang('en');
+        }
       }
 
+      const finalIdentity = getDemoClientIdentity(useMode, loadedCfg);
       const hiRes = await fetch(
         `/api/public/salons/${encodeURIComponent(salonId)}/customer-message`,
         {
@@ -84,23 +178,27 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
             actionId: 'WELCOME',
             messageText: 'Hi',
             preferredLang: chosenLang,
+            fromPhone: finalIdentity.fromPhone,
+            clientName: finalIdentity.clientName,
             isDemo: true,
           }),
         }
       );
       if (hiRes.ok) {
         const welcomeData = (await hiRes.json()) as CustomerActionMessageResponse;
+        setActiveLang(welcomeData.language);
         setMessages([
           {
             id: `c-hi-${Date.now()}`,
             from: 'CUSTOMER',
             text: 'Hi',
             dir: 'ltr',
-            lang: chosenLang,
+            lang: welcomeData.language,
           },
           {
-            id: `s-welcome-${Date.now()}`,
+            id: `s-welcome-${Date.now() + 1}`,
             from: 'SALON',
+            action: welcomeData.action,
             text: welcomeData.text,
             dir: welcomeData.dir,
             lang: welcomeData.language,
@@ -116,10 +214,16 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
   useEffect(() => {
     if (!isOpen) return;
     setActiveLang('en');
-    void loadConfigAndStartHi('en');
+    void loadConfigAndStartHi('en', customerMode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, salonId]);
 
   if (!isOpen) return null;
+
+  const handleModeSwitch = (nextMode: 'NEW' | 'SAVED') => {
+    setCustomerMode(nextMode);
+    void loadConfigAndStartHi(activeLang, nextMode);
+  };
 
   const triggerOption = async (
     actionId: CustomerMenuActionId,
@@ -142,6 +246,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
       return;
     }
 
+    const identity = getDemoClientIdentity(customerMode, config);
     const res = await fetch(
       `/api/public/salons/${encodeURIComponent(salonId)}/customer-message`,
       {
@@ -150,6 +255,8 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
         body: JSON.stringify({
           actionId,
           preferredLang: useLang,
+          fromPhone: identity.fromPhone,
+          clientName: identity.clientName,
           isDemo: true,
         }),
       }
@@ -168,6 +275,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
       {
         id: `s-act-${Date.now() + 1}`,
         from: 'SALON',
+        action: data.action,
         text: data.text,
         dir: data.dir,
         lang: data.language,
@@ -176,12 +284,15 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
         address: data.address,
         googleMapsUrl: data.googleMapsUrl,
         deals: data.deals,
+        showBookCta: data.showBookCta,
+        bookCtaLabel: data.bookCtaLabel,
       },
     ]);
   };
 
   const handleLanguageChange = async (nextLang: ClientPreferredLang) => {
     setActiveLang(nextLang);
+    const identity = getDemoClientIdentity(customerMode, config);
     const res = await fetch(
       `/api/public/salons/${encodeURIComponent(salonId)}/customer-message`,
       {
@@ -190,6 +301,8 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
         body: JSON.stringify({
           actionId: 'WELCOME',
           preferredLang: nextLang,
+          fromPhone: identity.fromPhone,
+          clientName: identity.clientName,
           isDemo: true,
         }),
       }
@@ -216,6 +329,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
     const text = chatInput.trim();
     if (!text) return;
     setChatInput('');
+    const identity = getDemoClientIdentity(customerMode, config);
     const res = await fetch(
       `/api/public/salons/${encodeURIComponent(salonId)}/customer-message`,
       {
@@ -224,6 +338,8 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
         body: JSON.stringify({
           messageText: text,
           preferredLang: activeLang,
+          fromPhone: identity.fromPhone,
+          clientName: identity.clientName,
           isDemo: true,
         }),
       }
@@ -236,6 +352,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
       {
         id: `s-txt-${Date.now() + 1}`,
         from: 'SALON',
+        action: data.action,
         text: data.text,
         dir: data.dir,
         lang: data.language,
@@ -245,6 +362,8 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
         address: data.address,
         googleMapsUrl: data.googleMapsUrl,
         deals: data.deals,
+        showBookCta: data.showBookCta,
+        bookCtaLabel: data.bookCtaLabel,
       },
     ]);
     if (data.openBookingFlow) {
@@ -264,8 +383,18 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
         {/* Top Bar */}
         <header className="px-4 sm:px-6 py-3.5 border-b border-[#30363D] bg-[#0D1117] flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <MessageSquare className="size-4 text-[#25D366]" />
+            <div className="flex items-center gap-2.5">
+              <div
+                dir="ltr"
+                className="h-7 px-2 rounded-lg bg-[#161B22] border border-[#30363D] flex items-center justify-center shrink-0"
+              >
+                <img
+                  src={LOGO_URL}
+                  alt="WorkCraft"
+                  className="h-4 w-auto object-contain"
+                />
+              </div>
+              <MessageSquare className="size-4 text-[#25D366] shrink-0" />
               <h2 className="text-sm sm:text-base font-black text-[#F0F6FC]">
                 Customer WhatsApp Experience — Live Demo
               </h2>
@@ -304,7 +433,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
                 <div className="grid grid-cols-1 gap-1.5">
                   <button
                     type="button"
-                    onClick={() => setCustomerMode('NEW')}
+                    onClick={() => handleModeSwitch('NEW')}
                     className={`min-h-[42px] rounded-xl border px-3 py-2 text-xs font-semibold flex items-center gap-2 transition ${
                       customerMode === 'NEW'
                         ? 'border-[#25D366] bg-[#0B2E1E] text-[#F0F6FC]'
@@ -316,7 +445,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCustomerMode('SAVED')}
+                    onClick={() => handleModeSwitch('SAVED')}
                     className={`min-h-[42px] rounded-xl border px-3 py-2 text-xs font-semibold flex items-center gap-2 transition ${
                       customerMode === 'SAVED'
                         ? 'border-[#25D366] bg-[#0B2E1E] text-[#F0F6FC]'
@@ -349,7 +478,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
                   </select>
                 </label>
                 <p className="text-[11px] text-[#8B949E] leading-snug">
-                  When selected, that barber appears disabled inside the Flow with a live busy reason.
+                  When selected, that barber is hidden at busy times inside the Flow so only free barbers appear in green.
                 </p>
               </div>
 
@@ -357,7 +486,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
               <div className="pt-1 border-t border-[#21262D] space-y-2">
                 <button
                   type="button"
-                  onClick={() => void loadConfigAndStartHi('en')}
+                  onClick={() => void loadConfigAndStartHi(activeLang, customerMode)}
                   className="w-full min-h-[42px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] text-xs font-mono font-bold text-[#06B6D4] flex items-center justify-center gap-2 transition"
                 >
                   <RotateCcw className="size-3.5" />
@@ -378,22 +507,29 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
           {/* Right: Mobile WhatsApp Thread + Embedded Flow / Deal Overlay */}
           <div className="flex justify-center">
             <div className="w-full max-w-md h-[640px] rounded-3xl border-2 border-[#2A3942] bg-[#0B141A] flex flex-col overflow-hidden relative shadow-2xl">
-              {/* Phone WhatsApp Top Bar */}
-              <div className="bg-[#202C33] border-b border-[#2A3942] px-4 py-3 flex items-center justify-between gap-2 shrink-0">
+              {/* Phone WhatsApp Top Bar with Top-Left WorkCraft Logo Badge */}
+              <div
+                dir="ltr"
+                className="bg-[#202C33] border-b border-[#2A3942] px-3.5 py-3 flex items-center justify-between gap-2 shrink-0"
+              >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="size-9 rounded-full bg-[#25D366] text-[#0B141A] font-black text-xs grid place-items-center shrink-0">
-                    {(config?.salonName || 'S').slice(0, 2).toUpperCase()}
+                  <div className="h-8 px-2 rounded-lg bg-[#0B141A] border border-[#2A3942] flex items-center justify-center shrink-0">
+                    <img
+                      src={LOGO_URL}
+                      alt="WorkCraft"
+                      className="h-4 w-auto object-contain"
+                    />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-[#E9EDEF] truncate">
                       {config?.salonName || 'Salon WhatsApp'}
                     </p>
                     <p className="text-[10px] font-mono text-[#25D366]">
-                      Official Demo · {activeLang.toUpperCase()}
+                      Official Demo · {activeLang.toUpperCase()} · {customerMode === 'SAVED' ? 'Returning' : 'New'}
                     </p>
                   </div>
                 </div>
-                <span className="rounded-md bg-[#111B21] border border-[#2A3942] px-2 py-0.5 text-[10px] font-mono text-[#FBBF24]">
+                <span className="rounded-md bg-[#111B21] border border-[#2A3942] px-2 py-0.5 text-[10px] font-mono text-[#FBBF24] shrink-0">
                   DEMO
                 </span>
               </div>
@@ -405,118 +541,171 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
                     Loading WhatsApp preview...
                   </div>
                 ) : (
-                  messages.map((m) => (
-                    <div
-                      key={m.id}
-                      className={`flex ${m.from === 'CUSTOMER' ? 'justify-end' : 'justify-start'}`}
-                    >
+                  messages.map((m) => {
+                    const labels = DEMO_UI_LABELS[m.lang] || DEMO_UI_LABELS.en;
+                    const shouldShowBookCta =
+                      m.showBookCta ||
+                      m.action === 'SERVICES_PRICES' ||
+                      m.action === 'HOURS_LOCATION';
+                    return (
                       <div
-                        dir={m.dir}
-                        className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-xs space-y-2.5 shadow ${
-                          m.from === 'CUSTOMER'
-                            ? 'bg-[#005C4B] text-[#E9EDEF] rounded-br-sm'
-                            : 'bg-[#202C33] text-[#E9EDEF] rounded-bl-sm border border-[#2A3942]'
-                        }`}
+                        key={m.id}
+                        className={`flex ${m.from === 'CUSTOMER' ? 'justify-end' : 'justify-start'}`}
                       >
-                        <p className="whitespace-pre-line leading-relaxed">{m.text}</p>
+                        <div
+                          dir={m.dir}
+                          className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-xs space-y-2.5 shadow ${
+                            m.from === 'CUSTOMER'
+                              ? 'bg-[#005C4B] text-[#E9EDEF] rounded-br-sm'
+                              : 'bg-[#202C33] text-[#E9EDEF] rounded-bl-sm border border-[#2A3942]'
+                          }`}
+                        >
+                          <p className="whitespace-pre-line leading-relaxed">{m.text}</p>
 
-                        {/* Single Welcome Message Language Selector + 4 Interactive Options */}
-                        {m.welcome && (
-                          <div className="space-y-2 pt-1 border-t border-[#2A3942]">
-                            <div className="flex flex-wrap gap-1.5" dir="ltr">
-                              {m.welcome.availableLanguages.map((langOpt) => (
-                                <button
-                                  key={langOpt.lang}
-                                  type="button"
-                                  onClick={() => void handleLanguageChange(langOpt.lang)}
-                                  className={`min-h-[30px] rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
-                                    activeLang === langOpt.lang
-                                      ? 'border-[#25D366] bg-[#0B2E1E] text-[#25D366]'
-                                      : 'border-[#2A3942] bg-[#111B21] text-[#D1D7DB] hover:border-[#8696A0]'
-                                  }`}
-                                >
-                                  {langOpt.nativeLabel}
-                                </button>
-                              ))}
-                            </div>
-
-                            <div className="grid grid-cols-1 gap-1.5">
-                              {m.welcome.options.map((opt) => (
-                                <button
-                                  key={opt.id}
-                                  type="button"
-                                  onClick={() => void triggerOption(opt.id, opt.label)}
-                                  className="min-h-[40px] w-full rounded-xl border border-[#2A3942] bg-[#111B21] hover:border-[#25D366] hover:bg-[#0B2E1E]/50 px-3 text-xs font-semibold text-[#53BDEB] flex items-center justify-between gap-2 transition"
-                                >
-                                  <span>{opt.label}</span>
-                                  {opt.id === 'BOOK_APPOINTMENT' ? (
-                                    <Calendar className="size-3.5 text-[#25D366] shrink-0" />
-                                  ) : opt.id === 'SERVICES_PRICES' ? (
-                                    <Scissors className="size-3.5 text-[#8696A0] shrink-0" />
-                                  ) : opt.id === 'HOURS_LOCATION' ? (
-                                    <Clock className="size-3.5 text-[#8696A0] shrink-0" />
-                                  ) : (
-                                    <Tag className="size-3.5 text-[#FBBF24] shrink-0" />
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Google Maps quick button for Hours & Location */}
-                        {m.googleMapsUrl && (
-                          <a
-                            href={m.googleMapsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="min-h-[38px] rounded-xl border border-[#2A3942] bg-[#111B21] px-3 text-[11px] font-semibold text-[#53BDEB] flex items-center justify-center gap-1.5"
-                          >
-                            <MapPin className="size-3.5 text-[#25D366]" />
-                            <span>Open Google Maps</span>
-                            <ExternalLink className="size-3" />
-                          </a>
-                        )}
-
-                        {/* Active Deals Interactive Video Page Buttons */}
-                        {m.deals && m.deals.length > 0 && (
-                          <div className="space-y-1.5 pt-1 border-t border-[#2A3942]">
-                            {m.deals.map((deal) => (
-                              <div
-                                key={deal.id}
-                                className="rounded-xl border border-[#2A3942] bg-[#111B21] p-2.5 space-y-1.5"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-bold text-[#E9EDEF]">{deal.title}</span>
-                                </div>
-                                <div className="flex gap-1.5">
+                          {/* Single Welcome Message Language Selector + 4 Interactive Options */}
+                          {m.welcome && (
+                            <div className="space-y-2 pt-1 border-t border-[#2A3942]">
+                              <div className="flex flex-wrap gap-1.5" dir="ltr">
+                                {m.welcome.availableLanguages.map((langOpt) => (
                                   <button
+                                    key={langOpt.lang}
                                     type="button"
-                                    onClick={() => setActiveSheet({ kind: 'DEAL', dealId: deal.id })}
-                                    className="flex-1 min-h-[36px] rounded-lg border border-[#2A3942] bg-[#202C33] hover:border-[#53BDEB] px-2.5 text-[11px] font-semibold text-[#53BDEB] flex items-center justify-center gap-1.5"
+                                    onClick={() => void handleLanguageChange(langOpt.lang)}
+                                    className={`min-h-[30px] rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
+                                      activeLang === langOpt.lang
+                                        ? 'border-[#25D366] bg-[#0B2E1E] text-[#25D366]'
+                                        : 'border-[#2A3942] bg-[#111B21] text-[#D1D7DB] hover:border-[#8696A0]'
+                                    }`}
                                   >
-                                    <Film className="size-3.5" />
-                                    <span>View Offer &amp; Video</span>
+                                    {langOpt.nativeLabel}
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveSheet({ kind: 'FLOW', dealId: deal.id })}
-                                    className="min-h-[36px] rounded-lg bg-[#25D366] text-[#0B141A] px-2.5 text-[11px] font-bold"
-                                  >
-                                    Book Deal
-                                  </button>
-                                </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
-                        )}
+
+                              <div className="grid grid-cols-1 gap-1.5">
+                                {m.welcome.options.map((opt) => (
+                                  <button
+                                    key={opt.id}
+                                    type="button"
+                                    onClick={() => void triggerOption(opt.id, opt.label)}
+                                    className="min-h-[40px] w-full rounded-xl border border-[#2A3942] bg-[#111B21] hover:border-[#25D366] hover:bg-[#0B2E1E]/50 px-3 text-xs font-semibold text-[#53BDEB] flex items-center justify-between gap-2 transition"
+                                  >
+                                    <span>{opt.label}</span>
+                                    {opt.id === 'BOOK_APPOINTMENT' ? (
+                                      <Calendar className="size-3.5 text-[#25D366] shrink-0" />
+                                    ) : opt.id === 'SERVICES_PRICES' ? (
+                                      <Scissors className="size-3.5 text-[#8696A0] shrink-0" />
+                                    ) : opt.id === 'HOURS_LOCATION' ? (
+                                      <Clock className="size-3.5 text-[#8696A0] shrink-0" />
+                                    ) : (
+                                      <Tag className="size-3.5 text-[#FBBF24] shrink-0" />
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Google Maps Directions + Small Copy Button (Query 8) */}
+                          {m.googleMapsUrl && (
+                            <div className="flex items-center gap-1.5 pt-0.5">
+                              <a
+                                href={m.googleMapsUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 min-h-[38px] rounded-xl border border-[#2A3942] bg-[#111B21] hover:border-[#25D366] px-3 text-[11px] font-semibold text-[#53BDEB] flex items-center justify-center gap-1.5 transition"
+                              >
+                                <MapPin className="size-3.5 text-[#25D366] shrink-0" />
+                                <span>{labels.mapsDirections}</span>
+                                <ExternalLink className="size-3 shrink-0" />
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => void handleCopyText(m.id, m.googleMapsUrl || '')}
+                                className="min-h-[38px] rounded-xl border border-[#2A3942] bg-[#111B21] hover:border-[#53BDEB] px-2.5 text-[11px] font-semibold text-[#D1D7DB] flex items-center gap-1 shrink-0 transition"
+                              >
+                                {copiedBubbleId === m.id ? (
+                                  <>
+                                    <Check className="size-3.5 text-[#25D366]" />
+                                    <span className="text-[#25D366]">{labels.copiedBtn}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="size-3.5 text-[#8696A0]" />
+                                    <span>{labels.copyBtn}</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Active Deals: Text-first card + Conditional Watch Video only if uploaded (Query 10) */}
+                          {m.deals && m.deals.length > 0 && (
+                            <div className="space-y-1.5 pt-1 border-t border-[#2A3942]">
+                              {m.deals.map((deal) => {
+                                const hasVideo = Boolean(deal.videoUrl && !deal.videoDeletedAt);
+                                return (
+                                  <div
+                                    key={deal.id}
+                                    className="rounded-xl border border-[#2A3942] bg-[#111B21] p-2.5 space-y-2"
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <span className="font-bold text-[#E9EDEF]">{deal.title}</span>
+                                    </div>
+                                    {deal.description && (
+                                      <p className="text-[11px] text-[#8696A0] leading-snug">
+                                        {deal.description}
+                                      </p>
+                                    )}
+                                    <div className="flex gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setActiveSheet({ kind: 'FLOW', dealId: deal.id })
+                                        }
+                                        className="flex-1 min-h-[36px] rounded-lg bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-2.5 text-[11px] font-bold flex items-center justify-center gap-1 transition"
+                                      >
+                                        <Calendar className="size-3.5" />
+                                        <span>{labels.bookDeal}</span>
+                                      </button>
+                                      {hasVideo && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setActiveSheet({ kind: 'DEAL', dealId: deal.id })
+                                          }
+                                          className="min-h-[36px] rounded-lg border border-[#2A3942] bg-[#202C33] hover:border-[#53BDEB] px-2.5 text-[11px] font-semibold text-[#53BDEB] flex items-center justify-center gap-1.5 transition"
+                                        >
+                                          <Film className="size-3.5" />
+                                          <span>{labels.watchVideo}</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Book Appointment CTA inside Services & Hours Replies (Query 9) */}
+                          {shouldShowBookCta && (
+                            <button
+                              type="button"
+                              onClick={() => setActiveSheet({ kind: 'FLOW', dealId: null })}
+                              className="w-full min-h-[38px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-3 text-xs font-bold flex items-center justify-center gap-1.5 transition"
+                            >
+                              <Calendar className="size-3.5" />
+                              <span>{m.bookCtaLabel || labels.bookAppointment}</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 
-              {/* Composer Bar */}
+              {/* Composer Bar (Text-only per Query 11) */}
               <form
                 onSubmit={handleSendText}
                 className="bg-[#202C33] border-t border-[#2A3942] p-2.5 flex items-center gap-2 shrink-0"
@@ -577,3 +766,4 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
     </div>
   );
 };
+
