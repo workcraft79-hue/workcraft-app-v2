@@ -179,11 +179,25 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
 
   const { deal, isExpired, videoPurged } = payload;
   const hasActiveVideo = Boolean(deal.videoUrl && !videoPurged);
+  const localizedDealTitle = deal.titleTranslations?.[lang] || deal.title;
+  const localizedDealDesc = deal.descriptionTranslations?.[lang] || deal.description;
   const discountSummary =
     deal.discountType === 'PCT'
-      ? `${deal.discountValue}% OFF`
+      ? lang === 'ur'
+        ? `${deal.discountValue}% رعایت`
+        : lang === 'ar'
+        ? `خصم ${deal.discountValue}%`
+        : `${deal.discountValue}% OFF`
       : deal.discountType === 'FIXED'
-      ? `${payload.currencySymbol}${deal.discountValue.toLocaleString()} OFF`
+      ? lang === 'ur'
+        ? `${payload.currencySymbol}${deal.discountValue.toLocaleString()} رعایت`
+        : lang === 'ar'
+        ? `خصم ${payload.currencySymbol}${deal.discountValue.toLocaleString()}`
+        : `${payload.currencySymbol}${deal.discountValue.toLocaleString()} OFF`
+      : lang === 'ur'
+      ? `پیکیج ${payload.currencySymbol}${deal.discountValue.toLocaleString()}`
+      : lang === 'ar'
+      ? `باقة ${payload.currencySymbol}${deal.discountValue.toLocaleString()}`
       : `Bundle ${payload.currencySymbol}${deal.discountValue.toLocaleString()}`;
 
   const handleCopyMaps = async () => {
@@ -202,19 +216,17 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
       className="min-h-screen bg-[#0B141A] text-[#E9EDEF] flex flex-col items-center sm:py-6 sm:px-4"
     >
       <div className="w-full max-w-md bg-[#111B21] min-h-screen sm:min-h-0 sm:rounded-3xl sm:border sm:border-[#222E35] sm:shadow-2xl overflow-hidden flex flex-col">
-        {/* Top-Left Crisp WorkCraft Brand Header (Query 6) */}
+        {/* Top-Left Crisp Transparent WorkCraft Logo Header */}
         <header
           dir="ltr"
-          className="bg-[#202C33] border-b border-[#2A3942] px-4 py-3 flex items-center justify-between gap-2.5"
+          className="bg-[#202C33] border-b border-[#2A3942] px-3.5 py-2.5 flex items-center justify-between gap-2.5"
         >
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="h-8 px-2 rounded-lg bg-[#0B141A] border border-[#2A3942] flex items-center justify-center shrink-0">
-              <img
-                src={LOGO_URL}
-                alt="WorkCraft"
-                className="h-4 w-auto object-contain"
-              />
-            </div>
+            <img
+              src={LOGO_URL}
+              alt="WorkCraft"
+              className="size-10 sm:size-11 bg-transparent object-contain shrink-0"
+            />
             <div className="min-w-0">
               <span
                 className={`text-[10px] font-mono font-bold uppercase tracking-wider block ${
@@ -278,7 +290,7 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
           {/* Deal Details */}
           <div className="rounded-2xl border border-[#2A3942] bg-[#202C33] p-4 space-y-3">
             <div className="flex items-start justify-between gap-2">
-              <h2 className="text-lg font-bold text-[#E9EDEF] leading-snug">{deal.title}</h2>
+              <h2 className="text-lg font-bold text-[#E9EDEF] leading-snug">{localizedDealTitle}</h2>
               <span
                 dir="ltr"
                 className="rounded-lg bg-[#0B2E1E] border border-[#14532D] px-2.5 py-1 text-xs font-mono font-bold text-[#25D366] shrink-0"
@@ -287,8 +299,8 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
               </span>
             </div>
 
-            {deal.description && (
-              <p className="text-xs text-[#D1D7DB] leading-relaxed">{deal.description}</p>
+            {localizedDealDesc && (
+              <p className="text-xs text-[#D1D7DB] leading-relaxed">{localizedDealDesc}</p>
             )}
 
             <div className="flex items-center gap-2 text-xs font-mono text-[#FBBF24] pt-1">
