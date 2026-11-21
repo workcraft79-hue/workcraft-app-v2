@@ -765,6 +765,8 @@ const REGION_CONFIGS: Record<
 };
 
 export const SERVICE_TRANSLATIONS: Record<string, { ur: string; ar: string }> = {
+  'Master Haircut': { ur: 'ماسٹر ہیئر کٹ', ar: 'قص شعر احترافي' },
+  'Skin Fade': { ur: 'اسکن فیڈ', ar: 'تدريج الشعر' },
   'Master Haircut & Skin Fade': { ur: 'ماسٹر ہیئر کٹ اور سکن فیڈ', ar: 'قص شعر متطور وتدرج دقيق' },
   'Royal Beard Sculpt & Ozone Steam': { ur: 'رائل بیئرڈ ڈیزائن اور اوزون اسٹیم', ar: 'تحديد وتشذيب اللحية مع البخار الملكي' },
   'Classic Beard Trim & Sculpt': { ur: 'کلاسک داڑھی ٹرم اور سیٹنگ', ar: 'تشذيب وتحديد اللحية الكلاسيكي' },
@@ -3603,7 +3605,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       ];
     }
     return [
-      { id: 's1', name: 'Master Haircut & Skin Fade', durationMins: 40, price: 800, active: true },
+      { id: 's1', name: 'Master Haircut', durationMins: 35, price: 600, active: true },
+      { id: 's1b', name: 'Skin Fade', durationMins: 30, price: 500, active: true },
       { id: 's2', name: 'Classic Beard Trim & Sculpt', durationMins: 25, price: 400, active: true },
       { id: 's3', name: 'Hot Towel Steam Shave', durationMins: 25, price: 500, active: true },
       { id: 's4', name: 'Hair Color & Camo', durationMins: 45, price: 1500, active: true },
@@ -7485,9 +7488,31 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               kicker={ui.salonHoursKicker}
             >
               <form onSubmit={handleSaveSalonHours} className="space-y-4">
-                <p className="text-xs text-[#8B949E] font-sans">
-                  {ui.salonHoursDesc}
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-[#8B949E] font-sans">
+                    {ui.salonHoursDesc}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSalonHours((prev) => ({
+                        ...prev,
+                        monThuClosed: false,
+                        fridayClosed: false,
+                        satSunClosed: false,
+                        fridayOpen: prev.monThuOpen,
+                        fridayClose: prev.monThuClose,
+                        satSunOpen: prev.monThuOpen,
+                        satSunClose: prev.monThuClose,
+                        fridayBreakStart: '',
+                        fridayBreakEnd: '',
+                      }))
+                    }
+                    className="min-h-[38px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-3 text-[11px] font-mono font-bold text-[#06B6D4] transition shrink-0"
+                  >
+                    Same Hours Mon–Sun (No Friday Break)
+                  </button>
+                </div>
 
                 {/* Monday - Thursday */}
                 <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-4 space-y-3">
