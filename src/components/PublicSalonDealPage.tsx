@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   CalendarClock,
+  Check,
+  Copy,
   ExternalLink,
   Film,
   MapPin,
@@ -9,6 +11,7 @@ import {
   Tag,
   X,
 } from 'lucide-react';
+import { LOGO_URL } from '../data/portalData';
 import type { ClientPreferredLang, PublicDealPageResponse } from '../types/concierge';
 import { CustomerBookingFlow } from './CustomerBookingFlow';
 
@@ -32,8 +35,10 @@ const DEAL_COPY: Record<
     bookRegularBtn: string;
     expiredNotice: string;
     purgedVideoNotice: string;
-    noVideoNotice: string;
     openMapsBtn: string;
+    copyBtn: string;
+    copiedBtn: string;
+    minUnit: string;
   }
 > = {
   en: {
@@ -45,20 +50,24 @@ const DEAL_COPY: Record<
     bookRegularBtn: 'Book Regular Services Instead',
     expiredNotice: 'This promotional deal has expired and is no longer available for booking.',
     purgedVideoNotice: 'Promotional video was automatically deleted after the configured retention period.',
-    noVideoNotice: 'Promotional video will appear here once uploaded by the salon.',
-    openMapsBtn: 'Google Maps',
+    openMapsBtn: 'Google Maps Directions',
+    copyBtn: 'Copy',
+    copiedBtn: 'Copied',
+    minUnit: 'min',
   },
   roman_ur: {
     activeDealBadge: 'ACTIVE SALON OFFER',
     expiredDealBadge: 'OFFER KHATAM HO GAYI',
     expiresLabel: 'Aakhri Tareekh',
     includedServices: 'Shamil Services',
-    bookDealBtn: 'Book This Deal',
+    bookDealBtn: 'Yeh Deal Book Karein',
     bookRegularBtn: 'Regular Services Book Karein',
     expiredNotice: 'Yeh deal khatam ho chuki hai aur ab book nahi ki ja sakti.',
     purgedVideoNotice: 'Promo video retention muddat mukammal hone par khud-ba-khud delete kar di gayi hai.',
-    noVideoNotice: 'Salon jab promo video upload karega to woh yahan nazar aayegi.',
-    openMapsBtn: 'Google Maps',
+    openMapsBtn: 'Google Maps Directions',
+    copyBtn: 'Copy',
+    copiedBtn: 'Copied',
+    minUnit: 'min',
   },
   ur: {
     activeDealBadge: 'فعال سیلون آفر',
@@ -69,8 +78,10 @@ const DEAL_COPY: Record<
     bookRegularBtn: 'معمول کی سروسز بک کریں',
     expiredNotice: 'یہ پروموشنل ڈیل ختم ہو چکی ہے اور اب بکنگ کے لیے دستیاب نہیں ہے۔',
     purgedVideoNotice: 'مقررہ مدت پوری ہونے پر پروموشنل ویڈیو خودکار طریقے سے حذف کر دی گئی ہے۔',
-    noVideoNotice: 'سیلون کی جانب سے ویڈیو اپ لوڈ ہونے پر یہاں نظر آئے گی۔',
-    openMapsBtn: 'گوگل میپس',
+    openMapsBtn: 'گوگل میپس ڈائریکشنز',
+    copyBtn: 'کاپی',
+    copiedBtn: 'کاپی ہو گیا',
+    minUnit: 'منٹ',
   },
   ar: {
     activeDealBadge: 'عرض ساري حالياً',
@@ -81,8 +92,10 @@ const DEAL_COPY: Record<
     bookRegularBtn: 'احجز الخدمات الاعتيادية',
     expiredNotice: 'انتهت صلاحية هذا العرض ولم يعد متاحاً للحجز.',
     purgedVideoNotice: 'تم حذف الفيديو الترويجي تلقائياً بعد انتهاء مدة الاحتفاظ المحددة.',
-    noVideoNotice: 'سيظهر الفيديو الترويجي هنا عند رفعه من الصالون.',
-    openMapsBtn: 'خرائط جوجل',
+    openMapsBtn: 'اتجاهات خرائط جوجل',
+    copyBtn: 'نسخ',
+    copiedBtn: 'تم النسخ',
+    minUnit: 'دقيقة',
   },
 };
 
@@ -99,6 +112,7 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [lang, setLang] = useState<ClientPreferredLang>(initialLang);
   const [showFlow, setShowFlow] = useState(false);
+  const [copiedMaps, setCopiedMaps] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,7 +123,13 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
     )
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Deal not found'))))
       .then((data: PublicDealPageResponse) => {
-        if (!cancelled) setPayload(data);
+        if (!cancelled) {
+          setPayload(data);
+          const allowed = data.availableLanguages.map((l) => l.lang);
+          if (!allowed.includes(lang)) {
+            setLang('en');
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setError('This deal could not be found.');
@@ -158,6 +178,7 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
   }
 
   const { deal, isExpired, videoPurged } = payload;
+  const hasActiveVideo = Boolean(deal.videoUrl && !videoPurged);
   const discountSummary =
     deal.discountType === 'PCT'
       ? `${deal.discountValue}% OFF`
@@ -165,23 +186,45 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
       ? `${payload.currencySymbol}${deal.discountValue.toLocaleString()} OFF`
       : `Bundle ${payload.currencySymbol}${deal.discountValue.toLocaleString()}`;
 
+  const handleCopyMaps = async () => {
+    try {
+      await navigator.clipboard.writeText(payload.googleMapsUrl);
+      setCopiedMaps(true);
+      setTimeout(() => setCopiedMaps(false), 2200);
+    } catch {
+      // Clipboard blocked in restricted sandbox
+    }
+  };
+
   return (
     <div
       dir={dir}
       className="min-h-screen bg-[#0B141A] text-[#E9EDEF] flex flex-col items-center sm:py-6 sm:px-4"
     >
       <div className="w-full max-w-md bg-[#111B21] min-h-screen sm:min-h-0 sm:rounded-3xl sm:border sm:border-[#222E35] sm:shadow-2xl overflow-hidden flex flex-col">
-        {/* Header */}
-        <header className="bg-[#202C33] border-b border-[#2A3942] px-4 py-3 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <span
-              className={`text-[10px] font-mono font-bold uppercase tracking-wider ${
-                isExpired ? 'text-[#F87171]' : 'text-[#25D366]'
-              }`}
-            >
-              {isExpired ? copy.expiredDealBadge : copy.activeDealBadge}
-            </span>
-            <h1 className="text-sm font-bold text-[#E9EDEF] truncate">{payload.salonName}</h1>
+        {/* Top-Left Crisp WorkCraft Brand Header (Query 6) */}
+        <header
+          dir="ltr"
+          className="bg-[#202C33] border-b border-[#2A3942] px-4 py-3 flex items-center justify-between gap-2.5"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="h-8 px-2 rounded-lg bg-[#0B141A] border border-[#2A3942] flex items-center justify-center shrink-0">
+              <img
+                src={LOGO_URL}
+                alt="WorkCraft"
+                className="h-4 w-auto object-contain"
+              />
+            </div>
+            <div className="min-w-0">
+              <span
+                className={`text-[10px] font-mono font-bold uppercase tracking-wider block ${
+                  isExpired ? 'text-[#F87171]' : 'text-[#25D366]'
+                }`}
+              >
+                {isExpired ? copy.expiredDealBadge : copy.activeDealBadge}
+              </span>
+              <h1 className="text-sm font-bold text-[#E9EDEF] truncate">{payload.salonName}</h1>
+            </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <select
@@ -210,41 +253,51 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
 
         {/* Body */}
         <main className="flex-1 p-4 space-y-4">
-          {/* Promotional Video Player */}
-          <div className="rounded-2xl overflow-hidden border border-[#2A3942] bg-[#0B141A]">
-            {deal.videoUrl && !videoPurged ? (
-              <video
-                src={deal.videoUrl}
-                controls
-                playsInline
-                preload="metadata"
-                className="w-full max-h-72 bg-black object-contain"
-              />
-            ) : (
-              <div className="p-6 text-center space-y-2">
-                <Film className="size-7 text-[#8696A0] mx-auto" />
-                <p className="text-xs text-[#8696A0] leading-relaxed">
-                  {videoPurged ? copy.purgedVideoNotice : copy.noVideoNotice}
-                </p>
-              </div>
-            )}
-          </div>
+          {/* Promotional Video Player (Text-first per Query 10: shown only if video uploaded or expired/purged) */}
+          {(hasActiveVideo || videoPurged) && (
+            <div className="rounded-2xl overflow-hidden border border-[#2A3942] bg-[#0B141A]">
+              {hasActiveVideo ? (
+                <video
+                  src={deal.videoUrl}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="w-full max-h-72 bg-black object-contain"
+                />
+              ) : (
+                <div className="p-5 text-center space-y-2">
+                  <Film className="size-6 text-[#8696A0] mx-auto" />
+                  <p className="text-xs text-[#8696A0] leading-relaxed">
+                    {copy.purgedVideoNotice}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Deal Details */}
           <div className="rounded-2xl border border-[#2A3942] bg-[#202C33] p-4 space-y-3">
             <div className="flex items-start justify-between gap-2">
               <h2 className="text-lg font-bold text-[#E9EDEF] leading-snug">{deal.title}</h2>
-              <span className="rounded-lg bg-[#0B2E1E] border border-[#14532D] px-2.5 py-1 text-xs font-mono font-bold text-[#25D366] shrink-0">
+              <span
+                dir="ltr"
+                className="rounded-lg bg-[#0B2E1E] border border-[#14532D] px-2.5 py-1 text-xs font-mono font-bold text-[#25D366] shrink-0"
+              >
                 {discountSummary}
               </span>
             </div>
 
-            <p className="text-xs text-[#D1D7DB] leading-relaxed">{deal.description}</p>
+            {deal.description && (
+              <p className="text-xs text-[#D1D7DB] leading-relaxed">{deal.description}</p>
+            )}
 
             <div className="flex items-center gap-2 text-xs font-mono text-[#FBBF24] pt-1">
               <CalendarClock className="size-4 shrink-0" />
               <span>
-                {copy.expiresLabel}: {new Date(deal.expiresAt).toLocaleDateString()}
+                {copy.expiresLabel}:{' '}
+                {new Date(deal.expiresAt).toLocaleDateString(
+                  lang === 'ur' ? 'ur-PK' : lang === 'ar' ? 'ar-AE' : 'en-GB'
+                )}
               </span>
             </div>
           </div>
@@ -256,7 +309,7 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
             </div>
           )}
 
-          {/* Included Services */}
+          {/* Included Services (Localized per Query 1) */}
           <div className="rounded-2xl border border-[#2A3942] bg-[#202C33] p-4 space-y-2.5">
             <h3 className="text-xs font-mono font-bold uppercase text-[#8696A0] flex items-center gap-1.5">
               <Scissors className="size-3.5 text-[#25D366]" />
@@ -269,9 +322,9 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
                   className="flex items-center justify-between text-xs py-1 border-b border-[#2A3942] last:border-none"
                 >
                   <span className="text-[#E9EDEF] font-medium">
-                    {svc.name} · {svc.durationMins || 35}m
+                    {svc.translations?.[lang] || svc.name} · {svc.durationMins || 35} {copy.minUnit}
                   </span>
-                  <span className="font-mono text-[#8696A0] tabular-nums">
+                  <span dir="ltr" className="font-mono text-[#8696A0] tabular-nums">
                     {payload.currencySymbol}
                     {svc.price.toLocaleString()}
                   </span>
@@ -280,21 +333,41 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
             </div>
           </div>
 
-          {/* Salon Address & Maps */}
-          <div className="rounded-2xl border border-[#2A3942] bg-[#182229] p-3.5 flex items-center justify-between gap-3">
-            <div className="flex items-start gap-2 text-xs text-[#D1D7DB] min-w-0">
+          {/* Salon Address + Google Maps Directions & Small Copy Button (Query 8) */}
+          <div className="rounded-2xl border border-[#2A3942] bg-[#182229] p-3.5 space-y-2.5">
+            <div className="flex items-start gap-2 text-xs text-[#D1D7DB]">
               <MapPin className="size-4 text-[#25D366] shrink-0 mt-0.5" />
-              <span className="truncate">{payload.address}</span>
+              <span className="leading-relaxed">{payload.address}</span>
             </div>
-            <a
-              href={payload.googleMapsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 min-h-[36px] rounded-lg border border-[#2A3942] bg-[#202C33] px-2.5 text-xs font-semibold text-[#53BDEB] flex items-center gap-1.5"
-            >
-              <ExternalLink className="size-3.5" />
-              <span>{copy.openMapsBtn}</span>
-            </a>
+            <div className="flex items-center gap-2">
+              <a
+                href={payload.googleMapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 min-h-[38px] rounded-lg border border-[#2A3942] bg-[#202C33] hover:border-[#25D366] px-3 text-xs font-semibold text-[#53BDEB] flex items-center justify-center gap-1.5 transition"
+              >
+                <MapPin className="size-3.5 text-[#25D366] shrink-0" />
+                <span>{copy.openMapsBtn}</span>
+                <ExternalLink className="size-3 shrink-0" />
+              </a>
+              <button
+                type="button"
+                onClick={() => void handleCopyMaps()}
+                className="min-h-[38px] rounded-lg border border-[#2A3942] bg-[#202C33] hover:border-[#53BDEB] px-3 text-xs font-semibold text-[#D1D7DB] flex items-center gap-1.5 shrink-0 transition"
+              >
+                {copiedMaps ? (
+                  <>
+                    <Check className="size-3.5 text-[#25D366]" />
+                    <span className="text-[#25D366]">{copy.copiedBtn}</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="size-3.5 text-[#8696A0]" />
+                    <span>{copy.copyBtn}</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </main>
 
@@ -329,3 +402,4 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
     </div>
   );
 };
+
