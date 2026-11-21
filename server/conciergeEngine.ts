@@ -115,7 +115,11 @@ function buildGoogleMapsSearchUrl(salonName: string, address: string): string {
 
 export function getDefaultClientLanguagesForRegion(region: SalonRegionCode): ClientPreferredLang[] {
   if (region === 'PK') return ['en', 'roman_ur', 'ur'];
-  if (region === 'MENA') return ['en', 'ar', 'ur'];
+  return ['en', 'ur', 'ar'];
+}
+
+function getAllowedClientLanguagesForRegion(region: SalonRegionCode): ClientPreferredLang[] {
+  if (region === 'PK') return ['en', 'roman_ur', 'ur'];
   return ['en', 'ur', 'ar'];
 }
 
@@ -123,12 +127,17 @@ function normalizeClientLanguageList(
   langs: unknown,
   region: SalonRegionCode
 ): ClientPreferredLang[] {
-  const validSet = new Set<ClientPreferredLang>(['en', 'roman_ur', 'ur', 'ar']);
+  const allowed = getAllowedClientLanguagesForRegion(region);
+  const allowedSet = new Set<ClientPreferredLang>(allowed);
   if (!Array.isArray(langs) || langs.length === 0) {
-    return getDefaultClientLanguagesForRegion(region);
+    return [...allowed];
   }
-  const cleaned = langs.filter((l): l is ClientPreferredLang => validSet.has(l as ClientPreferredLang));
+  const cleaned = langs.filter((l): l is ClientPreferredLang => allowedSet.has(l as ClientPreferredLang));
   if (!cleaned.includes('en')) cleaned.unshift('en');
+  // Ensure MENA/Europe defaults include Urdu & Arabic and PK/IN defaults include Roman Urdu & Urdu cleanly
+  for (const fallbackLang of allowed) {
+    if (!cleaned.includes(fallbackLang)) cleaned.push(fallbackLang);
+  }
   return Array.from(new Set(cleaned));
 }
 
@@ -154,7 +163,7 @@ function getIsoLocalDateStr(iso: string | undefined | null, offsetHours: number)
 
 export function extractCountryCode(phone: string): string {
   const cleaned = phone.replace(/[^\d+]/g, '');
-  const prefixes = ['+971', '+966', '+974', '+965', '+968', '+973', '+92', '+44', '+33', '+49', '+1'];
+  const prefixes = ['+971', '+966', '+974', '+965', '+968', '+973', '+92', '+91', '+44', '+33', '+49', '+1'];
   for (const prefix of prefixes) {
     if (cleaned.startsWith(prefix)) return prefix;
   }
@@ -179,6 +188,16 @@ export function detectRegionFromPhone(phone: string): {
       timezoneOffsetHours: 5,
       currency: 'PKR',
       currencySymbol: 'PKR ',
+    };
+  }
+  if (cc === '+91') {
+    return {
+      region: 'PK',
+      regionLabel: 'India (+91)',
+      countryCode: cc,
+      timezoneOffsetHours: 5.5,
+      currency: 'INR',
+      currencySymbol: '₹',
     };
   }
   if (['+971', '+966', '+974', '+965', '+968', '+973'].includes(cc)) {
@@ -215,13 +234,7 @@ export function getLanguageMenuForRegion(region: SalonRegionCode): LanguageMenuO
     return [
       { index: '1', lang: 'en', label: '1. English', dir: 'ltr' },
       { index: '2', lang: 'roman_ur', label: '2. Roman Urdu', dir: 'ltr' },
-      { index: '3', lang: 'ur', label: '3. اردو (Urdu Script)', dir: 'rtl' },
-    ];
-  }
-  if (region === 'MENA') {
-    return [
-      { index: '1', lang: 'en', label: '1. English', dir: 'ltr' },
-      { index: '2', lang: 'ar', label: '2. العربية (Arabic)', dir: 'rtl' },
+      { index: '3', lang: 'ur', label: '3. اردو (Urdu)', dir: 'rtl' },
     ];
   }
   return [
@@ -242,7 +255,7 @@ export function buildGreetingMenuText(salonName: string, region: SalonRegionCode
     return `Assalamu Alaikum & Welcome to ${salonName}! Please choose your preferred language:\n${optionsLine}\nReply with 1, 2, or 3.`;
   }
   if (region === 'MENA') {
-    return `Marhaba & Welcome to ${salonName}! Please choose your preferred language:\n${optionsLine}\nReply with 1 or 2.`;
+    return `Marhaba & Welcome to ${salonName}! Please choose your preferred language:\n${optionsLine}\nReply with 1, 2, or 3.`;
   }
   return `Welcome to ${salonName}! Please select your preferred language:\n${optionsLine}\nReply with 1, 2, or 3.`;
 }
@@ -263,22 +276,23 @@ export function getDefaultServicesForCategory(
   category: SalonCategory,
   currency: string
 ): SalonServiceRate[] {
-  const isPkr = currency === 'PKR';
+  const isSouthAsia = currency === 'PKR' || currency === 'INR';
   if (category === 'LADIES') {
     return [
-      { id: 'l1', name: 'Signature Party Makeup & Styling', durationMins: 60, price: isPkr ? 4500 : 280, active: true },
-      { id: 'l2', name: 'Barat / Walima Bridal Package', durationMins: 150, price: isPkr ? 35000 : 1800, active: true },
-      { id: 'l3', name: 'Hydra-Facial & Skin Polish', durationMins: 50, price: isPkr ? 3500 : 220, active: true },
-      { id: 'l4', name: 'Keratin Hair Rebonding / Smoothing', durationMins: 120, price: isPkr ? 12000 : 650, active: true },
-      { id: 'l5', name: 'Mani-Pedi Classic Spa', durationMins: 45, price: isPkr ? 2000 : 140, active: true },
+      { id: 'l1', name: 'Signature Party Makeup & Styling', durationMins: 60, price: isSouthAsia ? 4500 : 280, active: true },
+      { id: 'l2', name: 'Barat / Walima Bridal Package', durationMins: 150, price: isSouthAsia ? 35000 : 1800, active: true },
+      { id: 'l3', name: 'Hydra-Facial & Skin Polish', durationMins: 50, price: isSouthAsia ? 3500 : 220, active: true },
+      { id: 'l4', name: 'Keratin Hair Rebonding / Smoothing', durationMins: 120, price: isSouthAsia ? 12000 : 650, active: true },
+      { id: 'l5', name: 'Mani-Pedi Classic Spa', durationMins: 45, price: isSouthAsia ? 2000 : 140, active: true },
     ];
   }
   return [
-    { id: 's1', name: 'Master Haircut & Skin Fade', durationMins: 40, price: isPkr ? 800 : 65, active: true },
-    { id: 's2', name: 'Classic Beard Trim & Sculpt', durationMins: 25, price: isPkr ? 400 : 35, active: true },
-    { id: 's3', name: 'Hot Towel Steam Shave', durationMins: 25, price: isPkr ? 500 : 40, active: true },
-    { id: 's4', name: 'Charcoal Deep Detox Facial', durationMins: 45, price: isPkr ? 2500 : 150, active: true },
-    { id: 's5', name: 'Groom Signature Package', durationMins: 120, price: isPkr ? 12000 : 550, active: true },
+    { id: 's1', name: 'Master Haircut', durationMins: 35, price: isSouthAsia ? 600 : 50, active: true },
+    { id: 's2', name: 'Skin Fade', durationMins: 30, price: isSouthAsia ? 500 : 45, active: true },
+    { id: 's3', name: 'Classic Beard Trim', durationMins: 25, price: isSouthAsia ? 400 : 35, active: true },
+    { id: 's4', name: 'Hot Towel Steam Shave', durationMins: 25, price: isSouthAsia ? 500 : 40, active: true },
+    { id: 's5', name: 'Charcoal Deep Detox Facial', durationMins: 45, price: isSouthAsia ? 2500 : 150, active: true },
+    { id: 's6', name: 'Groom Signature Package', durationMins: 120, price: isSouthAsia ? 12000 : 550, active: true },
   ];
 }
 
@@ -558,11 +572,11 @@ function createInitialSeedData(): ConciergeStoreData {
       id: 'deal-1-vip',
       salonId: '1',
       title: 'Executive Haircut & Facial Combo (20% OFF)',
-      description: 'Includes Master Haircut & Skin Fade + Charcoal Deep Detox Facial with priority chair access.',
+      description: 'Includes Master Haircut + Skin Fade + Charcoal Deep Detox Facial with priority chair access.',
       discountType: 'PCT',
       discountValue: 20,
-      serviceIds: ['s1', 's4'],
-      serviceNames: ['Master Haircut & Skin Fade', 'Charcoal Deep Detox Facial'],
+      serviceIds: ['s1', 's2', 's5'],
+      serviceNames: ['Master Haircut', 'Skin Fade', 'Charcoal Deep Detox Facial'],
       startsAt: daysAgoIso(1),
       expiresAt: new Date(now + 10 * 86400000).toISOString(),
       videoRetentionDaysAfterExpiry: 30,
@@ -574,11 +588,11 @@ function createInitialSeedData(): ConciergeStoreData {
       id: 'deal-3-dubai',
       salonId: '3',
       title: 'Jumeirah Executive Grooming Package',
-      description: 'Signature haircut, beard sculpt, and hot towel shave bundle.',
+      description: 'Master haircut, skin fade, classic beard trim, and hot towel shave bundle.',
       discountType: 'PCT',
       discountValue: 15,
-      serviceIds: ['s1', 's2', 's3'],
-      serviceNames: ['Master Haircut & Skin Fade', 'Classic Beard Trim & Sculpt', 'Hot Towel Steam Shave'],
+      serviceIds: ['s1', 's2', 's3', 's4'],
+      serviceNames: ['Master Haircut', 'Skin Fade', 'Classic Beard Trim', 'Hot Towel Steam Shave'],
       startsAt: daysAgoIso(1),
       expiresAt: new Date(now + 14 * 86400000).toISOString(),
       videoRetentionDaysAfterExpiry: 30,
@@ -655,6 +669,31 @@ function normalizeLoadedConciergeStore(parsed: Partial<ConciergeStoreData>): Con
     }
     if (!Array.isArray(s.enabledServices) || s.enabledServices.length === 0) {
       s.enabledServices = getDefaultServicesForCategory(s.salonCategory, s.currency);
+    } else if (s.enabledServices.some((svc) => svc.name === 'Master Haircut & Skin Fade')) {
+      const expanded: SalonServiceRate[] = [];
+      for (const svc of s.enabledServices) {
+        if (svc.name === 'Master Haircut & Skin Fade') {
+          expanded.push(
+            {
+              id: 's1',
+              name: 'Master Haircut',
+              durationMins: 35,
+              price: Math.max(200, Math.round((svc.price || 800) * 0.65)),
+              active: svc.active !== false,
+            },
+            {
+              id: 's2-fade',
+              name: 'Skin Fade',
+              durationMins: 30,
+              price: Math.max(200, Math.round((svc.price || 800) * 0.55)),
+              active: svc.active !== false,
+            }
+          );
+        } else {
+          expanded.push(svc);
+        }
+      }
+      s.enabledServices = expanded;
     }
     if (!s.address) {
       s.address =
@@ -2860,6 +2899,186 @@ const LANGUAGE_CHOICE_META: Record<ClientPreferredLang, CustomerLanguageChoice> 
   ar: { lang: 'ar', label: 'Arabic', nativeLabel: 'العربية', dir: 'rtl' },
 };
 
+const CUSTOMER_SERVICE_TRANSLATIONS: Record<
+  string,
+  { roman_ur: string; ur: string; ar: string }
+> = {
+  'master haircut': {
+    roman_ur: 'Master Haircut',
+    ur: 'ماسٹر ہیئر کٹ',
+    ar: 'قص شعر احترافي',
+  },
+  'skin fade': {
+    roman_ur: 'Skin Fade',
+    ur: 'اسکن فیڈ',
+    ar: 'تدريج سكن فيد',
+  },
+  'classic beard trim': {
+    roman_ur: 'Classic Beard Trim',
+    ur: 'کلاسک داڑھی ٹرم',
+    ar: 'تشذيب اللحية الكلاسيكي',
+  },
+  'classic beard trim & sculpt': {
+    roman_ur: 'Classic Beard Trim & Setting',
+    ur: 'کلاسک داڑھی ٹرم اور سیٹنگ',
+    ar: 'تشذيب وتحديد اللحية الكلاسيكي',
+  },
+  'hot towel steam shave': {
+    roman_ur: 'Hot Towel Steam Shave',
+    ur: 'ہاٹ ٹاول اسٹیم شیو',
+    ar: 'حلاقة بالمنشفة الساخنة والبخار',
+  },
+  'hair color & camo': {
+    roman_ur: 'Hair Color & Camo',
+    ur: 'ہیئر کلر اور کیمو',
+    ar: 'صبغة وتلوين الشعر',
+  },
+  'charcoal deep detox facial': {
+    roman_ur: 'Charcoal Deep Detox Facial',
+    ur: 'چارکول ڈیپ ڈیٹوکس فیشل',
+    ar: 'تنظيف عميق للبشرة بالفحم',
+  },
+  'keratin hair protein': {
+    roman_ur: 'Keratin Hair Protein',
+    ur: 'کیراٹین ہیئر پروٹین',
+    ar: 'بروتين الكيراتين للشعر',
+  },
+  'herbal mint head massage': {
+    roman_ur: 'Herbal Mint Head Massage',
+    ur: 'ہربل منٹ ہیڈ مساج',
+    ar: 'مساج الرأس بالنعناع والأعشاب',
+  },
+  'groom signature package': {
+    roman_ur: 'Dulha Signature Package',
+    ur: 'دولہا سگنیچر پیکیج',
+    ar: 'باقة العريس المميزة',
+  },
+  'signature party makeup & styling': {
+    roman_ur: 'Party Makeup & Styling',
+    ur: 'پارٹی میک اپ اور اسٹائلنگ',
+    ar: 'مكياج سهرة مميز وتصفيف',
+  },
+  'barat / walima bridal package': {
+    roman_ur: 'Barat / Walima Bridal Package',
+    ur: 'بارات / ولیمہ برائیڈل پیکیج',
+    ar: 'باقة العروس للزفاف',
+  },
+  'hydra-facial & skin polish': {
+    roman_ur: 'Hydra-Facial & Skin Polish',
+    ur: 'ہائیڈرا فیشل اور اسکن پالش',
+    ar: 'هيدرافيشل وصنفرة البشرة',
+  },
+  'keratin hair rebonding / smoothing': {
+    roman_ur: 'Keratin Rebonding / Smoothing',
+    ur: 'کیراٹین ریبانڈنگ / اسموتھنگ',
+    ar: 'فرد وتنعيم الشعر بالكيراتين',
+  },
+  'mani-pedi classic spa': {
+    roman_ur: 'Mani-Pedi Classic Spa',
+    ur: 'مینی پیڈی کلاسک اسپا',
+    ar: 'مانيكير وباديكير كلاسيكي',
+  },
+  'full face threading & waxing': {
+    roman_ur: 'Face Threading & Waxing',
+    ur: 'فل فیس تھریڈنگ اور ویکسنگ',
+    ar: 'إزالة شعر الوجه بالفتلة والشمع',
+  },
+  'deep conditioning hair spa': {
+    roman_ur: 'Deep Conditioning Hair Spa',
+    ur: 'ڈیپ کنڈیشننگ ہیئر اسپا',
+    ar: 'حمام كريم وعناية للشعر',
+  },
+};
+
+function localizeServiceName(name: string, lang: ClientPreferredLang): string {
+  if (lang === 'en') return name;
+  const key = name.trim().toLowerCase();
+  const exact = CUSTOMER_SERVICE_TRANSLATIONS[key];
+  if (exact) return exact[lang];
+
+  if (lang === 'roman_ur') return name;
+
+  const tokenMapUr: Array<[RegExp, string]> = [
+    [/\bmaster haircut\b/gi, 'ماسٹر ہیئر کٹ'],
+    [/\bhaircut\b/gi, 'ہیئر کٹ'],
+    [/\bskin fade\b/gi, 'اسکن فیڈ'],
+    [/\bbeard trim\b/gi, 'داڑھی ٹرم'],
+    [/\bbeard\b/gi, 'داڑھی'],
+    [/\bshave\b/gi, 'شیو'],
+    [/\bfacial\b/gi, 'فیشل'],
+    [/\bpolish\b/gi, 'پالش'],
+    [/\bmassage\b/gi, 'مساج'],
+    [/\bmakeup\b/gi, 'میک اپ'],
+    [/\bbridal\b/gi, 'برائیڈل'],
+    [/\bgroom\b/gi, 'دولہا'],
+    [/\bpackage\b/gi, 'پیکیج'],
+    [/\bkeratin\b/gi, 'کیراٹین'],
+    [/\bhair color\b/gi, 'ہیئر کلر'],
+    [/\bthreading\b/gi, 'تھریڈنگ'],
+    [/\bwaxing\b/gi, 'ویکسنگ'],
+    [/\bspa\b/gi, 'اسپا'],
+  ];
+  const tokenMapAr: Array<[RegExp, string]> = [
+    [/\bmaster haircut\b/gi, 'قص شعر احترافي'],
+    [/\bhaircut\b/gi, 'قص شعر'],
+    [/\bskin fade\b/gi, 'تدريج سكن فيد'],
+    [/\bbeard trim\b/gi, 'تشذيب اللحية'],
+    [/\bbeard\b/gi, 'لحية'],
+    [/\bshave\b/gi, 'حلاقة'],
+    [/\bfacial\b/gi, 'تنظيف بشرة'],
+    [/\bmassage\b/gi, 'مساج'],
+    [/\bmakeup\b/gi, 'مكياج'],
+    [/\bbridal\b/gi, 'عروس'],
+    [/\bgroom\b/gi, 'عريس'],
+    [/\bpackage\b/gi, 'باقة'],
+    [/\bkeratin\b/gi, 'كيراتين'],
+    [/\bhair color\b/gi, 'صبغة شعر'],
+    [/\bthreading\b/gi, 'إزالة شعر بالفتلة'],
+    [/\bwaxing\b/gi, 'شمع'],
+    [/\bspa\b/gi, 'سبا'],
+  ];
+
+  let out = name;
+  const rules = lang === 'ur' ? tokenMapUr : tokenMapAr;
+  for (const [rx, replacement] of rules) {
+    out = out.replace(rx, replacement);
+  }
+  return out;
+}
+
+function enrichServicesWithTranslations(services: SalonServiceRate[]): SalonServiceRate[] {
+  return services.map((s) => ({
+    ...s,
+    translations: {
+      en: s.name,
+      roman_ur: s.translations?.roman_ur || localizeServiceName(s.name, 'roman_ur'),
+      ur: s.translations?.ur || localizeServiceName(s.name, 'ur'),
+      ar: s.translations?.ar || localizeServiceName(s.name, 'ar'),
+    },
+  }));
+}
+
+function isUniformDailySchedule(hours: SalonOperatingHours): boolean {
+  if (hours.monThuClosed || hours.fridayClosed || hours.satSunClosed) return false;
+  const sameOpen =
+    hours.monThuOpen.trim().toLowerCase() === hours.fridayOpen.trim().toLowerCase() &&
+    hours.monThuOpen.trim().toLowerCase() === hours.satSunOpen.trim().toLowerCase();
+  const sameClose =
+    hours.monThuClose.trim().toLowerCase() === hours.fridayClose.trim().toLowerCase() &&
+    hours.monThuClose.trim().toLowerCase() === hours.satSunClose.trim().toLowerCase();
+  const bStart = (hours.fridayBreakStart || '').trim().toLowerCase();
+  const bEnd = (hours.fridayBreakEnd || '').trim().toLowerCase();
+  const hasBreak =
+    Boolean(bStart) &&
+    Boolean(bEnd) &&
+    bStart !== 'none' &&
+    bEnd !== 'none' &&
+    bStart !== 'off' &&
+    bEnd !== 'off' &&
+    bStart !== bEnd;
+  return sameOpen && sameClose && !hasBreak;
+}
+
 function getConfiguredLanguageChoices(settings: RetentionSettings): CustomerLanguageChoice[] {
   const regionMeta = detectRegionFromPhone(settings.whatsappPhone);
   const langs = normalizeClientLanguageList(settings.enabledClientLanguages, regionMeta.region);
@@ -3110,7 +3329,9 @@ export function getPublicDealPayload(
     videoPurged,
     retentionDaysAfterExpiry:
       deal.videoRetentionDaysAfterExpiry ?? settings.videoRetentionDaysAfterExpiry ?? 30,
-    matchedServices: matchedServices.length > 0 ? matchedServices : activeServices.slice(0, 2),
+    matchedServices: enrichServicesWithTranslations(
+      matchedServices.length > 0 ? matchedServices : activeServices.slice(0, 2)
+    ),
     availableLanguages: getConfiguredLanguageChoices(settings),
   };
 }
@@ -3165,7 +3386,7 @@ function getScheduleForDate(
       breakStartMins: bStart >= 0 ? bStart : undefined,
       breakEndMins: bEnd > bStart ? bEnd : undefined,
       fridayBreakText:
-        hours.fridayBreakStart && hours.fridayBreakEnd
+        bStart >= 0 && bEnd > bStart && hours.fridayBreakStart && hours.fridayBreakEnd
           ? `Friday Prayer Break: ${hours.fridayBreakStart} – ${hours.fridayBreakEnd}`
           : undefined,
     };
@@ -3248,7 +3469,7 @@ export function getCustomerExperienceConfig(
     address,
     googleMapsUrl,
     operatingHours: settings.operatingHours || { ...DEFAULT_SALON_OPERATING_HOURS },
-    services: activeServices,
+    services: enrichServicesWithTranslations(activeServices),
     barbers: getSalonBarbers(salonId),
     activeDeals,
     availableLanguages,
@@ -3265,11 +3486,13 @@ export function getCustomerExperienceConfig(
 
 function buildCustomerWelcomeMenu(
   settings: RetentionSettings,
-  lang: ClientPreferredLang
+  lang: ClientPreferredLang,
+  savedClientName?: string | null
 ): CustomerWelcomeMenuResponse {
   const availableLanguages = getConfiguredLanguageChoices(settings);
   const resolvedLang = availableLanguages.some((l) => l.lang === lang) ? lang : 'en';
   const dir = getLangDirection(resolvedLang);
+  const cleanName = savedClientName ? sanitizePlainText(savedClientName, 80) : '';
 
   const copyMap: Record<
     ClientPreferredLang,
@@ -3282,28 +3505,36 @@ function buildCustomerWelcomeMenu(
     }
   > = {
     en: {
-      welcome: `Welcome to ${settings.salonName}! Choose a language below or pick an option to get started:`,
+      welcome: cleanName
+        ? `Welcome back to ${settings.salonName}, ${cleanName}! Choose a language below or pick an option:`
+        : `Welcome to ${settings.salonName}! Choose a language below or pick an option to get started:`,
       book: 'Book Appointment',
       services: 'Services & Prices',
       hours: 'Opening Hours & Location',
       deals: 'Current Deals & Offers',
     },
     roman_ur: {
-      welcome: `${settings.salonName} mein khush amdeed! Language select karein ya neeche diye gaye option chunein:`,
+      welcome: cleanName
+        ? `${settings.salonName} mein dobara khush amdeed, ${cleanName}! Language select karein ya neeche option chunein:`
+        : `${settings.salonName} mein khush amdeed! Language select karein ya neeche diye gaye option chunein:`,
       book: 'Appointment Book Karein',
       services: 'Services aur Prices',
       hours: 'Opening Hours aur Location',
       deals: 'Current Deals aur Offers',
     },
     ur: {
-      welcome: `${settings.salonName} میں خوش آمدید! اپنی زبان منتخب کریں یا نیچے دیے گئے آپشنز میں سے انتخاب کریں:`,
+      welcome: cleanName
+        ? `${settings.salonName} میں دوبارہ خوش آمدید، ${cleanName}! اپنی زبان منتخب کریں یا نیچے دیے گئے آپشنز میں سے انتخاب کریں:`
+        : `${settings.salonName} میں خوش آمدید! اپنی زبان منتخب کریں یا نیچے دیے گئے آپشنز میں سے انتخاب کریں:`,
       book: 'اپائنٹمنٹ بک کریں',
       services: 'سروسز اور قیمتیں',
       hours: 'اوقات اور لوکیشن',
       deals: 'موجودہ ڈیلز اور آفرز',
     },
     ar: {
-      welcome: `أهلاً بك في ${settings.salonName}! اختر لغتك المفضلة أو حدد أحد الخيارات التالية:`,
+      welcome: cleanName
+        ? `أهلاً بعودتك إلى ${settings.salonName}، ${cleanName}! اختر لغتك المفضلة أو حدد أحد الخيارات التالية:`
+        : `أهلاً بك في ${settings.salonName}! اختر لغتك المفضلة أو حدد أحد الخيارات التالية:`,
       book: 'حجز موعد',
       services: 'الخدمات والأسعار',
       hours: 'ساعات العمل والموقع',
@@ -3383,7 +3614,9 @@ export function handleCustomerWhatsAppAction(input: {
     }
   }
 
-  const activeServices = (settings.enabledServices || []).filter((s) => s.active !== false);
+  const activeServices = enrichServicesWithTranslations(
+    (settings.enabledServices || []).filter((s) => s.active !== false)
+  );
   const hours = settings.operatingHours || { ...DEFAULT_SALON_OPERATING_HOURS };
   const address = settings.address || SEEDED_SALON_ADDRESSES[input.salonId] || 'Salon Location';
   const googleMapsUrl =
@@ -3393,8 +3626,23 @@ export function handleCustomerWhatsAppAction(input: {
     dealPagePath: `/deal/${encodeURIComponent(input.salonId)}/${encodeURIComponent(d.id)}`,
   }));
 
+  const savedStatus = resolveSavedNameStatus(client);
+  const greetingName =
+    input.clientName !== undefined
+      ? sanitizePlainText(input.clientName, 80) || null
+      : savedStatus.hasSavedName
+      ? savedStatus.savedName
+      : null;
+
+  const bookCtaMap: Record<ClientPreferredLang, string> = {
+    en: 'Book Appointment',
+    roman_ur: 'Appointment Book Karein',
+    ur: 'اپائنٹمنٹ بک کریں',
+    ar: 'حجز موعد',
+  };
+
   if (resolvedAction === 'WELCOME') {
-    const welcome = buildCustomerWelcomeMenu(settings, activeLang);
+    const welcome = buildCustomerWelcomeMenu(settings, activeLang, greetingName);
     return {
       language: welcome.language,
       dir: welcome.dir,
@@ -3421,9 +3669,16 @@ export function handleCustomerWhatsAppAction(input: {
   }
 
   if (resolvedAction === 'SERVICES_PRICES') {
-    const lines = activeServices.map(
-      (s) => `• ${s.name} — ${settings.currencySymbol}${s.price.toLocaleString()} (${s.durationMins || 35} min)`
-    );
+    const minWordMap: Record<ClientPreferredLang, string> = {
+      en: 'min',
+      roman_ur: 'min',
+      ur: 'منٹ',
+      ar: 'دقيقة',
+    };
+    const lines = activeServices.map((s) => {
+      const displayName = s.translations?.[activeLang] || localizeServiceName(s.name, activeLang);
+      return `• ${displayName} — ${settings.currencySymbol}${s.price.toLocaleString()} (${s.durationMins || 35} ${minWordMap[activeLang]})`;
+    });
     const header: Record<ClientPreferredLang, string> = {
       en: `${settings.salonName} — Services & Prices:\n${lines.join('\n')}`,
       roman_ur: `${settings.salonName} — Services aur Prices:\n${lines.join('\n')}`,
@@ -3448,22 +3703,63 @@ export function handleCustomerWhatsAppAction(input: {
       dir,
       action: 'SERVICES_PRICES',
       text,
+      showBookCta: true,
+      bookCtaLabel: bookCtaMap[activeLang],
       services: activeServices,
     };
   }
 
   if (resolvedAction === 'HOURS_LOCATION') {
-    const monThu = hours.monThuClosed ? 'Closed' : `${hours.monThuOpen} – ${hours.monThuClose}`;
+    const uniformDaily = isUniformDailySchedule(hours);
+    const closedWord: Record<ClientPreferredLang, string> = {
+      en: 'Closed',
+      roman_ur: 'Band',
+      ur: 'بند',
+      ar: 'مغلق',
+    };
+    const breakWord: Record<ClientPreferredLang, string> = {
+      en: 'Break',
+      roman_ur: 'Waqfa',
+      ur: 'وقفہ',
+      ar: 'استراحة',
+    };
+
+    const monThu = hours.monThuClosed
+      ? closedWord[activeLang]
+      : `${hours.monThuOpen} – ${hours.monThuClose}`;
     const fri = hours.fridayClosed
-      ? 'Closed'
-      : `${hours.fridayOpen} – ${hours.fridayClose} (Break: ${hours.fridayBreakStart} – ${hours.fridayBreakEnd})`;
-    const satSun = hours.satSunClosed ? 'Closed' : `${hours.satSunOpen} – ${hours.satSunClose}`;
+      ? closedWord[activeLang]
+      : `${hours.fridayOpen} – ${hours.fridayClose}${
+          hours.fridayBreakStart &&
+          hours.fridayBreakEnd &&
+          hours.fridayBreakStart.toLowerCase() !== 'none' &&
+          hours.fridayBreakEnd.toLowerCase() !== 'none'
+            ? ` (${breakWord[activeLang]}: ${hours.fridayBreakStart} – ${hours.fridayBreakEnd})`
+            : ''
+        }`;
+    const satSun = hours.satSunClosed
+      ? closedWord[activeLang]
+      : `${hours.satSunOpen} – ${hours.satSunClose}`;
+
+    const scheduleBlock: Record<ClientPreferredLang, string> = uniformDaily
+      ? {
+          en: `Mon – Sun: ${hours.monThuOpen} – ${hours.monThuClose}`,
+          roman_ur: `Peer – Itwar: ${hours.monThuOpen} – ${hours.monThuClose}`,
+          ur: `پیر تا اتوار: ${hours.monThuOpen} – ${hours.monThuClose}`,
+          ar: `الإثنين – الأحد: ${hours.monThuOpen} – ${hours.monThuClose}`,
+        }
+      : {
+          en: `Mon–Thu: ${monThu}\nFriday: ${fri}\nSat–Sun: ${satSun}`,
+          roman_ur: `Mon–Thu: ${monThu}\nJumma (Friday): ${fri}\nSat–Sun: ${satSun}`,
+          ur: `پیر تا جمعرات: ${monThu}\nجمعہ: ${fri}\nہفتہ اور اتوار: ${satSun}`,
+          ar: `الإثنين – الخميس: ${monThu}\nالجمعة: ${fri}\nالسبت – الأحد: ${satSun}`,
+        };
 
     const header: Record<ClientPreferredLang, string> = {
-      en: `${settings.salonName} — Opening Hours & Location:\nMon–Thu: ${monThu}\nFriday: ${fri}\nSat–Sun: ${satSun}\nAddress: ${address}\nGoogle Maps: ${googleMapsUrl}`,
-      roman_ur: `${settings.salonName} — Opening Hours aur Location:\nMon–Thu: ${monThu}\nJumma (Friday): ${fri}\nSat–Sun: ${satSun}\nAddress: ${address}\nGoogle Maps: ${googleMapsUrl}`,
-      ur: `${settings.salonName} — کھلنے کے اوقات اور لوکیشن:\nپیر تا جمعرات: ${monThu}\nجمعہ: ${fri}\nہفتہ اور اتوار: ${satSun}\nپتہ: ${address}\nگوگل میپس: ${googleMapsUrl}`,
-      ar: `${settings.salonName} — ساعات العمل والموقع:\nالإثنين – الخميس: ${monThu}\nالجمعة: ${fri}\nالسبت – الأحد: ${satSun}\nالعنوان: ${address}\nخرائط جوجل: ${googleMapsUrl}`,
+      en: `${settings.salonName} — Opening Hours & Location:\n${scheduleBlock.en}\nAddress: ${address}`,
+      roman_ur: `${settings.salonName} — Opening Hours aur Location:\n${scheduleBlock.roman_ur}\nAddress: ${address}`,
+      ur: `${settings.salonName} — کھلنے کے اوقات اور لوکیشن:\n${scheduleBlock.ur}\nپتہ: ${address}`,
+      ar: `${settings.salonName} — ساعات العمل والموقع:\n${scheduleBlock.ar}\nالعنوان: ${address}`,
     };
     const text = header[activeLang];
     if (!isDemo && client) {
@@ -3483,13 +3779,15 @@ export function handleCustomerWhatsAppAction(input: {
       dir,
       action: 'HOURS_LOCATION',
       text,
+      showBookCta: true,
+      bookCtaLabel: bookCtaMap[activeLang],
       hours,
       address,
       googleMapsUrl,
     };
   }
 
-  // CURRENT_DEALS — strictly active non-expired deals only
+  // CURRENT_DEALS — strictly active non-expired deals only (Text-first clarity)
   let text = '';
   if (activeDeals.length === 0) {
     const emptyMap: Record<ClientPreferredLang, string> = {
@@ -3503,11 +3801,34 @@ export function handleCustomerWhatsAppAction(input: {
     const dealLines = activeDeals.map((d) => {
       const badge =
         d.discountType === 'PCT'
-          ? `${d.discountValue}% OFF`
+          ? activeLang === 'ur'
+            ? `${d.discountValue}% رعایت`
+            : activeLang === 'ar'
+            ? `خصم ${d.discountValue}%`
+            : `${d.discountValue}% OFF`
           : d.discountType === 'FIXED'
-          ? `${settings.currencySymbol}${d.discountValue.toLocaleString()} OFF`
+          ? activeLang === 'ur'
+            ? `${settings.currencySymbol}${d.discountValue.toLocaleString()} رعایت`
+            : activeLang === 'ar'
+            ? `خصم ${settings.currencySymbol}${d.discountValue.toLocaleString()}`
+            : `${settings.currencySymbol}${d.discountValue.toLocaleString()} OFF`
+          : activeLang === 'ur'
+          ? `پیکیج ${settings.currencySymbol}${d.discountValue.toLocaleString()}`
+          : activeLang === 'ar'
+          ? `باقة ${settings.currencySymbol}${d.discountValue.toLocaleString()}`
           : `Bundle ${settings.currencySymbol}${d.discountValue.toLocaleString()}`;
-      return `• ${d.title} (${badge}) — Expires ${new Date(d.expiresAt).toLocaleDateString()}`;
+      const expDate = new Date(d.expiresAt).toLocaleDateString(
+        activeLang === 'ur' ? 'ur-PK' : activeLang === 'ar' ? 'ar-AE' : 'en-GB'
+      );
+      const expLabel =
+        activeLang === 'ur'
+          ? `آخری تاریخ ${expDate}`
+          : activeLang === 'ar'
+          ? `ساري حتى ${expDate}`
+          : activeLang === 'roman_ur'
+          ? `Aakhri tareekh ${expDate}`
+          : `Expires ${expDate}`;
+      return `• ${d.title} (${badge}) — ${expLabel}`;
     });
     const prefix: Record<ClientPreferredLang, string> = {
       en: `${settings.salonName} — Active Deals & Offers:\n${dealLines.join('\n')}`,
