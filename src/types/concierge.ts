@@ -21,6 +21,7 @@ export interface SalonServiceRate {
   price: number;
   durationMins?: number;
   active?: boolean;
+  translations?: Partial<Record<ClientPreferredLang, string>>;
 }
 
 export interface SalonOperatingHours {
@@ -339,6 +340,8 @@ export interface CustomerActionMessageResponse {
   action: CustomerMenuActionId | 'WELCOME';
   text: string;
   openBookingFlow?: boolean;
+  showBookCta?: boolean;
+  bookCtaLabel?: string;
   welcome?: CustomerWelcomeMenuResponse;
   services?: SalonServiceRate[];
   hours?: SalonOperatingHours;
