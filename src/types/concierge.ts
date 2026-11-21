@@ -58,6 +58,8 @@ export interface SalonDeal {
   videoDeletedAt?: string | null;
   active: boolean;
   createdAt: string;
+  titleTranslations?: Partial<Record<ClientPreferredLang, string>>;
+  descriptionTranslations?: Partial<Record<ClientPreferredLang, string>>;
 }
 
 export interface RetentionSettings {
