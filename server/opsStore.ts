@@ -356,7 +356,7 @@ export function verifyFounderBiometricAssertion(params: {
   ) {
     return {
       ok: false,
-      error: 'Saved device biometric was revoked or expired. Unlock once with your Founder PIN (WC3118) to re-enable.',
+      error: 'Saved device biometric was revoked or expired. Unlock once with your Founder PIN to re-enable.',
     };
   }
 
