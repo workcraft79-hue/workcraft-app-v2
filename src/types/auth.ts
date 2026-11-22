@@ -7,8 +7,10 @@ export interface AuthUser {
   email: string;
   phone: string;
   salonId: string | null;
+  allowedSalonIds?: string[];
   agentId: string | null;
   salonName?: string;
+  sessionVersion?: number;
 }
 
 export interface DevTestAccount {
