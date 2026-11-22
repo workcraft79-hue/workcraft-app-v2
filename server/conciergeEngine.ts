@@ -1,6 +1,10 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import type {
+  AdAttributionChannel,
+  BookingAuditEntry,
+  BookingManagementPayload,
   BridalBookingRecord,
   ChairLock,
   ClientPreferredLang,
@@ -18,9 +22,12 @@ import type {
   CustomerWelcomeMenuResponse,
   DealDiscountType,
   LanguageMenuOption,
+  MonthlyUsageMeter,
   OwnerInterventionAlert,
   PublicDealPageResponse,
+  RetentionOpportunityItem,
   RetentionSettings,
+  ReturningClientSnapshot,
   SalonBillingStatus,
   SalonCategory,
   SalonConciergeStateResponse,
@@ -30,19 +37,31 @@ import type {
   SalonRegionCode,
   SalonServiceRate,
   ServicePackagePass,
+  StylistLeaveRecord,
   WalkInQueueItem,
   WhatsAppMessageLog,
 } from '../src/types/concierge.js';
 import { kvGetJson, kvSetJson } from './kvBridge.js';
+import { persistPostgresSnapshotMirror, recordBookingInPostgres } from './postgresRepo.js';
 import {
   clampInteger,
   getSalonsAssignedToAgent,
+  maskPhoneNumber,
   sanitizeBirthDate,
   sanitizeHttpUrl,
   sanitizeMultilineTemplate,
   sanitizePhone,
   sanitizePlainText,
+  signCustomerRecognizeToken,
+  verifyCustomerRecognizeToken,
 } from './security.js';
+
+interface BookingAccessTokenRecord {
+  bookingId: string;
+  salonId: string;
+  expiresAtMs: number;
+  revoked: boolean;
+}
 
 interface ConciergeStoreData {
   settingsBySalon: Record<string, RetentionSettings>;
@@ -50,6 +69,10 @@ interface ConciergeStoreData {
   clients: ConciergeClientProfile[];
   appointments: ConciergeAppointment[];
   chairLocks: ChairLock[];
+  stylistLeaves: StylistLeaveRecord[];
+  bookingAuditLog: BookingAuditEntry[];
+  bookingAccessTokens: Record<string, BookingAccessTokenRecord>;
+  salonUsageMonthly: Record<string, Record<string, number>>;
   alerts: OwnerInterventionAlert[];
   logs: WhatsAppMessageLog[];
   walkInQueue: WalkInQueueItem[];
@@ -108,6 +131,41 @@ const SEEDED_SALON_ADDRESSES: Record<string, string> = {
   '4': '28 Brewer Street, Soho, London W1F 0SR, UK',
   '5': 'Building 9-B, Clifton Block 4, Karachi',
 };
+
+export const SEEDED_PUBLIC_CODES: Record<string, string> = {
+  '1': 'wc_7k9m2p4x8q2a',
+  '2': 'wc_3r8v5n2w9c4j',
+  '3': 'wc_9p4d6t2m8y1k',
+  '4': 'wc_5w2h8z4f7b3n',
+  '5': 'wc_6m9q3x7v2p5d',
+};
+
+export const PLAN_QUOTAS: Record<SalonPackageTier, { limit: number; grace: number }> = {
+  STARTER: { limit: 750, grace: 50 },
+  PRO: { limit: 1500, grace: 100 },
+  'PRO++': { limit: 3000, grace: 200 },
+  CUSTOM: { limit: 10000, grace: 1000 },
+};
+
+function generateUnguessablePublicCode(salonId?: string): string {
+  if (salonId && SEEDED_PUBLIC_CODES[salonId]) {
+    return SEEDED_PUBLIC_CODES[salonId];
+  }
+  return `wc_${crypto.randomBytes(6).toString('hex')}`;
+}
+
+function detectTimezoneIana(countryCode: string): string {
+  if (countryCode === '+92') return 'Asia/Karachi';
+  if (countryCode === '+91') return 'Asia/Kolkata';
+  if (countryCode === '+971' || countryCode === '+968') return 'Asia/Dubai';
+  if (['+966', '+974', '+965', '+973'].includes(countryCode)) return 'Asia/Riyadh';
+  if (countryCode === '+44') return 'Europe/London';
+  if (countryCode === '+1') return 'America/Toronto';
+  if (['+33', '+49', '+34', '+39', '+31', '+32', '+43', '+351', '+353', '+30', '+358'].includes(countryCode)) {
+    return 'Europe/Berlin';
+  }
+  return 'Asia/Karachi';
+}
 
 function buildGoogleMapsSearchUrl(salonName: string, address: string): string {
   return `https://maps.google.com/?q=${encodeURIComponent(`${salonName} ${address}`.trim())}`;
@@ -351,13 +409,22 @@ function defaultSettingsForSalon(
       : 'High Street Studio, London');
   return {
     salonId,
+    publicCode: generateUnguessablePublicCode(salonId),
     salonName,
     ownerName,
+    ownerAuthPhone: phone,
+    publicContactPhone: phone,
+    publicWhatsappPhone: phone,
     whatsappPhone: phone,
+    whatsappAddonEnabled: false,
+    metaPhoneNumberId: '',
     countryCode: regionMeta.countryCode,
+    timezoneIana: detectTimezoneIana(regionMeta.countryCode),
     timezoneOffsetHours: regionMeta.timezoneOffsetHours,
     currency: regionMeta.currency,
     currencySymbol: regionMeta.currencySymbol,
+    defaultLang: 'en',
+    regionConfirmedByOwner: Boolean(SEEDED_PUBLIC_CODES[salonId]),
     salonCategory: resolvedCategory,
     enabledServices:
       Array.isArray(enabledServices) && enabledServices.length > 0
@@ -649,6 +716,10 @@ function createInitialSeedData(): ConciergeStoreData {
     clients,
     appointments,
     chairLocks: [],
+    stylistLeaves: [],
+    bookingAuditLog: [],
+    bookingAccessTokens: {},
+    salonUsageMonthly: {},
     alerts: [],
     logs: [],
     walkInQueue,
@@ -668,6 +739,16 @@ function normalizeLoadedConciergeStore(parsed: Partial<ConciergeStoreData>): Con
     clients: Array.isArray(parsed.clients) ? parsed.clients : seed.clients,
     appointments: Array.isArray(parsed.appointments) ? parsed.appointments : seed.appointments,
     chairLocks: Array.isArray(parsed.chairLocks) ? parsed.chairLocks : [],
+    stylistLeaves: Array.isArray(parsed.stylistLeaves) ? parsed.stylistLeaves : [],
+    bookingAuditLog: Array.isArray(parsed.bookingAuditLog) ? parsed.bookingAuditLog : [],
+    bookingAccessTokens:
+      parsed.bookingAccessTokens && typeof parsed.bookingAccessTokens === 'object'
+        ? parsed.bookingAccessTokens
+        : {},
+    salonUsageMonthly:
+      parsed.salonUsageMonthly && typeof parsed.salonUsageMonthly === 'object'
+        ? parsed.salonUsageMonthly
+        : {},
     alerts: Array.isArray(parsed.alerts) ? parsed.alerts : [],
     logs: Array.isArray(parsed.logs) ? parsed.logs : [],
     walkInQueue: Array.isArray(parsed.walkInQueue) ? parsed.walkInQueue : seed.walkInQueue,
@@ -689,6 +770,30 @@ function normalizeLoadedConciergeStore(parsed: Partial<ConciergeStoreData>): Con
   }
   for (const s of Object.values(normalized.settingsBySalon)) {
     const regionMeta = detectRegionFromPhone(s.whatsappPhone || '+92');
+    if (!s.publicCode || !s.publicCode.startsWith('wc_')) {
+      s.publicCode = generateUnguessablePublicCode(s.salonId);
+    }
+    if (!s.ownerAuthPhone) {
+      s.ownerAuthPhone = s.whatsappPhone || '+92 300 0000000';
+    }
+    if (!s.publicContactPhone) {
+      s.publicContactPhone = s.whatsappPhone || s.ownerAuthPhone;
+    }
+    if (s.publicWhatsappPhone === undefined) {
+      s.publicWhatsappPhone = s.publicContactPhone;
+    }
+    if (typeof s.whatsappAddonEnabled !== 'boolean') {
+      s.whatsappAddonEnabled = false;
+    }
+    if (!s.timezoneIana) {
+      s.timezoneIana = detectTimezoneIana(regionMeta.countryCode);
+    }
+    if (!s.defaultLang) {
+      s.defaultLang = 'en';
+    }
+    if (typeof s.regionConfirmedByOwner !== 'boolean') {
+      s.regionConfirmedByOwner = Boolean(SEEDED_PUBLIC_CODES[s.salonId]);
+    }
     if (!s.salonCategory) {
       s.salonCategory = inferSalonCategory(s.salonName, s.salonId);
     }
@@ -751,6 +856,10 @@ interface ShardedSalonConciergeDoc {
   clients: ConciergeClientProfile[];
   appointments: ConciergeAppointment[];
   chairLocks: ChairLock[];
+  stylistLeaves?: StylistLeaveRecord[];
+  bookingAuditLog?: BookingAuditEntry[];
+  bookingAccessTokens?: Record<string, BookingAccessTokenRecord>;
+  salonUsageMonthly?: Record<string, number>;
   barbers: string[];
   alerts: OwnerInterventionAlert[];
   logs: WhatsAppMessageLog[];
@@ -771,6 +880,10 @@ export async function hydrateConciergeStoreFromKv(): Promise<void> {
       clients: [],
       appointments: [],
       chairLocks: [],
+      stylistLeaves: [],
+      bookingAuditLog: [],
+      bookingAccessTokens: {},
+      salonUsageMonthly: {},
       barbersBySalon: {},
       alerts: [],
       logs: [],
@@ -788,6 +901,14 @@ export async function hydrateConciergeStoreFromKv(): Promise<void> {
       if (Array.isArray(doc.clients)) merged.clients!.push(...doc.clients);
       if (Array.isArray(doc.appointments)) merged.appointments!.push(...doc.appointments);
       if (Array.isArray(doc.chairLocks)) merged.chairLocks!.push(...doc.chairLocks);
+      if (Array.isArray(doc.stylistLeaves)) merged.stylistLeaves!.push(...doc.stylistLeaves);
+      if (Array.isArray(doc.bookingAuditLog)) merged.bookingAuditLog!.push(...doc.bookingAuditLog);
+      if (doc.bookingAccessTokens && typeof doc.bookingAccessTokens === 'object') {
+        Object.assign(merged.bookingAccessTokens!, doc.bookingAccessTokens);
+      }
+      if (doc.salonUsageMonthly && typeof doc.salonUsageMonthly === 'object') {
+        merged.salonUsageMonthly![sid] = doc.salonUsageMonthly;
+      }
       if (Array.isArray(doc.barbers)) merged.barbersBySalon![sid] = doc.barbers;
       if (Array.isArray(doc.alerts)) merged.alerts!.push(...doc.alerts);
       if (Array.isArray(doc.logs)) merged.logs!.push(...doc.logs);
@@ -836,16 +957,23 @@ function persistStore(changedSalonId?: string) {
   } catch (err) {
     console.warn('Could not persist concierge store:', err);
   }
-  // Shard KV persistence per salon so 2,500–5,000+ clients per salon stay safely inside $0.00 KV payload bounds
   const salonIds = Object.keys(cachedStore.settingsBySalon);
   const targetIds = changedSalonId && cachedStore.settingsBySalon[changedSalonId] ? [changedSalonId] : salonIds;
   void kvSetJson('wc:concierge:salons:index:v1', salonIds);
   for (const sid of targetIds) {
+    const salonTokens: Record<string, BookingAccessTokenRecord> = {};
+    for (const [hash, rec] of Object.entries(cachedStore.bookingAccessTokens || {})) {
+      if (rec.salonId === sid) salonTokens[hash] = rec;
+    }
     const doc: ShardedSalonConciergeDoc = {
       settings: cachedStore.settingsBySalon[sid],
       clients: cachedStore.clients.filter((c) => c.salonId === sid),
       appointments: cachedStore.appointments.filter((a) => a.salonId === sid),
       chairLocks: cachedStore.chairLocks.filter((l) => l.salonId === sid),
+      stylistLeaves: (cachedStore.stylistLeaves || []).filter((lv) => lv.salonId === sid),
+      bookingAuditLog: (cachedStore.bookingAuditLog || []).filter((e) => e.salonId === sid).slice(0, 300),
+      bookingAccessTokens: salonTokens,
+      salonUsageMonthly: (cachedStore.salonUsageMonthly || {})[sid] || {},
       barbers: cachedStore.barbersBySalon[sid] || [...DEFAULT_SALON_BARBERS],
       alerts: cachedStore.alerts.filter((a) => a.salonId === sid),
       logs: cachedStore.logs.filter((l) => l.salonId === sid).slice(0, 200),
@@ -914,6 +1042,116 @@ function ensureSalonExists(
     if (changed) persistStore();
   }
   return store.settingsBySalon[salonId];
+}
+
+export function resolveSalonIdByPublicCode(publicCode: string): string | null {
+  const clean = (publicCode || '').trim();
+  if (!clean || !clean.startsWith('wc_')) {
+    return null;
+  }
+  const store = ensureStoreLoaded();
+  const match = Object.values(store.settingsBySalon).find((s) => s.publicCode === clean);
+  return match ? match.salonId : null;
+}
+
+export function findSalonIdByMetaPhoneNumberId(phoneNumberId: string): string | null {
+  const clean = (phoneNumberId || '').trim();
+  if (!clean) return null;
+  const store = ensureStoreLoaded();
+  const match = Object.values(store.settingsBySalon).find(
+    (s) => Boolean(s.whatsappAddonEnabled) && (s.metaPhoneNumberId || '').trim() === clean
+  );
+  return match ? match.salonId : null;
+}
+
+function getSalonBillingMonthKey(settings: RetentionSettings): string {
+  return getSalonLocalDateParts(settings.timezoneOffsetHours).dateStr.slice(0, 7);
+}
+
+export function getMonthlyUsageSnapshot(salonId: string): MonthlyUsageMeter {
+  const store = ensureStoreLoaded();
+  const settings = ensureSalonExists(salonId);
+  const billingMonth = getSalonBillingMonthKey(settings);
+  const tier: SalonPackageTier = PLAN_QUOTAS[settings.packageTier] ? settings.packageTier : 'PRO++';
+  const quota = PLAN_QUOTAS[tier];
+  const recordedCount = Number(store.salonUsageMonthly?.[salonId]?.[billingMonth] ?? 0);
+  const billableBookings = Math.max(0, recordedCount);
+  const overageBookings = Math.max(0, billableBookings - quota.limit);
+  const remainingInPlan = Math.max(0, quota.limit - billableBookings);
+  const pctUsed = quota.limit > 0 ? Math.min(200, Math.round((billableBookings / quota.limit) * 100)) : 0;
+
+  let status: MonthlyUsageMeter['status'] = 'OK';
+  if (billableBookings >= quota.limit + quota.grace) {
+    status = 'BLOCKED';
+  } else if (billableBookings >= quota.limit) {
+    status = 'GRACE';
+  } else if (pctUsed >= 90) {
+    status = 'WARN_90';
+  } else if (pctUsed >= 80) {
+    status = 'WARN_80';
+  }
+
+  return {
+    billingMonth,
+    planTier: tier,
+    monthlyLimit: quota.limit,
+    graceLimit: quota.grace,
+    billableBookings,
+    overageBookings,
+    remainingInPlan,
+    pctUsed,
+    status,
+  };
+}
+
+function incrementMonthlyUsage(salonId: string) {
+  const store = ensureStoreLoaded();
+  const settings = ensureSalonExists(salonId);
+  const billingMonth = getSalonBillingMonthKey(settings);
+  if (!store.salonUsageMonthly[salonId]) {
+    store.salonUsageMonthly[salonId] = {};
+  }
+  store.salonUsageMonthly[salonId][billingMonth] =
+    Number(store.salonUsageMonthly[salonId][billingMonth] ?? 0) + 1;
+}
+
+function appendBookingAudit(
+  salonId: string,
+  bookingId: string,
+  actorType: BookingAuditEntry['actorType'],
+  action: BookingAuditEntry['action'],
+  note: string
+) {
+  const store = ensureStoreLoaded();
+  const entry: BookingAuditEntry = {
+    id: `aud-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
+    salonId,
+    bookingId,
+    actorType,
+    action,
+    note: sanitizePlainText(note, 260),
+    createdAt: new Date().toISOString(),
+  };
+  store.bookingAuditLog = [entry, ...(store.bookingAuditLog || [])].slice(0, 1200);
+}
+
+function syncSalonSettingsToPostgres(settings: RetentionSettings) {
+  const tier: SalonPackageTier = PLAN_QUOTAS[settings.packageTier] ? settings.packageTier : 'PRO++';
+  const quota = PLAN_QUOTAS[tier];
+  void persistPostgresSnapshotMirror({
+    salonId: settings.salonId,
+    publicCode: settings.publicCode,
+    salonName: settings.salonName,
+    ownerAuthPhone: settings.ownerAuthPhone || settings.whatsappPhone,
+    publicContactPhone: settings.publicContactPhone || settings.whatsappPhone,
+    publicWhatsappPhone: settings.publicWhatsappPhone,
+    timezoneIana: settings.timezoneIana || 'Asia/Karachi',
+    currencyCode: settings.currency,
+    currencySymbol: settings.currencySymbol,
+    planTier: tier,
+    monthlyLimit: quota.limit,
+    billingStatus: settings.billingStatus,
+  });
 }
 
 function formatOfferSummary(settings: RetentionSettings, kind: 'BIRTHDAY' | 'WINBACK', lang: ClientPreferredLang): string {
@@ -1231,8 +1469,38 @@ function isBarberBusyAtWindow(
     }
   }
 
+  for (const lv of store.stylistLeaves || []) {
+    if (lv.salonId !== salonId) continue;
+    if (lv.date !== resolvedTargetDate) continue;
+    const normLeaveStylist = lv.stylistName.toLowerCase();
+    if (
+      normLeaveStylist === normTarget ||
+      normLeaveStylist.includes(normTarget) ||
+      normTarget.includes(normLeaveStylist.split(' ')[0])
+    ) {
+      if (lv.fullDay !== false && !lv.startTime && !lv.endTime) {
+        return {
+          busy: true,
+          busyUntilMinutes: 1440,
+          reason: lv.reason || 'Stylist on Leave',
+        };
+      }
+      const lvStart = lv.startTime ? parseTimeSlotToMinutes(lv.startTime) : 0;
+      const lvEnd = lv.endTime ? parseTimeSlotToMinutes(lv.endTime) : 1440;
+      if (lvStart >= 0 && lvEnd > lvStart && startMinutes < lvEnd && endMinutes > lvStart) {
+        return {
+          busy: true,
+          busyUntilMinutes: lvEnd,
+          reason: lv.reason || `On Leave (${lv.startTime}–${lv.endTime})`,
+        };
+      }
+    }
+  }
+
   for (const appt of store.appointments) {
-    if (appt.salonId !== salonId || appt.status === 'COMPLETED' || appt.canceled) continue;
+    if (appt.salonId !== salonId || appt.status === 'COMPLETED' || appt.status === 'CANCELED' || appt.canceled) {
+      continue;
+    }
     const apptDateStr =
       appt.appointmentDate ||
       getIsoLocalDateStr(appt.scheduledForIso, settings.timezoneOffsetHours) ||
@@ -1329,6 +1597,8 @@ export function getSalonConciergeState(
   const greetingPromptPreview = buildGreetingMenuText(settings.salonName, regionMeta.region);
 
   return {
+    salonId,
+    publicCode: settings.publicCode,
     region: regionMeta.region,
     regionLabel: regionMeta.regionLabel,
     languageOptions,
@@ -1338,12 +1608,16 @@ export function getSalonConciergeState(
     appointments: store.appointments.filter((a) => a.salonId === salonId),
     chairLocks: store.chairLocks.filter((l) => l.salonId === salonId),
     barbers: getSalonBarbers(salonId),
+    stylistLeaves: (store.stylistLeaves || []).filter((lv) => lv.salonId === salonId),
     alerts: store.alerts.filter((al) => al.salonId === salonId),
     logs: store.logs.filter((l) => l.salonId === salonId).slice(0, 50),
     walkInQueue: (store.walkInQueue || []).filter((w) => w.salonId === salonId),
     bridalBookings: (store.bridalBookings || []).filter((b) => b.salonId === salonId),
     servicePackages: (store.servicePackages || []).filter((p) => p.salonId === salonId),
     deals: (store.deals || []).filter((d) => d.salonId === salonId),
+    usageMeter: getMonthlyUsageSnapshot(salonId),
+    opportunities: getRetentionOpportunities(salonId),
+    bookingAuditLog: (store.bookingAuditLog || []).filter((e) => e.salonId === salonId).slice(0, 80),
   };
 }
 
@@ -1353,7 +1627,7 @@ export function updateRetentionSettings(
 ): SalonConciergeStateResponse {
   const store = ensureStoreLoaded();
   const current = ensureSalonExists(salonId);
-  const regionMeta = detectRegionFromPhone(patch.whatsappPhone || current.whatsappPhone);
+  const regionMeta = detectRegionFromPhone(patch.whatsappPhone || patch.ownerAuthPhone || current.whatsappPhone);
   const cleanCategory: SalonCategory | undefined =
     patch.salonCategory === 'LADIES' || patch.salonCategory === 'MENS' ? patch.salonCategory : undefined;
   const cleanServices: SalonServiceRate[] | undefined = Array.isArray(patch.enabledServices)
@@ -1364,6 +1638,13 @@ export function updateRetentionSettings(
           name: sanitizePlainText(svc?.name, 80),
           price: clampInteger(svc?.price, 0, 500000, 1000),
           durationMins: clampInteger(svc?.durationMins ?? 35, 5, 360, 35),
+          bufferAfterMins:
+            svc?.bufferAfterMins !== undefined
+              ? clampInteger(svc.bufferAfterMins, 0, 120, 0)
+              : undefined,
+          eligibleStylists: Array.isArray(svc?.eligibleStylists)
+            ? svc.eligibleStylists.map((st) => sanitizePlainText(st, 60)).filter(Boolean).slice(0, 20)
+            : undefined,
           active: svc?.active !== false,
         }))
         .filter((s) => Boolean(s.name))
@@ -1393,11 +1674,55 @@ export function updateRetentionSettings(
     patch.salonName !== undefined
       ? sanitizePlainText(patch.salonName, 100) || current.salonName
       : current.salonName;
+  const validTier: SalonPackageTier | undefined =
+    patch.packageTier === 'STARTER' ||
+    patch.packageTier === 'PRO' ||
+    patch.packageTier === 'PRO++' ||
+    patch.packageTier === 'CUSTOM'
+      ? patch.packageTier
+      : undefined;
+  const validDefaultLang: ClientPreferredLang | undefined =
+    patch.defaultLang === 'en' ||
+    patch.defaultLang === 'roman_ur' ||
+    patch.defaultLang === 'ur' ||
+    patch.defaultLang === 'ar'
+      ? patch.defaultLang
+      : undefined;
 
   const safePatch: Partial<RetentionSettings> = {
     salonName: nextSalonName,
     ownerName: patch.ownerName !== undefined ? sanitizePlainText(patch.ownerName, 80) || current.ownerName : current.ownerName,
+    ownerAuthPhone:
+      patch.ownerAuthPhone !== undefined
+        ? sanitizePhone(patch.ownerAuthPhone) || current.ownerAuthPhone
+        : current.ownerAuthPhone,
+    publicContactPhone:
+      patch.publicContactPhone !== undefined
+        ? sanitizePhone(patch.publicContactPhone) || current.publicContactPhone
+        : current.publicContactPhone,
+    publicWhatsappPhone:
+      patch.publicWhatsappPhone !== undefined
+        ? sanitizePhone(patch.publicWhatsappPhone)
+        : current.publicWhatsappPhone,
     whatsappPhone: patch.whatsappPhone !== undefined ? sanitizePhone(patch.whatsappPhone) || current.whatsappPhone : current.whatsappPhone,
+    whatsappAddonEnabled:
+      patch.whatsappAddonEnabled !== undefined
+        ? Boolean(patch.whatsappAddonEnabled)
+        : current.whatsappAddonEnabled,
+    metaPhoneNumberId:
+      patch.metaPhoneNumberId !== undefined
+        ? sanitizePlainText(patch.metaPhoneNumberId, 64)
+        : current.metaPhoneNumberId,
+    timezoneIana:
+      patch.timezoneIana !== undefined
+        ? sanitizePlainText(patch.timezoneIana, 64) || current.timezoneIana
+        : current.timezoneIana,
+    defaultLang: validDefaultLang || current.defaultLang || 'en',
+    regionConfirmedByOwner:
+      patch.regionConfirmedByOwner !== undefined
+        ? Boolean(patch.regionConfirmedByOwner)
+        : current.regionConfirmedByOwner,
+    packageTier: validTier || current.packageTier,
     salonCategory: cleanCategory || current.salonCategory || inferSalonCategory(current.salonName, salonId),
     enabledServices: cleanServices && cleanServices.length > 0 ? cleanServices : current.enabledServices,
     address: nextAddress,
@@ -1472,13 +1797,15 @@ export function updateRetentionSettings(
     salonId,
     updatedAt: new Date().toISOString(),
   };
-  if (safePatch.whatsappPhone && patch.whatsappPhone) {
+  if ((safePatch.whatsappPhone && patch.whatsappPhone) || (safePatch.ownerAuthPhone && patch.ownerAuthPhone)) {
     updated.countryCode = regionMeta.countryCode;
     updated.timezoneOffsetHours = regionMeta.timezoneOffsetHours;
+    updated.timezoneIana = updated.timezoneIana || detectTimezoneIana(regionMeta.countryCode);
     updated.currency = regionMeta.currency;
     updated.currencySymbol = regionMeta.currencySymbol;
   }
   store.settingsBySalon[salonId] = updated;
+  syncSalonSettingsToPostgres(updated);
   persistStore(salonId);
   return getSalonConciergeState(salonId);
 }
@@ -1653,6 +1980,7 @@ export function upsertClientProfile(
     name?: string;
     birthDate?: string;
     preferredLanguage?: ClientPreferredLang | null;
+    marketingOptIn?: boolean;
   }
 ): ConciergeClientProfile {
   const store = ensureStoreLoaded();
@@ -1688,6 +2016,10 @@ export function upsertClientProfile(
       lastWinbackSentAt: null,
       awaitingWinbackRebook: false,
       awaitingReviewAppointmentId: null,
+      marketingOptIn: Boolean(input.marketingOptIn),
+      totalVisits: 0,
+      lastServiceIds: [],
+      lastBarberName: null,
     };
     store.clients.unshift(existing);
   } else {
@@ -1697,9 +2029,211 @@ export function upsertClientProfile(
       existing.preferredLanguage = validLang;
       existing.awaitingLanguageSelection = false;
     }
+    if (typeof input.marketingOptIn === 'boolean') {
+      existing.marketingOptIn = input.marketingOptIn;
+    }
   }
-  persistStore();
+  persistStore(salonId);
   return existing;
+}
+
+export function addStylistLeave(
+  salonId: string,
+  input: {
+    stylistName: string;
+    date: string;
+    startTime?: string;
+    endTime?: string;
+    fullDay?: boolean;
+    reason?: string;
+  }
+): SalonConciergeStateResponse {
+  const store = ensureStoreLoaded();
+  ensureSalonExists(salonId);
+  const cleanStylist = sanitizePlainText(input.stylistName, 60);
+  const cleanDate = /^\d{4}-\d{2}-\d{2}$/.test(input.date || '') ? input.date : '';
+  if (!cleanStylist || !cleanDate) {
+    throw new Error('Stylist name and YYYY-MM-DD date are required.');
+  }
+  const lv: StylistLeaveRecord = {
+    id: `lv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
+    salonId,
+    stylistName: cleanStylist,
+    date: cleanDate,
+    startTime: input.startTime ? sanitizePlainText(input.startTime, 20) : undefined,
+    endTime: input.endTime ? sanitizePlainText(input.endTime, 20) : undefined,
+    fullDay: input.fullDay !== false && !(input.startTime && input.endTime),
+    reason: input.reason ? sanitizePlainText(input.reason, 120) : 'Scheduled Off / Leave',
+    createdAt: new Date().toISOString(),
+  };
+  store.stylistLeaves = [lv, ...(store.stylistLeaves || [])].slice(0, 200);
+  persistStore(salonId);
+  return getSalonConciergeState(salonId);
+}
+
+export function removeStylistLeave(salonId: string, leaveId: string): SalonConciergeStateResponse {
+  const store = ensureStoreLoaded();
+  store.stylistLeaves = (store.stylistLeaves || []).filter(
+    (lv) => !(lv.salonId === salonId && lv.id === leaveId)
+  );
+  persistStore(salonId);
+  return getSalonConciergeState(salonId);
+}
+
+export function getRetentionOpportunities(salonId: string): RetentionOpportunityItem[] {
+  const store = ensureStoreLoaded();
+  const settings = ensureSalonExists(salonId);
+  const localClock = getLocalClockForOffset(settings.timezoneOffsetHours);
+  const nowMs = Date.now();
+  const winbackThresholdMs = Math.max(1, settings.winbackDays) * 86400000;
+  const opportunities: RetentionOpportunityItem[] = [];
+
+  for (const cli of store.clients.filter((c) => c.salonId === salonId)) {
+    const lang: ClientPreferredLang = cli.preferredLanguage || 'en';
+    const cleanPhoneDigits = cli.phone.replace(/\D/g, '');
+    if (!cleanPhoneDigits) continue;
+    const bookUrlHint = `/s/${settings.publicCode}`;
+
+    if (settings.birthdayEnabled && cli.birthDate && cli.birthDate === localClock.dayMonth) {
+      const msg = `${renderBirthdayMessage(settings, cli.name, lang)} Book instantly: ${bookUrlHint}`;
+      opportunities.push({
+        clientId: cli.id,
+        clientName: cli.name,
+        clientPhone: cli.phone,
+        reason: 'BIRTHDAY',
+        suggestedMessage: msg,
+        whatsappHandoffUrl: `https://wa.me/${cleanPhoneDigits}?text=${encodeURIComponent(msg)}`,
+      });
+      continue;
+    }
+
+    if (settings.winbackEnabled && cli.lastCompletedVisitAt) {
+      const lastVisitMs = new Date(cli.lastCompletedVisitAt).getTime();
+      if (!Number.isNaN(lastVisitMs) && nowMs - lastVisitMs >= winbackThresholdMs) {
+        const hasUpcoming = store.appointments.some(
+          (a) =>
+            a.salonId === salonId &&
+            a.clientId === cli.id &&
+            (a.status === 'CONFIRMED' || a.status === 'IN_CHAIR')
+        );
+        if (!hasUpcoming) {
+          const daysSince = Math.floor((nowMs - lastVisitMs) / 86400000);
+          const msg = `${renderWinBackMessage(settings, cli.name, lang)} Instant rebook: ${bookUrlHint}`;
+          opportunities.push({
+            clientId: cli.id,
+            clientName: cli.name,
+            clientPhone: cli.phone,
+            reason: 'DORMANT_30D',
+            daysSinceLastVisit: daysSince,
+            suggestedMessage: msg,
+            whatsappHandoffUrl: `https://wa.me/${cleanPhoneDigits}?text=${encodeURIComponent(msg)}`,
+          });
+        }
+      }
+    }
+  }
+  return opportunities;
+}
+
+export function saveFirstTimeClientProfile(
+  publicCode: string,
+  input: {
+    name: string;
+    phone: string;
+    preferredLanguage?: ClientPreferredLang;
+    marketingOptIn?: boolean;
+  }
+): {
+  ok: true;
+  salonId: string;
+  publicCode: string;
+  cookieToken: string;
+  personalReturningShareUrl: string;
+  returningClient: ReturningClientSnapshot;
+} | { ok: false; statusCode: number; error: string } {
+  const salonId = resolveSalonIdByPublicCode(publicCode);
+  if (!salonId) {
+    return { ok: false, statusCode: 404, error: 'Salon booking link not found.' };
+  }
+  const settings = ensureSalonExists(salonId);
+  const cleanName = sanitizePlainText(input.name, 80);
+  const cleanPhone = sanitizePhone(input.phone);
+  if (!cleanName || cleanName.length < 2) {
+    return { ok: false, statusCode: 400, error: 'Please enter your complete full name.' };
+  }
+  if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 6) {
+    return { ok: false, statusCode: 400, error: 'Please enter a valid mobile number.' };
+  }
+  const validLang: ClientPreferredLang =
+    input.preferredLanguage === 'roman_ur' ||
+    input.preferredLanguage === 'ur' ||
+    input.preferredLanguage === 'ar'
+      ? input.preferredLanguage
+      : 'en';
+
+  const client = upsertClientProfile(salonId, {
+    name: cleanName,
+    phone: cleanPhone,
+    preferredLanguage: validLang,
+    marketingOptIn: Boolean(input.marketingOptIn),
+  });
+
+  const cookieToken = signCustomerRecognizeToken({
+    salonId,
+    publicCode: settings.publicCode,
+    clientId: client.id,
+  });
+
+  return {
+    ok: true,
+    salonId,
+    publicCode: settings.publicCode,
+    cookieToken,
+    personalReturningShareUrl: `/s/${encodeURIComponent(settings.publicCode)}?c=${encodeURIComponent(cookieToken)}`,
+    returningClient: {
+      clientId: client.id,
+      clientName: client.name,
+      maskedPhone: maskPhoneNumber(client.phone),
+      preferredLanguage: (client.preferredLanguage || validLang) as ClientPreferredLang,
+      totalVisits: Number(client.totalVisits || 0),
+      lastServiceIds: Array.isArray(client.lastServiceIds) ? client.lastServiceIds : [],
+      lastBarberName: client.lastBarberName || null,
+      marketingOptIn: Boolean(client.marketingOptIn),
+    },
+  };
+}
+
+export function updateAppointmentStatus(
+  salonId: string,
+  bookingId: string,
+  nextStatus: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED'
+): { ok: true; appointment: ConciergeAppointment; state: SalonConciergeStateResponse } | { ok: false; error: string } {
+  const store = ensureStoreLoaded();
+  ensureSalonExists(salonId);
+  const appt = store.appointments.find((a) => a.salonId === salonId && a.id === bookingId);
+  if (!appt) {
+    return { ok: false, error: 'Appointment not found for this salon.' };
+  }
+  appt.status = nextStatus;
+  if (nextStatus === 'CANCELED') {
+    appt.canceled = true;
+    store.chairLocks = store.chairLocks.filter((l) => !(l.salonId === salonId && l.id === bookingId));
+    appendBookingAudit(salonId, bookingId, 'OWNER', 'CANCELED', 'Marked canceled by salon owner (quota unchanged).');
+  } else if (nextStatus === 'COMPLETED') {
+    const nowIso = new Date().toISOString();
+    appt.completedAt = nowIso;
+    const cli = store.clients.find((c) => c.id === appt.clientId);
+    if (cli) {
+      cli.lastCompletedVisitAt = nowIso;
+      cli.totalVisits = (cli.totalVisits || 0) + 1;
+    }
+    store.chairLocks = store.chairLocks.filter((l) => !(l.salonId === salonId && l.id === bookingId));
+    appendBookingAudit(salonId, bookingId, 'OWNER', 'COMPLETED', 'Appointment marked completed by salon owner.');
+  } else {
+    appendBookingAudit(salonId, bookingId, 'OWNER', nextStatus === 'IN_CHAIR' ? 'IN_CHAIR' : 'CREATED', `Status updated to ${nextStatus}.`);
+  }
+  persistStore(salonId);
+  return { ok: true, appointment: appt, state: getSalonConciergeState(salonId) };
 }
 
 export function completeAppointmentAndRecordVisit(
@@ -2006,95 +2540,44 @@ export function processWhatsAppWebhook(payload: {
   );
   const activeDir = getLangDirection(activeLang);
 
-  // 3. Smart Reputation Routing for 1–5 Star Feedback (Module 4)
+  // 3. Neutral Post-Visit Review Prompt (No 4-5 star vs 1-3 star rating gate!)
   if (isStarFeedback && starMatch) {
     const rating = Number(starMatch[1]);
     const appt =
       store.appointments.find((a) => a.id === reviewApptId) ||
       store.appointments.find((a) => a.salonId === payload.salonId && a.clientId === client!.id && a.status === 'COMPLETED');
 
-    if (rating >= 4) {
-      if (appt) {
-        appt.rating = rating;
-        appt.ratingComment = raw;
-        appt.reviewRoutedStatus = 'PUBLIC_GOOGLE_SENT';
-      }
-      client.awaitingReviewAppointmentId = null;
-
-      const thankYouMap: Record<ClientPreferredLang, string> = {
-        en: `Thank you for the ${rating}★ rating, ${client.name}! We would love it if you shared your quick review on Google: ${settings.googleReviewUrl}`,
-        roman_ur: `Bohat shukriya ${client.name} (${rating}★)! Agar aap apna review Google par share kar dein to bohat meharbani hogi: ${settings.googleReviewUrl}`,
-        ur: `${rating}★ ریٹنگ کا بہت شکریہ ${client.name}! برائے مہربانی اپنا قیمتی ریویو گوگل پر شیئر کریں: ${settings.googleReviewUrl}`,
-        ar: `شكراً جزيلاً لتقييمك (${rating}★) يا ${client.name}! يسعدنا مشاركة تقييمك على جوجل: ${settings.googleReviewUrl}`,
-      };
-      const replyText = thankYouMap[activeLang];
-      appendLog(payload.salonId, {
-        direction: 'OUTBOUND',
-        module: 'REVIEW_T2H',
-        clientName: client.name,
-        clientPhone: client.phone,
-        language: activeLang,
-        dir: activeDir,
-        body: replyText,
-      });
-      persistStore();
-      return {
-        replyText,
-        replyDir: activeDir,
-        lockedLanguage: activeLang,
-        routedAction: 'REVIEW_ROUTED_PUBLIC_GOOGLE',
-        state: getSalonConciergeState(payload.salonId),
-      };
-    } else {
-      // 1-3 Stars: Strictly suppress Google URL & create OWNER_INTERVENTION_NEEDED alert!
-      if (appt) {
-        appt.rating = rating;
-        appt.ratingComment = raw;
-        appt.reviewRoutedStatus = 'OWNER_INTERVENTION_NEEDED';
-      }
-      client.awaitingReviewAppointmentId = null;
-
-      const alert: OwnerInterventionAlert = {
-        id: `al-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-        salonId: payload.salonId,
-        appointmentId: appt?.id || 'DIRECT-WA',
-        clientId: client.id,
-        clientName: client.name,
-        clientPhone: client.phone,
-        service: appt?.service || 'Salon Service',
-        rating,
-        feedbackText: raw,
-        status: 'OWNER_INTERVENTION_NEEDED',
-        createdAt: new Date().toISOString(),
-        resolvedAt: null,
-      };
-      store.alerts.unshift(alert);
-
-      const apologyMap: Record<ClientPreferredLang, string> = {
-        en: `We are truly sorry your visit did not earn 5 stars, ${client.name}. Thank you for your honest ${rating}★ feedback—our Salon Owner (${settings.ownerName}) has been alerted privately and will reach out personally to make this right.`,
-        roman_ur: `Maazrat chahte hain ${client.name} ke aaj ka tajurba aap ki umeed ke mutabiq nahi raha. Hum ne aap ka ${rating}★ feedback Salon Owner (${settings.ownerName}) tak fori pohncha diya hai—woh khud aap se rabta karein gay.`,
-        ur: `ہم دل سے معذرت خواہ ہیں ${client.name} کہ آج کا تجربہ آپ کی توقعات پر پورا نہ اتر سکا۔ آپ کا ${rating}★ فیڈبیک فوری طور پر سیلون مالک (${settings.ownerName}) کو بھیج دیا گیا ہے اور وہ ذاتی طور پر آپ سے رابطہ کریں گے۔`,
-        ar: `نعتذر بشدة يا ${client.name} لأن تجربتك لم تكن بالمستوى المطلوب. تم إبلاغ مالك الصالون (${settings.ownerName}) فوراً بتقييمك (${rating}★) وسيتواصل معك شخصياً لتعويضك.`,
-      };
-      const replyText = apologyMap[activeLang];
-      appendLog(payload.salonId, {
-        direction: 'OUTBOUND',
-        module: 'REVIEW_T2H',
-        clientName: client.name,
-        clientPhone: client.phone,
-        language: activeLang,
-        dir: activeDir,
-        body: replyText,
-      });
-      persistStore();
-      return {
-        replyText,
-        replyDir: activeDir,
-        lockedLanguage: activeLang,
-        routedAction: 'OWNER_INTERVENTION_NEEDED',
-        state: getSalonConciergeState(payload.salonId),
-      };
+    if (appt) {
+      appt.rating = rating;
+      appt.ratingComment = raw;
+      appt.reviewRoutedStatus = 'PUBLIC_GOOGLE_SENT';
     }
+    client.awaitingReviewAppointmentId = null;
+
+    const thankYouMap: Record<ClientPreferredLang, string> = {
+      en: `Thank you for your feedback, ${client.name}! Every review helps ${settings.salonName} serve you better. Share your honest experience on Google: ${settings.googleReviewUrl}`,
+      roman_ur: `Aap ke feedback ka bohat shukriya ${client.name}! Meharbani farma kar apna imandari se review Google par share karein: ${settings.googleReviewUrl}`,
+      ur: `آپ کے فیڈبیک کا بہت شکریہ ${client.name}! برائے مہربانی اپنا ایمانداری پر مبنی ریویو گوگل پر شیئر کریں: ${settings.googleReviewUrl}`,
+      ar: `شكراً جزيلاً لمشاركتك رأيك يا ${client.name}! نرحب بمشاركة تجربتك الصادقة على جوجل: ${settings.googleReviewUrl}`,
+    };
+    const replyText = thankYouMap[activeLang];
+    appendLog(payload.salonId, {
+      direction: 'OUTBOUND',
+      module: 'REVIEW_T2H',
+      clientName: client.name,
+      clientPhone: client.phone,
+      language: activeLang,
+      dir: activeDir,
+      body: replyText,
+    });
+    persistStore(payload.salonId);
+    return {
+      replyText,
+      replyDir: activeDir,
+      lockedLanguage: activeLang,
+      routedAction: 'REVIEW_ROUTED_PUBLIC_GOOGLE',
+      state: getSalonConciergeState(payload.salonId),
+    };
   }
 
   // 3B. Localized Price List / Rate Menu Auto-Reply (Includes Ladies Female-Only Privacy Notice)
@@ -3107,6 +3590,11 @@ const CUSTOMER_DEAL_EXACT_TRANSLATIONS: Record<
     ur: 'ماسٹر ہیئر کٹ، اسکن فیڈ، کلاسک داڑھی ٹرم اور ہاٹ ٹاول شیو کا مکمل پیکیج۔',
     ar: 'باقة شاملة تتضمن قص شعر احترافي، تدريج الشعر، تشذيب اللحية، وحلاقة بالمنشفة الساخنة.',
   },
+  'signature haircut, beard sculpt, and hot towel shave bundle.': {
+    roman_ur: 'Signature Haircut, Beard Sculpt aur Hot Towel Shave ka mukammal bundle.',
+    ur: 'سگنیچر ہیئر کٹ، داڑھی اسٹائلنگ اور ہاٹ ٹاول شیو کا مکمل پیکیج۔',
+    ar: 'باقة شاملة تتضمن قص شعر مميز، تحديد اللحية، وحلاقة بالمنشفة الساخنة.',
+  },
   'hydra-facial + party styling glow deal': {
     roman_ur: 'Hydra-Facial + Party Styling Glow Deal',
     ur: 'ہائیڈرا فیشل + پارٹی اسٹائلنگ گلو ڈیل',
@@ -3149,7 +3637,11 @@ function localizeDealText(text: string, lang: ClientPreferredLang): string {
     [/\bspecial salon offer\b/gi, 'خصوصی سیلون آفر'],
     [/\blimited-time\b/gi, 'محدود مدت'],
     [/\bvalid until\b/gi, 'آخری تاریخ'],
+    [/\bincludes:\s*/gi, 'شامل ہیں: '],
     [/\bincludes\b/gi, 'شامل ہیں:'],
+    [/\bwith\b/gi, 'اور'],
+    [/\band\b/gi, 'اور'],
+    [/\s+&\s+/g, ' اور '],
     [/\bweekend\b/gi, 'ویک اینڈ'],
     [/\bgrooming\b/gi, 'گرومنگ'],
     [/\bexecutive\b/gi, 'ایگزیکٹو'],
@@ -3177,7 +3669,11 @@ function localizeDealText(text: string, lang: ClientPreferredLang): string {
     [/\bspecial salon offer\b/gi, 'عرض صالون خاص'],
     [/\blimited-time\b/gi, 'لفترة محدودة'],
     [/\bvalid until\b/gi, 'صالح حتى'],
+    [/\bincludes:\s*/gi, 'يشمل: '],
     [/\bincludes\b/gi, 'يشمل:'],
+    [/\bwith\b/gi, 'مع'],
+    [/\band\b/gi, 'و'],
+    [/\s+&\s+/g, ' و '],
     [/\bweekend\b/gi, 'نهاية الأسبوع'],
     [/\bgrooming\b/gi, 'عناية'],
     [/\bexecutive\b/gi, 'تنفيذي'],
@@ -3463,9 +3959,11 @@ export function getDealVideoFileInfo(
 }
 
 export function getPublicDealPayload(
-  salonId: string,
+  salonCode: string,
   dealId: string
 ): PublicDealPageResponse | null {
+  const salonId = resolveSalonIdByPublicCode(salonCode);
+  if (!salonId) return null;
   const settings = ensureSalonExists(salonId);
   runDealExpiryAndVideoRetentionCron(salonId);
   const store = ensureStoreLoaded();
@@ -3478,13 +3976,19 @@ export function getPublicDealPayload(
   const matchedServices = activeServices.filter(
     (s) => (s.id && deal.serviceIds.includes(s.id)) || deal.serviceNames.includes(s.name)
   );
+  const enrichedActive = enrichServicesWithTranslations(activeServices);
+  const enrichedMatched = enrichServicesWithTranslations(
+    matchedServices.length > 0 ? matchedServices : activeServices.slice(0, 2)
+  );
   const address = settings.address || SEEDED_SALON_ADDRESSES[salonId] || 'Salon Location';
   const googleMapsUrl =
     settings.googleMapsUrl || buildGoogleMapsSearchUrl(settings.salonName, address);
 
   return {
     salonId,
+    publicCode: settings.publicCode,
     salonName: settings.salonName,
+    salonCategory: settings.salonCategory || 'MENS',
     address,
     googleMapsUrl,
     currencySymbol: settings.currencySymbol,
@@ -3493,10 +3997,10 @@ export function getPublicDealPayload(
     videoPurged,
     retentionDaysAfterExpiry:
       deal.videoRetentionDaysAfterExpiry ?? settings.videoRetentionDaysAfterExpiry ?? 30,
-    matchedServices: enrichServicesWithTranslations(
-      matchedServices.length > 0 ? matchedServices : activeServices.slice(0, 2)
-    ),
+    services: enrichedActive,
+    matchedServices: enrichedMatched,
     availableLanguages: getConfiguredLanguageChoices(settings),
+    defaultLanguage: settings.defaultLang || 'en',
   };
 }
 
@@ -3597,7 +4101,7 @@ function getScheduleForDate(
 
 export function getCustomerExperienceConfig(
   salonId: string,
-  clientPhone?: string,
+  clientToken?: string,
   requestedLang?: ClientPreferredLang
 ): CustomerExperienceConfig {
   const settings = ensureSalonExists(salonId);
@@ -3605,46 +4109,76 @@ export function getCustomerExperienceConfig(
   const store = ensureStoreLoaded();
   const regionMeta = detectRegionFromPhone(settings.whatsappPhone);
   const availableLanguages = getConfiguredLanguageChoices(settings);
-  const cleanPhone = clientPhone ? sanitizePhone(clientPhone) : '';
-  const normPhone = cleanPhone.replace(/\s+/g, '');
-  const client = normPhone
-    ? store.clients.find(
-        (c) => c.salonId === salonId && c.phone.replace(/\s+/g, '') === normPhone
-      )
-    : undefined;
-  const savedInfo = resolveSavedNameStatus(client);
+
+  // Returning client recognition uses ONLY verified HMAC token (?c= or HttpOnly wc_cli_<code > cookie)
+  // Unverified phone query parameters NEVER leak client names or PII.
+  let verifiedClient: ConciergeClientProfile | undefined;
+  if (clientToken) {
+    const claims = verifyCustomerRecognizeToken(clientToken, salonId);
+    if (claims?.clientId) {
+      verifiedClient = store.clients.find(
+        (c) => c.salonId === salonId && c.id === claims.clientId
+      );
+    }
+  }
+
+  const returningClient: ReturningClientSnapshot | null = verifiedClient
+    ? {
+        clientId: verifiedClient.id,
+        clientName: verifiedClient.name,
+        maskedPhone: maskPhoneNumber(verifiedClient.phone),
+        preferredLanguage: (verifiedClient.preferredLanguage || 'en') as ClientPreferredLang,
+        totalVisits: Number(verifiedClient.totalVisits || 0),
+        lastServiceIds: Array.isArray(verifiedClient.lastServiceIds)
+          ? verifiedClient.lastServiceIds
+          : [],
+        lastBarberName: verifiedClient.lastBarberName || null,
+        marketingOptIn: Boolean(verifiedClient.marketingOptIn),
+      }
+    : null;
+
   const defaultLanguage: ClientPreferredLang =
     requestedLang && availableLanguages.some((l) => l.lang === requestedLang)
       ? requestedLang
-      : 'en';
+      : returningClient?.preferredLanguage &&
+        availableLanguages.some((l) => l.lang === returningClient.preferredLanguage)
+      ? returningClient.preferredLanguage
+      : settings.defaultLang || 'en';
+
   const activeServices = (settings.enabledServices || []).filter((s) => s.active !== false);
-  const activeDeals = listSalonDeals(salonId, true);
+  const activeDeals = listSalonDeals(salonId, true).map((d) => ({
+    ...d,
+    dealPagePath: `/deal/${encodeURIComponent(settings.publicCode)}/${encodeURIComponent(d.id)}`,
+  }));
   const address = settings.address || SEEDED_SALON_ADDRESSES[salonId] || 'Salon Location';
   const googleMapsUrl =
     settings.googleMapsUrl || buildGoogleMapsSearchUrl(settings.salonName, address);
+  const usage = getMonthlyUsageSnapshot(salonId);
 
   return {
     salonId,
+    publicCode: settings.publicCode,
     salonName: settings.salonName,
-    whatsappPhone: settings.whatsappPhone,
+    salonCategory: settings.salonCategory || 'MENS',
+    region: regionMeta.region,
     currency: settings.currency,
     currencySymbol: settings.currencySymbol,
-    region: regionMeta.region,
+    timezoneIana: settings.timezoneIana || detectTimezoneIana(regionMeta.countryCode),
+    publicContactPhone: settings.publicContactPhone || settings.whatsappPhone,
+    publicWhatsappPhone: settings.publicWhatsappPhone || settings.publicContactPhone || settings.whatsappPhone,
+    whatsappAddonEnabled: Boolean(settings.whatsappAddonEnabled),
     address,
     googleMapsUrl,
+    googleReviewUrl: settings.googleReviewUrl,
     operatingHours: settings.operatingHours || { ...DEFAULT_SALON_OPERATING_HOURS },
+    availableLanguages,
+    defaultLanguage,
     services: enrichServicesWithTranslations(activeServices),
     barbers: getSalonBarbers(salonId),
     activeDeals,
-    availableLanguages,
-    defaultLanguage,
-    customerProfile: {
-      phone: cleanPhone || '+92 300 0000000',
-      hasSavedName: savedInfo.hasSavedName,
-      savedName: savedInfo.savedName,
-      preferredLanguage: defaultLanguage,
-    },
+    returningClient,
     todayDate: getSalonLocalDateParts(settings.timezoneOffsetHours).dateStr,
+    usageStatus: usage.status,
   };
 }
 
@@ -3787,7 +4321,7 @@ export function handleCustomerWhatsAppAction(input: {
     settings.googleMapsUrl || buildGoogleMapsSearchUrl(settings.salonName, address);
   const activeDeals = listSalonDeals(input.salonId, true).map((d) => ({
     ...d,
-    dealPagePath: `/deal/${encodeURIComponent(input.salonId)}/${encodeURIComponent(d.id)}`,
+    dealPagePath: `/deal/${encodeURIComponent(settings.publicCode)}/${encodeURIComponent(d.id)}`,
   }));
 
   const savedStatus = resolveSavedNameStatus(client);
@@ -3993,7 +4527,12 @@ export function handleCustomerWhatsAppAction(input: {
           ? `Aakhri tareekh ${expDate}`
           : `Expires ${expDate}`;
       const localizedDealTitle = d.titleTranslations?.[activeLang] || d.title;
-      return `• ${localizedDealTitle} (${badge}) — ${expLabel}`;
+      const titleAlreadyShowsBadge =
+        localizedDealTitle.includes(badge) ||
+        (d.discountType === 'PCT' && localizedDealTitle.includes(`${d.discountValue}%`));
+      return titleAlreadyShowsBadge
+        ? `• ${localizedDealTitle} — ${expLabel}`
+        : `• ${localizedDealTitle} (${badge}) — ${expLabel}`;
     });
     const prefix: Record<ClientPreferredLang, string> = {
       en: `${settings.salonName} — Active Deals & Offers:\n${dealLines.join('\n')}`,
@@ -4029,13 +4568,40 @@ export function getAvailableSlotsAndBarbers(input: {
   salonId: string;
   date: string;
   durationMins?: number;
+  serviceIds?: string[];
   demoBusyBarber?: string;
   demoBusyTimeSlot?: string;
 }): CustomerAvailabilityResponse {
   const settings = ensureSalonExists(input.salonId);
   const hours = settings.operatingHours || { ...DEFAULT_SALON_OPERATING_HOURS };
   const barbers = getSalonBarbers(input.salonId);
-  const durationMins = clampInteger(input.durationMins ?? 40, 10, 300, 40);
+
+  const configuredServices = (settings.enabledServices || []).filter((s) => s.active !== false);
+  const requestedIds = Array.isArray(input.serviceIds) ? input.serviceIds : [];
+  const selectedServices =
+    requestedIds.length > 0
+      ? configuredServices.filter(
+          (s) => (s.id && requestedIds.includes(s.id)) || requestedIds.includes(s.name)
+        )
+      : [];
+  const maxBufferMins = selectedServices.reduce(
+    (maxB, s) => Math.max(maxB, Number(s.bufferAfterMins || 0)),
+    0
+  );
+  const eligibleBarbersSet: Set<string> | null = (() => {
+    const sets = selectedServices
+      .map((s) => (Array.isArray(s.eligibleStylists) && s.eligibleStylists.length > 0 ? s.eligibleStylists : null))
+      .filter((x): x is string[] => Boolean(x));
+    if (sets.length === 0) return null;
+    let common = new Set(sets[0].map((n) => n.toLowerCase()));
+    for (const arr of sets.slice(1)) {
+      const nextSet = new Set(arr.map((n) => n.toLowerCase()));
+      common = new Set([...common].filter((n) => nextSet.has(n)));
+    }
+    return common;
+  })();
+
+  const durationMins = clampInteger(input.durationMins ?? 40, 10, 300, 40) + maxBufferMins;
   const cleanDate = /^\d{4}-\d{2}-\d{2}$/.test(input.date)
     ? input.date
     : getSalonLocalDateParts(settings.timezoneOffsetHours).dateStr;
@@ -4044,6 +4610,7 @@ export function getAvailableSlotsAndBarbers(input: {
   if (!schedule.isOpen) {
     return {
       salonId: input.salonId,
+      publicCode: settings.publicCode,
       date: cleanDate,
       dayName: schedule.dayName,
       isOpen: false,
@@ -4060,11 +4627,9 @@ export function getAvailableSlotsAndBarbers(input: {
 
   for (let start = schedule.openMins; start + durationMins <= schedule.closeMins; start += 30) {
     const end = start + durationMins;
-    // Skip slots in the past if booking for today (+15m buffer)
     if (isToday && start < localNow.minutesOfDay + 15) {
       continue;
     }
-    // Skip slots overlapping Friday prayer break
     if (
       schedule.breakStartMins !== undefined &&
       schedule.breakEndMins !== undefined &&
@@ -4076,6 +4641,13 @@ export function getAvailableSlotsAndBarbers(input: {
 
     const timeSlot = formatMinutesToTimeSlot(start);
     const barberStatuses: CustomerBarberAvailability[] = barbers.map((barberName) => {
+      if (eligibleBarbersSet && !eligibleBarbersSet.has(barberName.toLowerCase())) {
+        return {
+          name: barberName,
+          available: false,
+          reason: 'Not assigned to selected service',
+        };
+      }
       const check = isBarberBusyAtWindow(
         input.salonId,
         barberName,
@@ -4105,6 +4677,7 @@ export function getAvailableSlotsAndBarbers(input: {
 
   return {
     salonId: input.salonId,
+    publicCode: settings.publicCode,
     date: cleanDate,
     dayName: schedule.dayName,
     isOpen: true,
@@ -4115,16 +4688,126 @@ export function getAvailableSlotsAndBarbers(input: {
   };
 }
 
-export function createCustomerFlowBooking(
+function buildIcsCalendarContent(params: {
+  bookingId: string;
+  salonName: string;
+  service: string;
+  barberName: string;
+  address: string;
+  startsAtIso: string;
+  durationMins: number;
+}): string {
+  const start = new Date(params.startsAtIso);
+  const end = new Date(start.getTime() + params.durationMins * 60000);
+  const fmt = (d: Date) =>
+    d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//WorkCraft Local//Booking//EN',
+    'BEGIN:VEVENT',
+    `UID:${params.bookingId}@workcraft.local`,
+    `DTSTAMP:${fmt(new Date())}`,
+    `DTSTART:${fmt(start)}`,
+    `DTEND:${fmt(end)}`,
+    `SUMMARY:${params.salonName} — ${params.service} (${params.barberName})`,
+    `LOCATION:${params.address}`,
+    `DESCRIPTION:Booking Ref ${params.bookingId} with ${params.barberName} at ${params.salonName}`,
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+}
+
+function findRawAccessTokenForBooking(bookingId: string, salonId: string, expiresAtMs: number): string {
+  const store = ensureStoreLoaded();
+  const rawAccessToken = crypto.randomBytes(24).toString('base64url');
+  const tokenHash = crypto.createHash('sha256').update(rawAccessToken).digest('hex');
+  store.bookingAccessTokens[tokenHash] = {
+    bookingId,
+    salonId,
+    expiresAtMs,
+    revoked: false,
+  };
+  return rawAccessToken;
+}
+
+export async function createCustomerFlowBooking(
   salonId: string,
   input: CustomerFlowBookingRequest
-): { statusCode: number; payload: CustomerFlowBookingResponse } {
+): Promise<{
+  statusCode: number;
+  payload: CustomerFlowBookingResponse;
+  recognizeCookieToken?: string;
+}> {
   const store = ensureStoreLoaded();
   const settings = ensureSalonExists(salonId);
   runDealExpiryAndVideoRetentionCron(salonId);
 
   const isDemo = Boolean(input.isDemo);
-  const cleanPhone = sanitizePhone(input.clientPhone || '');
+  const cleanIdempotencyKey = input.idempotencyKey
+    ? sanitizePlainText(input.idempotencyKey, 96)
+    : undefined;
+
+  if (!isDemo && cleanIdempotencyKey) {
+    const existingAppt = store.appointments.find(
+      (a) => a.salonId === salonId && a.idempotencyKey === cleanIdempotencyKey
+    );
+    if (existingAppt) {
+      const address = settings.address || SEEDED_SALON_ADDRESSES[salonId] || 'Salon Location';
+      const googleMapsUrl =
+        settings.googleMapsUrl || buildGoogleMapsSearchUrl(settings.salonName, address);
+      const rawToken = findRawAccessTokenForBooking(
+        existingAppt.id,
+        salonId,
+        (existingAppt.scheduledEndMs || Date.now()) + 7 * 86400000
+      );
+      const recognizeToken = signCustomerRecognizeToken({
+        salonId,
+        publicCode: settings.publicCode,
+        clientId: existingAppt.clientId,
+      });
+      persistStore(salonId);
+      return {
+        statusCode: 200,
+        recognizeCookieToken: recognizeToken,
+        payload: {
+          ok: true,
+          isDemo: false,
+          appointment: existingAppt,
+          appliedDeal: null,
+          currencySymbol: settings.currencySymbol,
+          address,
+          googleMapsUrl,
+          bookingManagementToken: rawToken,
+          bookingManagementPath: `/b/${rawToken}`,
+          personalReturningShareUrl: `/s/${encodeURIComponent(settings.publicCode)}?c=${encodeURIComponent(recognizeToken)}`,
+          maskedPhone: maskPhoneNumber(existingAppt.clientPhone),
+        },
+      };
+    }
+  }
+
+  // Monthly booking quota guard (750 / 1,500 / 3,000 / >3,000 Custom + grace)
+  const usage = getMonthlyUsageSnapshot(salonId);
+  if (!isDemo && usage.billableBookings >= usage.monthlyLimit + usage.graceLimit) {
+    return {
+      statusCode: 402,
+      payload: {
+        ok: false,
+        code: 'QUOTA_EXCEEDED',
+        error: `${settings.salonName} has reached its monthly online booking capacity. Please call the salon directly.`,
+        publicContactPhone: settings.publicContactPhone || settings.whatsappPhone,
+      },
+    };
+  }
+
+  const verifiedClient = input.verifiedClientId
+    ? store.clients.find((c) => c.salonId === salonId && c.id === input.verifiedClientId)
+    : undefined;
+
+  const cleanPhone =
+    sanitizePhone(input.clientPhone || '') ||
+    (verifiedClient ? verifiedClient.phone : '');
   if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 6) {
     return {
       statusCode: 400,
@@ -4148,10 +4831,14 @@ export function createCustomerFlowBooking(
     };
   }
 
+  const maxBufferMins = selectedServices.reduce(
+    (maxB, s) => Math.max(maxB, Number(s.bufferAfterMins || 0)),
+    0
+  );
   const originalTotal = selectedServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
   const totalDurationMins = Math.max(
     15,
-    selectedServices.reduce((sum, s) => sum + (Number(s.durationMins) || 35), 0)
+    selectedServices.reduce((sum, s) => sum + (Number(s.durationMins) || 35), 0) + maxBufferMins
   );
   let finalTotal = originalTotal;
   let appliedDeal: CustomerFlowBookingResponse['appliedDeal'] = null;
@@ -4184,14 +4871,15 @@ export function createCustomerFlowBooking(
     };
   }
 
-  // Check saved client name status
   const normPhone = cleanPhone.replace(/\s+/g, '');
-  const existingClient = store.clients.find(
-    (c) => c.salonId === salonId && c.phone.replace(/\s+/g, '') === normPhone
-  );
+  const existingClient =
+    verifiedClient ||
+    store.clients.find(
+      (c) => c.salonId === salonId && c.phone.replace(/\s+/g, '') === normPhone
+    );
   const savedInfo = resolveSavedNameStatus(existingClient);
   const providedName = sanitizePlainText(input.clientName || '', 80);
-  const finalClientName = savedInfo.hasSavedName ? savedInfo.savedName! : providedName;
+  const finalClientName = providedName || (savedInfo.hasSavedName ? savedInfo.savedName! : '');
 
   if (!finalClientName) {
     return {
@@ -4199,7 +4887,7 @@ export function createCustomerFlowBooking(
       payload: {
         ok: false,
         code: 'NAME_REQUIRED',
-        error: 'Please enter your name to complete this booking.',
+        error: 'Please enter your complete name to book this appointment.',
       },
     };
   }
@@ -4219,11 +4907,11 @@ export function createCustomerFlowBooking(
     };
   }
 
-  // Re-validate availability right before confirmation (prevents double bookings!)
   const availability = getAvailableSlotsAndBarbers({
     salonId,
     date: cleanDate,
-    durationMins: totalDurationMins,
+    durationMins: totalDurationMins - maxBufferMins,
+    serviceIds: selectedServices.map((s) => s.id || s.name),
     demoBusyBarber: isDemo ? input.demoBusyBarber : undefined,
     demoBusyTimeSlot: isDemo ? input.demoBusyTimeSlot : undefined,
   });
@@ -4270,11 +4958,11 @@ export function createCustomerFlowBooking(
     };
   }
 
-  // Construct scheduledForIso using cleanDate and startMinutes adjusted by salon timezoneOffsetHours
   const [y, m, d] = cleanDate.split('-').map((n) => parseInt(n, 10));
   const startUtcMs =
     Date.UTC(y, m - 1, d, Math.floor(startMinutes / 60), startMinutes % 60, 0) -
     settings.timezoneOffsetHours * 3600000;
+  const scheduledEndMs = startUtcMs + totalDurationMins * 60000;
 
   const address = settings.address || SEEDED_SALON_ADDRESSES[salonId] || 'Salon Location';
   const googleMapsUrl =
@@ -4283,17 +4971,39 @@ export function createCustomerFlowBooking(
   const serviceNamesSummary = selectedServices.map((s) => s.name).join(' + ');
   const apptId = isDemo
     ? `DEMO-${Date.now().toString().slice(-4)}`
-    : `BK-FLW-${Date.now().toString().slice(-4)}`;
+    : `BK-WEB-${Date.now().toString().slice(-4)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
 
   let clientId = existingClient?.id || `demo-cli-${Date.now().toString(36)}`;
   if (!isDemo) {
     const savedClient = upsertClientProfile(salonId, {
       phone: cleanPhone,
-      name: savedInfo.hasSavedName ? undefined : finalClientName,
+      name: finalClientName,
       preferredLanguage: input.preferredLanguage || existingClient?.preferredLanguage || 'en',
+      marketingOptIn: input.marketingOptIn !== undefined ? Boolean(input.marketingOptIn) : existingClient?.marketingOptIn,
     });
+    savedClient.totalVisits = (savedClient.totalVisits || 0) + 1;
+    savedClient.lastServiceIds = selectedServices.map((s) => s.id || s.name);
+    savedClient.lastBarberName = matchedBarber.name;
     clientId = savedClient.id;
   }
+
+  const adSource: AdAttributionChannel = input.adSource || 'WEB_LINK';
+  const sourceTypeMap: Record<AdAttributionChannel, ConciergeAppointment['sourceType']> = {
+    FB: 'FB_AD',
+    IG: 'IG_AD',
+    TIKTOK: 'TIKTOK_AD',
+    QR: 'WEB_QR',
+    WEB_LINK: 'WEB_LINK',
+    DIRECT: 'WEB_LINK',
+  };
+
+  const rawAccessToken = crypto.randomBytes(24).toString('base64url');
+  const tokenHash = crypto.createHash('sha256').update(rawAccessToken).digest('hex');
+  const accessTokenExpiresAtMs = scheduledEndMs + 7 * 86400000;
+  const proofHash = crypto
+    .createHash('sha256')
+    .update(`${salonId}:${apptId}:${cleanDate}:${formattedTime}:${matchedBarber.name}`)
+    .digest('hex');
 
   const newAppointment: ConciergeAppointment = {
     id: apptId,
@@ -4308,10 +5018,13 @@ export function createCustomerFlowBooking(
     appointmentDate: cleanDate,
     timeSlot: formattedTime,
     durationMins: totalDurationMins,
-    scheduledEndMs: startUtcMs + totalDurationMins * 60000,
-    dealId: appliedDeal?.id,
+    scheduledEndMs,
+    dealId: appliedDeal?.id || null,
     bookedDealTitle: appliedDeal?.title,
-    sourceType: 'WHATSAPP_BOT',
+    adSource,
+    idempotencyKey: cleanIdempotencyKey,
+    proofHash,
+    sourceType: sourceTypeMap[adSource] || 'WEB_LINK',
     status: 'CONFIRMED',
     scheduledForIso: new Date(startUtcMs).toISOString(),
     completedAt: null,
@@ -4321,14 +5034,71 @@ export function createCustomerFlowBooking(
     reviewRoutedStatus: 'PENDING',
   };
 
+  let recognizeCookieToken: string | undefined;
+
   if (!isDemo) {
-    // Save in backend WITHOUT sending a separate WhatsApp confirmation message by default
+    const pgCheck = await recordBookingInPostgres({
+      salonPublicCode: settings.publicCode,
+      bookingRef: apptId,
+      clientName: finalClientName,
+      clientPhoneE164: cleanPhone,
+      preferredLang: input.preferredLanguage || 'en',
+      stylistName: matchedBarber.name,
+      servicesSnapshot: selectedServices.map((s) => ({
+        id: s.id,
+        name: s.name,
+        price: s.price,
+        durationMins: s.durationMins || 35,
+      })),
+      totalPrice: finalTotal,
+      totalDurationMins,
+      startsAtIso: newAppointment.scheduledForIso,
+      endsAtIso: new Date(scheduledEndMs).toISOString(),
+      source: newAppointment.sourceType || 'WEB_LINK',
+      idempotencyKey: cleanIdempotencyKey,
+      proofHash,
+      billingMonth: getSalonBillingMonthKey(settings),
+      monthlyLimit: usage.monthlyLimit,
+      accessTokenHash: tokenHash,
+      accessTokenExpiresAtIso: new Date(accessTokenExpiresAtMs).toISOString(),
+    });
+    if (!pgCheck.ok && pgCheck.code === 'OVERLAP') {
+      return {
+        statusCode: 409,
+        payload: {
+          ok: false,
+          code: 'SLOT_UNAVAILABLE',
+          error: pgCheck.error,
+        },
+      };
+    }
+
     store.appointments.unshift(newAppointment);
+    store.bookingAccessTokens[tokenHash] = {
+      bookingId: apptId,
+      salonId,
+      expiresAtMs: accessTokenExpiresAtMs,
+      revoked: false,
+    };
+    incrementMonthlyUsage(salonId);
+    appendBookingAudit(
+      salonId,
+      apptId,
+      'CUSTOMER',
+      'CREATED',
+      `Booked ${serviceNamesSummary} on ${cleanDate} at ${formattedTime} with ${matchedBarber.name} via ${adSource}.`
+    );
+    recognizeCookieToken = signCustomerRecognizeToken({
+      salonId,
+      publicCode: settings.publicCode,
+      clientId,
+    });
     persistStore(salonId);
   }
 
   return {
     statusCode: 201,
+    recognizeCookieToken,
     payload: {
       ok: true,
       isDemo,
@@ -4337,7 +5107,192 @@ export function createCustomerFlowBooking(
       currencySymbol: settings.currencySymbol,
       address,
       googleMapsUrl,
+      bookingManagementToken: rawAccessToken,
+      bookingManagementPath: `/b/${rawAccessToken}`,
+      personalReturningShareUrl: recognizeCookieToken
+        ? `/s/${encodeURIComponent(settings.publicCode)}?c=${encodeURIComponent(recognizeCookieToken)}`
+        : undefined,
+      maskedPhone: maskPhoneNumber(cleanPhone),
     },
   };
+}
+
+export function getBookingByAccessToken(rawToken: string): BookingManagementPayload | null {
+  const clean = (rawToken || '').trim();
+  if (!clean || clean.length < 12) return null;
+  const store = ensureStoreLoaded();
+  const tokenHash = crypto.createHash('sha256').update(clean).digest('hex');
+  const tokenRec = store.bookingAccessTokens?.[tokenHash];
+  if (!tokenRec || tokenRec.revoked || tokenRec.expiresAtMs < Date.now()) {
+    return null;
+  }
+  const appt = store.appointments.find(
+    (a) => a.salonId === tokenRec.salonId && a.id === tokenRec.bookingId
+  );
+  if (!appt) return null;
+  const settings = ensureSalonExists(tokenRec.salonId);
+  const address = settings.address || SEEDED_SALON_ADDRESSES[settings.salonId] || 'Salon Location';
+  const googleMapsUrl =
+    settings.googleMapsUrl || buildGoogleMapsSearchUrl(settings.salonName, address);
+  const cli = store.clients.find((c) => c.id === appt.clientId);
+
+  return {
+    ok: true,
+    bookingId: appt.id,
+    bookingRef: appt.id,
+    salonPublicCode: settings.publicCode,
+    salonName: settings.salonName,
+    publicContactPhone: settings.publicContactPhone || settings.whatsappPhone,
+    publicWhatsappPhone: settings.publicWhatsappPhone || settings.publicContactPhone || settings.whatsappPhone,
+    clientName: appt.clientName,
+    maskedPhone: maskPhoneNumber(appt.clientPhone),
+    service: appt.service,
+    serviceIds: Array.isArray(appt.serviceIds) ? appt.serviceIds : [],
+    barberName: appt.barberName,
+    appointmentDate:
+      appt.appointmentDate ||
+      getIsoLocalDateStr(appt.scheduledForIso, settings.timezoneOffsetHours) ||
+      getSalonLocalDateParts(settings.timezoneOffsetHours).dateStr,
+    timeSlot: appt.timeSlot,
+    durationMins: appt.durationMins || 35,
+    totalPrice: appt.price,
+    currencySymbol: settings.currencySymbol,
+    status: appt.status,
+    address,
+    googleMapsUrl,
+    // Neutral review URL revealed STRICTLY when appointment is COMPLETED (no star-rating gating!)
+    googleReviewUrl: appt.status === 'COMPLETED' ? settings.googleReviewUrl : null,
+    preferredLanguage: (cli?.preferredLanguage || settings.defaultLang || 'en') as ClientPreferredLang,
+    icsContent: buildIcsCalendarContent({
+      bookingId: appt.id,
+      salonName: settings.salonName,
+      service: appt.service,
+      barberName: appt.barberName,
+      address,
+      startsAtIso: appt.scheduledForIso,
+      durationMins: appt.durationMins || 35,
+    }),
+  };
+}
+
+export function rescheduleBookingByAccessToken(
+  rawToken: string,
+  input: { appointmentDate: string; timeSlot: string; barberName?: string }
+): { statusCode: number; ok: boolean; error?: string; booking?: BookingManagementPayload } {
+  const clean = (rawToken || '').trim();
+  if (!clean) return { statusCode: 404, ok: false, error: 'Booking link not found.' };
+  const store = ensureStoreLoaded();
+  const tokenHash = crypto.createHash('sha256').update(clean).digest('hex');
+  const tokenRec = store.bookingAccessTokens?.[tokenHash];
+  if (!tokenRec || tokenRec.revoked || tokenRec.expiresAtMs < Date.now()) {
+    return { statusCode: 404, ok: false, error: 'This booking management link has expired or been revoked.' };
+  }
+  const appt = store.appointments.find(
+    (a) => a.salonId === tokenRec.salonId && a.id === tokenRec.bookingId
+  );
+  if (!appt) return { statusCode: 404, ok: false, error: 'Appointment not found.' };
+  if (appt.status === 'COMPLETED' || appt.status === 'CANCELED') {
+    return { statusCode: 409, ok: false, error: `Completed or canceled bookings cannot be rescheduled.` };
+  }
+
+  const settings = ensureSalonExists(tokenRec.salonId);
+  const cleanDate = sanitizePlainText(input.appointmentDate || '', 20);
+  const cleanTimeSlot = sanitizePlainText(input.timeSlot || '', 24);
+  const targetBarber = sanitizePlainText(input.barberName || appt.barberName, 60);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) || !cleanTimeSlot) {
+    return { statusCode: 400, ok: false, error: 'Valid date and time slot are required.' };
+  }
+
+  // Temporarily mark current appointment as excluded via status snapshot? Or check availability excluding self:
+  const prevStatus = appt.status;
+  appt.status = 'CANCELED';
+  const avail = getAvailableSlotsAndBarbers({
+    salonId: tokenRec.salonId,
+    date: cleanDate,
+    durationMins: appt.durationMins || 35,
+    serviceIds: appt.serviceIds,
+  });
+  appt.status = prevStatus;
+
+  if (!avail.isOpen) {
+    return { statusCode: 409, ok: false, error: avail.closedReason || 'Salon is closed on that date.' };
+  }
+  const startMinutes = parseTimeSlotToMinutes(cleanTimeSlot);
+  const formattedTime = startMinutes >= 0 ? formatMinutesToTimeSlot(startMinutes) : cleanTimeSlot;
+  const matchedSlot = avail.slots.find(
+    (s) => s.startMinutes === startMinutes || s.timeSlot === formattedTime
+  );
+  const matchedBarber = matchedSlot?.barbers.find(
+    (b) => b.name.toLowerCase() === targetBarber.toLowerCase() && b.available
+  );
+  if (!matchedSlot || !matchedBarber) {
+    return {
+      statusCode: 409,
+      ok: false,
+      error: `${targetBarber} is not available at ${formattedTime} on ${cleanDate}.`,
+    };
+  }
+
+  const [y, m, d] = cleanDate.split('-').map((n) => parseInt(n, 10));
+  const startUtcMs =
+    Date.UTC(y, m - 1, d, Math.floor(startMinutes / 60), startMinutes % 60, 0) -
+    settings.timezoneOffsetHours * 3600000;
+  const dur = appt.durationMins || 35;
+
+  const oldSummary = `${appt.appointmentDate || ''} ${appt.timeSlot} (${appt.barberName})`;
+  appt.appointmentDate = cleanDate;
+  appt.timeSlot = formattedTime;
+  appt.barberName = matchedBarber.name;
+  appt.scheduledForIso = new Date(startUtcMs).toISOString();
+  appt.scheduledEndMs = startUtcMs + dur * 60000;
+  tokenRec.expiresAtMs = appt.scheduledEndMs + 7 * 86400000;
+
+  // Rescheduling NEVER increments monthly quota!
+  appendBookingAudit(
+    tokenRec.salonId,
+    appt.id,
+    'CUSTOMER',
+    'RESCHEDULED',
+    `Moved from ${oldSummary} to ${cleanDate} ${formattedTime} (${matchedBarber.name}). 0 quota used.`
+  );
+  persistStore(tokenRec.salonId);
+  return { statusCode: 200, ok: true, booking: getBookingByAccessToken(rawToken) || undefined };
+}
+
+export function cancelBookingByAccessToken(
+  rawToken: string,
+  reason?: string
+): { statusCode: number; ok: boolean; error?: string; booking?: BookingManagementPayload } {
+  const clean = (rawToken || '').trim();
+  if (!clean) return { statusCode: 404, ok: false, error: 'Booking link not found.' };
+  const store = ensureStoreLoaded();
+  const tokenHash = crypto.createHash('sha256').update(clean).digest('hex');
+  const tokenRec = store.bookingAccessTokens?.[tokenHash];
+  if (!tokenRec || tokenRec.revoked || tokenRec.expiresAtMs < Date.now()) {
+    return { statusCode: 404, ok: false, error: 'This booking management link has expired or been revoked.' };
+  }
+  const appt = store.appointments.find(
+    (a) => a.salonId === tokenRec.salonId && a.id === tokenRec.bookingId
+  );
+  if (!appt) return { statusCode: 404, ok: false, error: 'Appointment not found.' };
+  if (appt.status === 'COMPLETED') {
+    return { statusCode: 409, ok: false, error: 'Completed appointments cannot be canceled.' };
+  }
+
+  appt.status = 'CANCELED';
+  appt.canceled = true;
+  store.chairLocks = store.chairLocks.filter(
+    (l) => !(l.salonId === tokenRec.salonId && l.id === appt.id)
+  );
+  // Cancellations NEVER decrement monthly quota!
+  appendBookingAudit(
+    tokenRec.salonId,
+    appt.id,
+    'CUSTOMER',
+    'CANCELED',
+    `Canceled by customer (${sanitizePlainText(reason || 'Self-service cancel', 120)}). Slot freed; quota unchanged.`
+  );
+  persistStore(tokenRec.salonId);
+  return { statusCode: 200, ok: true, booking: getBookingByAccessToken(rawToken) || undefined };
 }
 
