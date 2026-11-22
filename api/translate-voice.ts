@@ -2,11 +2,6 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { translateAndSynthesizeVoice } from '../server/voiceTranslator.js';
 import { recordAiVoiceApiUsage } from '../server/voiceInboxStore.js';
 
-export const config = {
-  runtime: 'nodejs',
-  maxDuration: 30,
-};
-
 interface JsonRequest extends IncomingMessage {
   body?: Record<string, unknown>;
 }
