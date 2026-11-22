@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   Eye,
   EyeOff,
   Fingerprint,
@@ -7,6 +8,7 @@ import {
   Lock,
   ShieldCheck,
   Smartphone,
+  UserCheck,
   X,
 } from 'lucide-react';
 import type { AuthUser } from '../types/auth';
@@ -19,6 +21,12 @@ export interface StoredFounderBiometric {
   biometricBlob: string;
   deviceLabel: string;
   registeredAt: string;
+}
+
+interface FounderStatusResponse {
+  configured: boolean;
+  setupRequired: boolean;
+  productionMisconfigured: boolean;
 }
 
 export function detectMobileFounderDevice(): boolean {
@@ -104,6 +112,7 @@ export async function enrollFounderBiometricDevice(
   try {
     const chRes = await fetch('/api/auth/founder-webauthn/challenge', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ purpose: 'register' }),
     });
@@ -118,7 +127,7 @@ export async function enrollFounderBiometricDevice(
       return { ok: false, error: chData.error || 'Could not start biometric enrollment.' };
     }
 
-    const userBytes = new TextEncoder().encode('workcraft-founder-wc3118');
+    const userBytes = new TextEncoder().encode('workcraft-founder-identity');
     const createOptions: CredentialCreationOptions = {
       publicKey: {
         rp: {
@@ -157,6 +166,7 @@ export async function enrollFounderBiometricDevice(
 
     const regRes = await fetch('/api/auth/founder-webauthn/register', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         challengeToken: chData.challengeToken,
@@ -211,14 +221,24 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
     loadStoredFounderBiometric()
   );
 
-  // Returning mobile with saved biometric starts on Biometric tab, while keeping PIN available as dual option
   const showDualMobileOptions = isMobile && canBiometric && Boolean(savedBiometric);
+  const [portalMode, setPortalMode] = useState<'FOUNDER' | 'OWNER_OR_AGENT'>('FOUNDER');
   const [authMethod, setAuthMethod] = useState<'BIOMETRIC' | 'PIN'>(() =>
     showDualMobileOptions ? 'BIOMETRIC' : 'PIN'
   );
 
+  const [founderStatus, setFounderStatus] = useState<FounderStatusResponse | null>(null);
   const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
   const [showPin, setShowPin] = useState(false);
+
+  // Salon Owner / Field Agent OTP Challenge Login
+  const [ownerIdentifier, setOwnerIdentifier] = useState('');
+  const [challengeId, setChallengeId] = useState<string | null>(null);
+  const [challengeMaskedTarget, setChallengeMaskedTarget] = useState<string | null>(null);
+  const [devPreviewCode, setDevPreviewCode] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -232,11 +252,64 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
     }
   }, [isMobile, canBiometric]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/founder-status', { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: FounderStatusResponse | null) => {
+        if (!cancelled && data) {
+          setFounderStatus(data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleInitialPinSetup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanedPin = pin.trim().toUpperCase();
+    const cleanedConfirm = confirmPin.trim().toUpperCase();
+    if (cleanedPin.length < 6) {
+      setErrorMsg('Choose a Founder PIN of at least 6 characters.');
+      return;
+    }
+    if (cleanedPin !== cleanedConfirm) {
+      setErrorMsg('Founder PIN confirmation does not match.');
+      return;
+    }
+    setErrorMsg(null);
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/auth/founder-setup', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: cleanedPin }),
+      });
+      const data = (await res.json()) as {
+        authenticated?: boolean;
+        user?: AuthUser;
+        error?: string;
+      };
+      if (!res.ok || !data.authenticated || !data.user) {
+        setErrorMsg(data.error || 'Could not configure initial Founder PIN.');
+        return;
+      }
+      onUnlocked(data.user, 'PIN');
+    } catch {
+      setErrorMsg('Connection interrupted. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handlePinUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanedPin = pin.trim().toUpperCase();
-    if (cleanedPin.length < 4) {
-      setErrorMsg('Enter your 6-character Founder PIN.');
+    if (cleanedPin.length < 6) {
+      setErrorMsg('Enter your Founder PIN (minimum 6 characters).');
       return;
     }
 
@@ -245,6 +318,7 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
     try {
       const res = await fetch('/api/auth/founder-session', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: cleanedPin }),
       });
@@ -265,6 +339,75 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
     }
   };
 
+  const handleRequestOwnerChallenge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ownerIdentifier.trim()) {
+      setErrorMsg('Enter your registered salon WhatsApp or mobile number.');
+      return;
+    }
+    setErrorMsg(null);
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/auth/owner-challenge', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: ownerIdentifier.trim() }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        challengeId?: string;
+        maskedDestination?: string;
+        devPreviewCode?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.challengeId) {
+        setErrorMsg(data.error || 'No salon owner or agent account found for that number.');
+        return;
+      }
+      setChallengeId(data.challengeId);
+      setChallengeMaskedTarget(data.maskedDestination || null);
+      setDevPreviewCode(data.devPreviewCode || null);
+      setOtpCode('');
+    } catch {
+      setErrorMsg('Unable to send verification code. Try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleVerifyOwnerChallenge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!challengeId || otpCode.trim().length < 6) {
+      setErrorMsg('Enter the 6-digit verification code.');
+      return;
+    }
+    setErrorMsg(null);
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/auth/owner-verify', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challengeId, code: otpCode.trim() }),
+      });
+      const data = (await res.json()) as {
+        authenticated?: boolean;
+        user?: AuthUser;
+        error?: string;
+      };
+      if (!res.ok || !data.authenticated || !data.user) {
+        setErrorMsg(data.error || 'Invalid or expired verification code.');
+        return;
+      }
+      onUnlocked(data.user, 'PIN');
+    } catch {
+      setErrorMsg('Verification interrupted. Please retry.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleBiometricUnlock = async () => {
     if (!savedBiometric) {
       setAuthMethod('PIN');
@@ -275,6 +418,7 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
     try {
       const chRes = await fetch('/api/auth/founder-webauthn/challenge', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ purpose: 'login' }),
       });
@@ -313,6 +457,7 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
       const response = assertion.response as AuthenticatorAssertionResponse;
       const verifyRes = await fetch('/api/auth/founder-webauthn/verify', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           challengeToken: chData.challengeToken,
@@ -355,55 +500,76 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
             alt="WORKCRAFT"
             className="h-auto w-[148px] object-contain opacity-95"
           />
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-[#06B6D4]/40 bg-[#06B6D4]/10 px-3 py-1 text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-[#06B6D4]">
-            <Lock className="size-3" />
-            <span>FOUNDER COMMAND ACCESS</span>
-          </span>
+          <p className="text-[11px] font-mono font-bold uppercase tracking-[0.18em] text-[#06B6D4] flex items-center gap-1.5">
+            <Lock className="size-3.5" />
+            <span>
+              {portalMode === 'FOUNDER'
+                ? 'Founder Control Room'
+                : 'Salon Owner & Agent Sign In'}
+            </span>
+          </p>
           <h1 className="text-xl font-black tracking-tight text-[#F0F6FC]">
-            Unlock WorkCraft Control Room
+            {portalMode === 'FOUNDER'
+              ? founderStatus?.setupRequired
+                ? 'Create Your Founder PIN'
+                : 'Unlock WorkCraft Portal'
+              : 'Sign In to Your Salon Workspace'}
           </h1>
           <p className="text-xs font-sans text-[#8B949E] leading-relaxed">
-            {showDualMobileOptions
-              ? 'Choose Thumb / Face ID or enter your 6-character Founder PIN to continue.'
-              : isMobile
-              ? 'First-time mobile login requires your 6-character Founder PIN. Once inside, you can save Thumb / Face ID for future logins.'
-              : 'Enter your 6-character Founder PIN to open the Founder Command Center.'}
+            {portalMode === 'OWNER_OR_AGENT'
+              ? 'Enter your registered salon WhatsApp or mobile number to verify access via 6-digit code.'
+              : founderStatus?.setupRequired
+              ? 'First-time non-production preview setup: choose a private Founder PIN (minimum 6 characters).'
+              : showDualMobileOptions
+              ? 'Choose Thumb / Face ID or enter your Founder PIN to continue.'
+              : 'Enter your Founder PIN to open the WorkCraft Control Center.'}
           </p>
         </div>
 
-        {/* Returning Mobile Dual Selector: Biometric OR PIN */}
-        {showDualMobileOptions && (
-          <div className="grid grid-cols-2 gap-2 rounded-2xl border border-[#30363D] bg-[#0D1117] p-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMethod('BIOMETRIC');
-                setErrorMsg(null);
-              }}
-              className={`min-h-[48px] rounded-xl text-xs font-mono font-bold transition flex items-center justify-center gap-1.5 ${
-                authMethod === 'BIOMETRIC'
-                  ? 'bg-[#06B6D4] text-[#0D1117]'
-                  : 'text-[#8B949E] hover:text-[#F0F6FC]'
-              }`}
-            >
-              <Fingerprint className="size-4" />
-              <span>Biometric ID</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMethod('PIN');
-                setErrorMsg(null);
-              }}
-              className={`min-h-[48px] rounded-xl text-xs font-mono font-bold transition flex items-center justify-center gap-1.5 ${
-                authMethod === 'PIN'
-                  ? 'bg-[#D29922] text-[#0D1117]'
-                  : 'text-[#8B949E] hover:text-[#F0F6FC]'
-              }`}
-            >
-              <KeyRound className="size-4" />
-              <span>Founder PIN</span>
-            </button>
+        {/* Role Selector: Founder vs Salon Owner / Agent */}
+        <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-[#30363D] bg-[#0D1117] p-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setPortalMode('FOUNDER');
+              setErrorMsg(null);
+            }}
+            className={`min-h-[44px] rounded-xl text-xs font-mono font-bold transition flex items-center justify-center gap-1.5 ${
+              portalMode === 'FOUNDER'
+                ? 'bg-[#06B6D4] text-[#0D1117]'
+                : 'text-[#8B949E] hover:text-[#F0F6FC]'
+            }`}
+          >
+            <KeyRound className="size-3.5" />
+            <span>Founder</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPortalMode('OWNER_OR_AGENT');
+              setErrorMsg(null);
+            }}
+            className={`min-h-[44px] rounded-xl text-xs font-mono font-bold transition flex items-center justify-center gap-1.5 ${
+              portalMode === 'OWNER_OR_AGENT'
+                ? 'bg-[#D29922] text-[#0D1117]'
+                : 'text-[#8B949E] hover:text-[#F0F6FC]'
+            }`}
+          >
+            <UserCheck className="size-3.5" />
+            <span>Salon / Agent</span>
+          </button>
+        </div>
+
+        {portalMode === 'FOUNDER' && founderStatus?.productionMisconfigured && (
+          <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] p-3.5 text-xs space-y-1">
+            <div className="flex items-center gap-2 font-mono font-bold text-[#F85149]">
+              <AlertTriangle className="size-4 shrink-0" />
+              <span>Environment Configuration Required</span>
+            </div>
+            <p className="text-[#F0F6FC]/90 font-sans leading-relaxed">
+              Production requires <code className="font-mono">JWT_SECRET</code> and{' '}
+              <code className="font-mono">FOUNDER_PIN</code> environment variables to be set in server config before Founder login can unlock.
+            </p>
           </div>
         )}
 
@@ -413,79 +579,230 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
           </div>
         )}
 
-        {authMethod === 'BIOMETRIC' && showDualMobileOptions ? (
-          <div className="space-y-4">
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={handleBiometricUnlock}
-              className="w-full min-h-[120px] rounded-2xl border-2 border-[#06B6D4]/60 bg-[#0D1117] hover:border-[#06B6D4] hover:bg-[#06B6D4]/10 p-5 flex flex-col items-center justify-center gap-2.5 transition active:scale-[0.98] disabled:opacity-60"
-            >
-              <span className="grid size-14 place-items-center rounded-2xl border border-[#06B6D4]/50 bg-[#06B6D4]/15 text-[#06B6D4]">
-                <Fingerprint className="size-8" />
-              </span>
-              <span className="text-sm font-mono font-black text-[#F0F6FC] uppercase tracking-wide">
-                {isSubmitting ? 'Verifying Biometrics...' : 'Tap to Unlock with Thumb / Face ID'}
-              </span>
-              <span className="text-[11px] font-mono text-[#3FB950]">
-                Saved on {savedBiometric?.deviceLabel || 'This Mobile'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMethod('PIN');
-                setErrorMsg(null);
-              }}
-              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] text-xs font-mono font-bold text-[#8B949E] hover:text-[#D29922] transition"
-            >
-              Use 6-Character Founder PIN Instead →
-            </button>
-          </div>
-        ) : (
-          <form onSubmit={handlePinUnlock} className="space-y-4">
-            <label className="block space-y-1.5">
-              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8B949E] block">
-                Founder 6-Character PIN (2 Letters + 4 Digits)
-              </span>
-              <div className="relative">
+        {portalMode === 'OWNER_OR_AGENT' ? (
+          !challengeId ? (
+            <form onSubmit={handleRequestOwnerChallenge} className="space-y-4">
+              <label className="block space-y-1.5">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8B949E] block">
+                  Registered Mobile / WhatsApp Number
+                </span>
                 <input
-                  type={showPin ? 'text' : 'password'}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.toUpperCase().slice(0, 12))}
-                  autoCapitalize="characters"
-                  autoComplete="current-password"
-                  placeholder="Enter 6-character PIN"
-                  className="w-full min-h-[52px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 pr-12 text-center font-mono text-lg font-bold tracking-[0.3em] text-[#F0F6FC] placeholder:tracking-normal placeholder:text-sm placeholder:text-[#484F58] focus:border-[#06B6D4] focus:outline-none"
+                  type="tel"
+                  dir="ltr"
+                  value={ownerIdentifier}
+                  onChange={(e) => setOwnerIdentifier(e.target.value)}
+                  placeholder="+92 300 4567890"
+                  className="w-full min-h-[50px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 font-mono text-sm text-[#F0F6FC] placeholder:text-[#484F58] focus:border-[#D29922] focus:outline-none"
                 />
+              </label>
+              <button
+                type="submit"
+                disabled={isSubmitting || !ownerIdentifier.trim()}
+                className="w-full min-h-[50px] rounded-xl bg-[#D29922] hover:bg-[#e0b252] disabled:opacity-50 text-[#0D1117] text-xs font-mono font-black uppercase tracking-wider transition"
+              >
+                {isSubmitting ? 'Sending Code...' : 'Request 6-Digit Sign-In Code'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifyOwnerChallenge} className="space-y-4">
+              <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3 text-xs space-y-1">
+                <p className="text-[#8B949E]">
+                  Verification code issued for{' '}
+                  <span dir="ltr" className="font-mono text-[#F0F6FC]">
+                    {challengeMaskedTarget || ownerIdentifier}
+                  </span>
+                </p>
+                {devPreviewCode && (
+                  <p className="font-mono text-[#3FB950]">
+                    Preview OTP Code: <strong className="tracking-widest">{devPreviewCode}</strong>
+                  </p>
+                )}
+              </div>
+
+              <label className="block space-y-1.5">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8B949E] block">
+                  6-Digit Verification Code
+                </span>
+                <input
+                  type="text"
+                  dir="ltr"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="123456"
+                  className="w-full min-h-[52px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 text-center font-mono text-lg font-bold tracking-[0.35em] text-[#F0F6FC] focus:border-[#D29922] focus:outline-none"
+                />
+              </label>
+
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowPin((v) => !v)}
-                  aria-label={showPin ? 'Hide PIN' : 'Show PIN'}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 min-h-[44px] min-w-[44px] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC]"
+                  onClick={() => {
+                    setChallengeId(null);
+                    setDevPreviewCode(null);
+                    setErrorMsg(null);
+                  }}
+                  className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 text-xs font-mono text-[#8B949E] hover:text-[#F0F6FC]"
                 >
-                  {showPin ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || otpCode.length < 6}
+                  className="flex-1 min-h-[48px] rounded-xl bg-[#3FB950] hover:bg-[#4ec860] disabled:opacity-50 text-[#0D1117] text-xs font-mono font-black uppercase tracking-wider transition"
+                >
+                  {isSubmitting ? 'Verifying...' : 'Verify & Open Dashboard'}
                 </button>
               </div>
+            </form>
+          )
+        ) : founderStatus?.setupRequired ? (
+          <form onSubmit={handleInitialPinSetup} className="space-y-4">
+            <label className="block space-y-1.5">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8B949E] block">
+                New Founder PIN (Min 6 Characters)
+              </span>
+              <input
+                type={showPin ? 'text' : 'password'}
+                value={pin}
+                onChange={(e) => setPin(e.target.value.toUpperCase().slice(0, 16))}
+                placeholder="Choose private PIN"
+                className="w-full min-h-[50px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 text-center font-mono text-base font-bold tracking-[0.2em] text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+              />
             </label>
-
+            <label className="block space-y-1.5">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8B949E] block">
+                Confirm Founder PIN
+              </span>
+              <input
+                type={showPin ? 'text' : 'password'}
+                value={confirmPin}
+                onChange={(e) => setConfirmPin(e.target.value.toUpperCase().slice(0, 16))}
+                placeholder="Re-enter PIN"
+                className="w-full min-h-[50px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 text-center font-mono text-base font-bold tracking-[0.2em] text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+              />
+            </label>
             <button
               type="submit"
-              disabled={isSubmitting || !pin.trim()}
-              className="w-full min-h-[52px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 text-[#0D1117] text-xs font-mono font-black uppercase tracking-wider transition active:scale-[0.98]"
+              disabled={isSubmitting || pin.trim().length < 6}
+              className="w-full min-h-[50px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 text-[#0D1117] text-xs font-mono font-black uppercase tracking-wider transition"
             >
-              {isSubmitting ? 'Verifying Founder PIN...' : 'Unlock Founder Command Center'}
+              {isSubmitting ? 'Saving Private PIN...' : 'Save Founder PIN & Enter'}
             </button>
           </form>
+        ) : (
+          <>
+            {showDualMobileOptions && (
+              <div className="grid grid-cols-2 gap-2 rounded-2xl border border-[#30363D] bg-[#0D1117] p-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMethod('BIOMETRIC');
+                    setErrorMsg(null);
+                  }}
+                  className={`min-h-[48px] rounded-xl text-xs font-mono font-bold transition flex items-center justify-center gap-1.5 ${
+                    authMethod === 'BIOMETRIC'
+                      ? 'bg-[#06B6D4] text-[#0D1117]'
+                      : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                  }`}
+                >
+                  <Fingerprint className="size-4" />
+                  <span>Biometric ID</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMethod('PIN');
+                    setErrorMsg(null);
+                  }}
+                  className={`min-h-[48px] rounded-xl text-xs font-mono font-bold transition flex items-center justify-center gap-1.5 ${
+                    authMethod === 'PIN'
+                      ? 'bg-[#D29922] text-[#0D1117]'
+                      : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                  }`}
+                >
+                  <KeyRound className="size-4" />
+                  <span>Founder PIN</span>
+                </button>
+              </div>
+            )}
+
+            {authMethod === 'BIOMETRIC' && showDualMobileOptions ? (
+              <div className="space-y-4">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleBiometricUnlock}
+                  className="w-full min-h-[120px] rounded-2xl border-2 border-[#06B6D4]/60 bg-[#0D1117] hover:border-[#06B6D4] hover:bg-[#06B6D4]/10 p-5 flex flex-col items-center justify-center gap-2.5 transition active:scale-[0.98] disabled:opacity-60"
+                >
+                  <span className="grid size-14 place-items-center rounded-2xl border border-[#06B6D4]/50 bg-[#06B6D4]/15 text-[#06B6D4]">
+                    <Fingerprint className="size-8" />
+                  </span>
+                  <span className="text-sm font-mono font-black text-[#F0F6FC] uppercase tracking-wide">
+                    {isSubmitting ? 'Verifying Biometrics...' : 'Tap to Unlock with Thumb / Face ID'}
+                  </span>
+                  <span className="text-[11px] font-mono text-[#3FB950]">
+                    Saved on {savedBiometric?.deviceLabel || 'This Mobile'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMethod('PIN');
+                    setErrorMsg(null);
+                  }}
+                  className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#D29922] text-xs font-mono font-bold text-[#8B949E] hover:text-[#D29922] transition"
+                >
+                  Use Founder PIN Instead
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handlePinUnlock} className="space-y-4">
+                <label className="block space-y-1.5">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8B949E] block">
+                    Founder PIN
+                  </span>
+                  <div className="relative">
+                    <input
+                      type={showPin ? 'text' : 'password'}
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value.toUpperCase().slice(0, 16))}
+                      autoCapitalize="characters"
+                      autoComplete="current-password"
+                      placeholder="Enter Founder PIN"
+                      className="w-full min-h-[52px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 pr-12 text-center font-mono text-lg font-bold tracking-[0.25em] text-[#F0F6FC] placeholder:tracking-normal placeholder:text-sm placeholder:text-[#484F58] focus:border-[#06B6D4] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPin((v) => !v)}
+                      aria-label={showPin ? 'Hide PIN' : 'Show PIN'}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 min-h-[44px] min-w-[44px] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC]"
+                    >
+                      {showPin ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
+                </label>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !pin.trim() || Boolean(founderStatus?.productionMisconfigured)}
+                  className="w-full min-h-[52px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 text-[#0D1117] text-xs font-mono font-black uppercase tracking-wider transition active:scale-[0.98]"
+                >
+                  {isSubmitting ? 'Verifying Founder PIN...' : 'Unlock Founder Command Center'}
+                </button>
+              </form>
+            )}
+          </>
         )}
 
         <div className="border-t border-[#21262D] pt-3 flex items-center justify-between text-[10px] font-mono text-[#6E7681]">
           <span className="inline-flex items-center gap-1 text-[#3FB950]">
             <ShieldCheck className="size-3.5" />
-            Hardware-Backed Session
+            HttpOnly Session Auth
           </span>
-          <span>Zero PIN impact on Salons/Agents</span>
+          <span>Per-Tenant Isolated</span>
         </div>
       </div>
     </main>
