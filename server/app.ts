@@ -331,13 +331,43 @@ const telemetryRateBuckets = new Map<string, { count: number; resetAt: number }>
 export function createApiApp(port = 3000): express.Express {
   const app = express();
   app.disable('x-powered-by');
-  app.use('/api/whatsapp/meta-webhook', express.json({
+  const metaWebhookJsonParser = express.json({
     limit: '2mb',
     verify: (req, _res, buf) => {
       (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
     },
-  }));
-  app.use(express.json({ limit: '4mb' }));
+  });
+  app.use('/api/whatsapp/meta-webhook', (req, res, next) => {
+    const preParsed = (req as express.Request & { body?: unknown }).body;
+    if (preParsed !== undefined && !Buffer.isBuffer(preParsed)) {
+      return next();
+    }
+    if (req.readableEnded) {
+      if (req.body === undefined) req.body = {};
+      return next();
+    }
+    return metaWebhookJsonParser(req, res, next);
+  });
+
+  const jsonBodyParser = express.json({ limit: '4mb' });
+  app.use((req, res, next) => {
+    const preParsed = (req as express.Request & { body?: unknown }).body;
+    if (preParsed !== undefined && !Buffer.isBuffer(preParsed)) {
+      if (typeof preParsed === 'string') {
+        try {
+          req.body = preParsed.trim() ? JSON.parse(preParsed) : {};
+        } catch {
+          return res.status(400).json({ error: 'Invalid JSON request body.' });
+        }
+      }
+      return next();
+    }
+    if (req.readableEnded) {
+      if (req.body === undefined) req.body = {};
+      return next();
+    }
+    return jsonBodyParser(req, res, next);
+  });
 
   app.use('/api', async (req, res, next) => {
     if (req.path !== '/health' && req.path !== '/auth/founder-status') {
