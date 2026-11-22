@@ -27,20 +27,6 @@ interface FounderStatusResponse {
   configured: boolean;
   setupRequired: boolean;
   productionMisconfigured: boolean;
-  databaseConfigured?: boolean;
-  founderPinConfigured?: boolean;
-  jwtSecretConfigured?: boolean;
-  missingEnvVars?: string[];
-}
-
-async function parseJsonResponseSafe<T>(res: Response): Promise<{ okJson: boolean; data: T | null; rawText: string }> {
-  const rawText = await res.text();
-  try {
-    const data = JSON.parse(rawText) as T;
-    return { okJson: true, data, rawText };
-  } catch {
-    return { okJson: false, data: null, rawText };
-  }
 }
 
 export function detectMobileFounderDevice(): boolean {
@@ -269,26 +255,13 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
   useEffect(() => {
     let cancelled = false;
     fetch('/api/auth/founder-status', { credentials: 'include' })
-      .then(async (res) => {
-        const parsed = await parseJsonResponseSafe<FounderStatusResponse & { error?: string }>(res);
-        if (cancelled) return;
-        if (!parsed.okJson || !parsed.data) {
-          setErrorMsg(
-            `Backend API unreachable or returned HTTP ${res.status}. Verify Vercel /api deployment.`
-          );
-          return;
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: FounderStatusResponse | null) => {
+        if (!cancelled && data) {
+          setFounderStatus(data);
         }
-        if (!res.ok) {
-          setErrorMsg(parsed.data.error || `Server status check failed (HTTP ${res.status}).`);
-          return;
-        }
-        setFounderStatus(parsed.data);
       })
-      .catch(() => {
-        if (!cancelled) {
-          setErrorMsg('Cannot reach authentication server. Please check your connection.');
-        }
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -315,22 +288,16 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: cleanedPin }),
       });
-      const parsed = await parseJsonResponseSafe<{
+      const data = (await res.json()) as {
         authenticated?: boolean;
         user?: AuthUser;
         error?: string;
-      }>(res);
-      if (!parsed.okJson || !parsed.data) {
-        setErrorMsg(
-          `Server returned non-JSON response (HTTP ${res.status}). Verify backend deployment.`
-        );
+      };
+      if (!res.ok || !data.authenticated || !data.user) {
+        setErrorMsg(data.error || 'Could not configure initial Founder PIN.');
         return;
       }
-      if (!res.ok || !parsed.data.authenticated || !parsed.data.user) {
-        setErrorMsg(parsed.data.error || 'Could not configure initial Founder PIN.');
-        return;
-      }
-      onUnlocked(parsed.data.user, 'PIN');
+      onUnlocked(data.user, 'PIN');
     } catch {
       setErrorMsg('Connection interrupted. Please try again.');
     } finally {
@@ -355,22 +322,16 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: cleanedPin }),
       });
-      const parsed = await parseJsonResponseSafe<{
+      const data = (await res.json()) as {
         authenticated?: boolean;
         user?: AuthUser;
         error?: string;
-      }>(res);
-      if (!parsed.okJson || !parsed.data) {
-        setErrorMsg(
-          `API route returned HTTP ${res.status} (non-JSON). Please redeploy /api/index or check server logs.`
-        );
+      };
+      if (!res.ok || !data.authenticated || !data.user) {
+        setErrorMsg(data.error || 'Incorrect Founder PIN.');
         return;
       }
-      if (!res.ok || !parsed.data.authenticated || !parsed.data.user) {
-        setErrorMsg(parsed.data.error || 'Incorrect Founder PIN.');
-        return;
-      }
-      onUnlocked(parsed.data.user, 'PIN');
+      onUnlocked(data.user, 'PIN');
     } catch {
       setErrorMsg('Connection interrupted. Please try again.');
     } finally {
@@ -600,19 +561,14 @@ export const FounderUnlockGate: React.FC<FounderUnlockGateProps> = ({ onUnlocked
         </div>
 
         {portalMode === 'FOUNDER' && founderStatus?.productionMisconfigured && (
-          <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] p-3.5 text-xs space-y-1.5">
+          <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] p-3.5 text-xs space-y-1">
             <div className="flex items-center gap-2 font-mono font-bold text-[#F85149]">
               <AlertTriangle className="size-4 shrink-0" />
-              <span>Vercel / Production Setup Required</span>
+              <span>Environment Configuration Required</span>
             </div>
             <p className="text-[#F0F6FC]/90 font-sans leading-relaxed">
-              Add these environment variables in your Vercel Project Settings (and redeploy) so Founder login can unlock in production:
-            </p>
-            <p className="font-mono text-[11px] text-[#FCA5A5]">
-              {(founderStatus.missingEnvVars?.length
-                ? founderStatus.missingEnvVars
-                : ['JWT_SECRET', 'FOUNDER_PIN', 'DATABASE_URL']
-              ).join(' · ')}
+              Production requires <code className="font-mono">JWT_SECRET</code> and{' '}
+              <code className="font-mono">FOUNDER_PIN</code> environment variables to be set in server config before Founder login can unlock.
             </p>
           </div>
         )}
