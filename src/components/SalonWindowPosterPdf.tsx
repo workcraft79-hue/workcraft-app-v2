@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Download, FileText, QrCode, Printer, CheckCircle2, Sparkles } from 'lucide-react';
+import {
+  Check,
+  CheckCircle2,
+  Copy,
+  Download,
+  FileText,
+  MessageCircle,
+  Printer,
+  QrCode,
+  Sparkles,
+} from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
 import { LOGO_URL } from '../data/portalData';
@@ -11,6 +21,9 @@ interface SalonWindowPosterPdfProps {
   salonName: string;
   salonCategory?: 'MENS' | 'LADIES';
   whatsappNumber: string;
+  salonPublicCode?: string;
+  publicContactPhone?: string;
+  originUrl?: string;
   location?: string;
   initialLanguage?: PosterLang;
   compact?: boolean;
@@ -34,49 +47,49 @@ const POSTER_PHRASES: Record<
   en: {
     langLabel: 'English',
     isRtl: false,
-    scanLabel: 'SCAN TO BOOK ON WHATSAPP',
-    whatsappLabel: 'Salon WhatsApp Booking Number',
-    badgeMens: "Men's Grooming & Salon · WhatsApp Enabled",
-    badgeLadies: 'Ladies Beauty Parlor · WhatsApp Enabled',
-    headline: 'Respected Customer — Book 24/7 on WhatsApp!',
+    scanLabel: 'SCAN FOR INSTANT WEB BOOKING',
+    whatsappLabel: 'Salon Contact Phone',
+    badgeMens: "Men's Grooming & Salon · 24/7 Instant Web QR Booking",
+    badgeLadies: 'Ladies Beauty Parlor · 24/7 Instant Web QR Booking',
+    headline: 'Respected Customer — Scan QR to Book in 20 Seconds!',
     phrase:
-      'Respected Customer, enjoy our 24/7 Automated WhatsApp Service! Scan the QR code above or send "Hi" in English, Urdu, or Arabic to book anytime with zero counter wait—choose your favorite stylist or barber, check live service menus and prices, unlock bridal, Eid, birthday & prepaid session deals, and receive instant reminders.',
+      'Respected Customer, no app download needed! Scan the QR code above to open our live booking page in English, Urdu, or Arabic—pick your favorite stylist or barber, check live service menus & prices, save your personal booking link directly to your WhatsApp chat, and manage or reschedule anytime.',
     steps: [
-      '1. Scan QR or message our WhatsApp 24/7',
+      '1. Scan QR — no app install needed 24/7',
       '2. Pick services, stylist & live open slot',
-      '3. Skip waiting · Get VIP deals & reminders',
+      '3. Save your personal link to WhatsApp for 2-tap rebooking',
     ],
   },
   ur: {
     langLabel: 'اردو (Urdu)',
     isRtl: true,
-    scanLabel: 'واٹس ایپ بکنگ کے لیے کیو آر اسکین کریں',
-    whatsappLabel: 'سیلون واٹس ایپ بکنگ نمبر',
-    badgeMens: 'مینس سیلون · واٹس ایپ خودکار بکنگ',
-    badgeLadies: 'لیڈیز بیوٹی پارلر · واٹس ایپ خودکار بکنگ',
-    headline: 'معزز کسٹمر — اب 24 گھنٹے واٹس ایپ پر فوری بکنگ!',
+    scanLabel: 'فوری ویب بکنگ کے لیے کیو آر اسکین کریں',
+    whatsappLabel: 'سیلون رابطہ نمبر',
+    badgeMens: 'مینس سیلون · 24/7 فوری ویب کیو آر بکنگ',
+    badgeLadies: 'لیڈیز بیوٹی پارلر · 24/7 فوری ویب کیو آر بکنگ',
+    headline: 'معزز کسٹمر — کیو آر اسکین کریں اور 20 سیکنڈ میں بکنگ کریں!',
     phrase:
-      'معزز کسٹمر، اب 24 گھنٹے واٹس ایپ خودکار بکنگ سہولت استعمال کریں! اوپر دیا گیا کیو آر کوڈ اسکین کریں یا میسج بھیجیں—اردو، عربی یا انگلش میں فوری جواب پائیں، بغیر انتظار اپنا پسندیدہ اسٹائلسٹ اور وقت منتخب کریں، تمام سروسز اور پرائیویٹ کیبن ریٹس دیکھیں، عید، برتھ ڈے، سیشن پاس ڈیلز اور خودکار ریمائنڈرز حاصل کریں۔',
+      'معزز کسٹمر، کسی ایپ کی ضرورت نہیں! اوپر دیا گیا کیو آر کوڈ اسکین کریں اور اردو، عربی یا انگلش میں فوری بکنگ پیج کھولیں—اپنا پسندیدہ اسٹائلسٹ اور وقت منتخب کریں، تمام سروسز کے ریٹس دیکھیں، اپنا ذاتی بکنگ لنک اپنے واٹس ایپ میں محفوظ کریں اور آئندہ 2 کلکس میں دوبارہ بک کریں۔',
     steps: [
-      '1۔ کیو آر اسکین کریں یا واٹس ایپ پر میسج کریں',
+      '1۔ کیو آر اسکین کریں — بغیر ایپ انسٹال 24/7',
       '2۔ سروسز، اسٹائلسٹ اور لائیو ٹائم منتخب کریں',
-      '3۔ انتظار سے بچیں · وی آئی پی ڈیلز اور ریمائنڈر پائیں',
+      '3۔ اپنا ذاتی لنک واٹس ایپ میں محفوظ کر کے 2-ٹیپ ری بکنگ کریں',
     ],
   },
   ar: {
     langLabel: 'العربية (Arabic)',
     isRtl: true,
-    scanLabel: 'امسح الرمز للحجز عبر واتساب',
-    whatsappLabel: 'رقم واتساب الصالون للحجز',
-    badgeMens: 'صالون رجالي · الحجز الذكي عبر واتساب',
-    badgeLadies: 'صالون تجميل نسائي · الحجز الذكي عبر واتساب',
-    headline: 'عميلنا العزيز — احجز موعدك فوراً عبر واتساب ٢٤/٧!',
+    scanLabel: 'امسح الرمز للحجز الفوري عبر الويب',
+    whatsappLabel: 'رقم التواصل للصالون',
+    badgeMens: 'صالون رجالي · الحجز الفوري عبر الويب QR',
+    badgeLadies: 'صالون تجميل نسائي · الحجز الفوري عبر الويب QR',
+    headline: 'عميلنا العزيز — امسح الرمز واحجز موعدك خلال ٢٠ ثانية!',
     phrase:
-      'عميلنا العزيز، استمتع بخدمة واتساب الذكية على مدار ٢٤ ساعة! امسح رمز QR أعلاه أو أرسل رسالة بالعربية أو الإنجليزية أو الأردية لحجز موعدك فوراً دون انتظار، اختيار مصففك المفضل، استعراض قائمة الأسعار والباقات الخاصة، الاستفادة من عروض المناسبات وأعياد الميلاد وتنبيهات المواعيد التلقائية.',
+      'عميلنا العزيز، لا حاجة لتحميل أي تطبيق! امسح رمز QR أعلاه لفتح صفحة الحجز الفورية بالعربية أو الإنجليزية أو الأردية—اختر مصففك المفضل، استعرض قائمة الأسعار والخدمات، احفظ رابطك الشخصي في محادثة واتساب الخاصة بك وأعد الحجز بضغطتين لاحقاً.',
     steps: [
-      '١. امسح رمز QR أو راسلنا على واتساب ٢٤/٧',
-      '٢. اختر الخدمات والمصفف والوقت المتاح فوراً',
-      '٣. احصل على تأكيد فوري وعروض VIP وتذكير تلقائي',
+      '١. امسح رمز QR فوراً بدون تحميل أي تطبيق',
+      '٢. اختر الخدمات والمصفف والوقت المتاح مباشرة',
+      '٣. احفظ رابطك الشخصي في واتساب لإعادة الحجز بضغطتين',
     ],
   },
 };
@@ -124,6 +137,9 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
   salonName,
   salonCategory = 'MENS',
   whatsappNumber,
+  salonPublicCode,
+  publicContactPhone,
+  originUrl,
   location = '',
   initialLanguage = 'en',
   compact = false,
@@ -137,19 +153,24 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
   const [pdfDownloadUrl, setPdfDownloadUrl] = useState<string | null>(null);
   const [pdfDownloadName, setPdfDownloadName] = useState<string>('');
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     setPosterLang(initialLanguage);
   }, [initialLanguage]);
 
-  const cleanPhoneDigits = whatsappNumber.replace(/[^\d]/g, '') || '923004567890';
-  const waDeepLink = `https://wa.me/${cleanPhoneDigits}?text=${encodeURIComponent(
-    `Assalamu Alaikum ${salonName}, I want to book an appointment.`
+  const resolvedContactPhone = publicContactPhone || whatsappNumber;
+  const resolvedOrigin =
+    originUrl || (typeof window !== 'undefined' ? window.location.origin : 'https://workcraft.app');
+  const resolvedCode = salonPublicCode || 'wc_7k9m2p4x8q2a';
+  const bookingUrl = `${resolvedOrigin}/s/${encodeURIComponent(resolvedCode)}?src=qr`;
+  const shareToClientWaHref = `https://wa.me/?text=${encodeURIComponent(
+    `${salonName} — Book anytime in 20 seconds (no app needed): ${bookingUrl}`
   )}`;
 
   useEffect(() => {
     let mounted = true;
-    QRCode.toDataURL(waDeepLink, {
+    QRCode.toDataURL(bookingUrl, {
       width: 360,
       margin: 1,
       color: {
@@ -166,7 +187,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
     return () => {
       mounted = false;
     };
-  }, [waDeepLink]);
+  }, [bookingUrl]);
 
   const copy = POSTER_PHRASES[posterLang];
   const isLadies =
@@ -244,7 +265,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
 
       const resolvedQrUrl =
         qrDataUrl ||
-        (await QRCode.toDataURL(waDeepLink, {
+        (await QRCode.toDataURL(bookingUrl, {
           width: 360,
           margin: 1,
           color: { dark: '#0E1E17', light: '#FFFFFF' },
@@ -293,7 +314,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
       ctx.direction = 'ltr';
       ctx.fillStyle = '#D9A441';
       ctx.font = 'bold 26px monospace';
-      ctx.fillText(whatsappNumber, qrBoxX + qrBoxW / 2, qrBoxY + 334);
+      ctx.fillText(resolvedContactPhone, qrBoxX + qrBoxW / 2, qrBoxY + 334);
 
       // 3. LEFT COLUMN BELOW LOGO: CATEGORY BADGE, SALON NAME & ADDRESS (ALWAYS LEFT-ALIGNED)
       const salonLeftX = 84;
@@ -378,13 +399,13 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
         phraseStartY += lineSpacing;
       }
 
-      // Bottom Footer: Matching Golden Salon WhatsApp Number Only (Powered by WorkCraft Removed)
+      // Bottom Footer: Matching Golden Salon Contact Phone
       ctx.direction = 'ltr';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#D9A441';
       ctx.font = isA4 ? 'bold 28px monospace' : 'bold 23px monospace';
       ctx.fillText(
-        `WhatsApp: ${whatsappNumber}`,
+        `Call / Contact: ${resolvedContactPhone}`,
         canvas.width / 2,
         canvas.height - 86
       );
@@ -436,11 +457,11 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
           <div className="flex items-center gap-2">
             <Printer className="size-4 text-[#D29922]" />
             <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#D29922]">
-              {isLadies ? 'Ladies Beauty Parlor' : 'Salon'} Printable Client PDF
+              {isLadies ? 'Ladies Beauty Parlor' : 'Salon'} Printable Web QR Poster
             </span>
           </div>
           <p className="text-xs text-[#8B949E] font-sans mt-1">
-            Download PDF, print it, and paste on shop entrance glass, mirror, or reception cabin so clients book on WhatsApp.
+            Download PDF, print it for your entrance glass, or share the direct web booking link to a client&apos;s WhatsApp.
           </p>
         </div>
 
@@ -487,6 +508,30 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
               Language: English
             </option>
           </select>
+
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard.writeText(bookingUrl).then(() => {
+                setCopiedLink(true);
+                setTimeout(() => setCopiedLink(false), 2000);
+              }).catch(() => {});
+            }}
+            className="min-h-[48px] inline-flex items-center gap-1.5 rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] text-[#F0F6FC] px-3 py-2 text-xs font-mono font-bold transition"
+          >
+            {copiedLink ? <Check className="size-3.5 text-[#3FB950]" /> : <Copy className="size-3.5" />}
+            <span>{copiedLink ? 'Copied' : 'Copy QR Link'}</span>
+          </button>
+
+          <a
+            href={shareToClientWaHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="min-h-[48px] inline-flex items-center gap-1.5 rounded-xl border border-[#25D366]/60 bg-[#0B2E1E] hover:bg-[#14532D] text-[#25D366] px-3 py-2 text-xs font-mono font-bold transition"
+          >
+            <MessageCircle className="size-3.5" />
+            <span>Share QR to WhatsApp</span>
+          </a>
 
           {/* 1-Click PDF Download Button */}
           <button
@@ -589,7 +634,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
                 {copy.scanLabel}
               </p>
               <p dir="ltr" className="text-sm font-mono font-black text-[#D9A441] tracking-tight">
-                {whatsappNumber}
+                {resolvedContactPhone}
               </p>
             </div>
           </div>
@@ -612,7 +657,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
             </div>
           </div>
 
-          {/* BOTTOM SECTION: FULL SERVICES VALUE PARAGRAPH + GOLDEN WHATSAPP NUMBER (NO POWERED BY WORKCRAFT) */}
+          {/* BOTTOM SECTION */}
           <div
             dir={copy.isRtl ? 'rtl' : 'ltr'}
             className="border-t border-[#D9A441]/35 pt-4 text-center space-y-3"
@@ -628,7 +673,7 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
               dir="ltr"
               className="text-sm font-mono font-black text-[#D9A441] pt-1 tracking-tight"
             >
-              WhatsApp: {whatsappNumber}
+              Call / Contact: {resolvedContactPhone}
             </p>
           </div>
         </div>
@@ -640,10 +685,10 @@ export const SalonWindowPosterPdf: React.FC<SalonWindowPosterPdfProps> = ({
             <FileText className="size-4 text-[#06B6D4] shrink-0" />
             <div className="min-w-0">
               <p className="font-bold text-[#F0F6FC] truncate">
-                {salonName} — {isLadies ? 'Ladies Parlor' : 'Salon'} Window Poster PDF Ready
+                {salonName} — {isLadies ? 'Ladies Parlor' : 'Salon'} Web QR Poster PDF Ready
               </p>
               <p className="text-[10px] text-[#8B949E] font-sans truncate">
-                Top-Left Logo · Top-Right QR ({whatsappNumber}) · Bottom {copy.langLabel} Notice
+                QR URL: /s/{resolvedCode}?src=qr · Contact: {resolvedContactPhone}
               </p>
             </div>
           </div>
