@@ -88,11 +88,19 @@ interface BookingRecord {
   scheduledEndMs?: number;
   flagged?: boolean;
   canceled?: boolean;
-  sourceType?: 'WHATSAPP_BOT' | 'WALK_IN_BUSY';
+  sourceType?:
+    | 'WHATSAPP_BOT'
+    | 'WALK_IN_BUSY'
+    | 'WEB_QR'
+    | 'WEB_LINK'
+    | 'FB_AD'
+    | 'IG_AD'
+    | 'TIKTOK_AD'
+    | 'OWNER_WALKIN';
   chairLabel?: string;
   reminderReplyLang?: 'en' | 'ur' | 'ar';
   reminderReplyText?: string;
-  status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED';
+  status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED';
 }
 
 interface OvernightQueueItem {
@@ -1961,6 +1969,13 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   });
   const [conciergeState, setConciergeState] = useState<SalonConciergeStateResponse | null>(null);
   const [isLiveWhatsAppDemoOpen, setIsLiveWhatsAppDemoOpen] = useState(false);
+  const [leaveStylistName, setLeaveStylistName] = useState('');
+  const [leaveDate, setLeaveDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [leaveFullDay, setLeaveFullDay] = useState(true);
+  const [leaveStartTime, setLeaveStartTime] = useState('12:00 PM');
+  const [leaveEndTime, setLeaveEndTime] = useState('04:00 PM');
+  const [leaveReason, setLeaveReason] = useState('');
+  const [savingLeave, setSavingLeave] = useState(false);
   const seenLogIdsRef = useRef<Set<string>>(new Set());
   const seenApptIdsRef = useRef<Set<string>>(new Set());
   const hasHydratedConciergeRef = useRef<boolean>(false);
@@ -2536,7 +2551,20 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
             setPersistedCategory(data.settings.salonCategory);
           }
           if (data.settings?.operatingHours) {
-            setSalonHours(data.settings.operatingHours);
+            const oh = data.settings.operatingHours;
+            setSalonHours({
+              monThuOpen: oh.monThuOpen,
+              monThuClose: oh.monThuClose,
+              monThuClosed: Boolean(oh.monThuClosed),
+              fridayOpen: oh.fridayOpen,
+              fridayClose: oh.fridayClose,
+              fridayBreakStart: oh.fridayBreakStart || '01:00 PM',
+              fridayBreakEnd: oh.fridayBreakEnd || '02:30 PM',
+              fridayClosed: Boolean(oh.fridayClosed),
+              satSunOpen: oh.satSunOpen,
+              satSunClose: oh.satSunClose,
+              satSunClosed: Boolean(oh.satSunClosed),
+            });
           }
           if (Array.isArray(data.settings?.enabledServices) && data.settings.enabledServices.length > 0) {
             setServices(
@@ -3833,6 +3861,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       | 'RESCHEDULE_CONFIRMED'
       | 'PRICE_MENU_SENT'
       | 'BARBER_BUSY_REROUTED'
+      | 'CHAIR_LOCKED_BUSY'
       | 'URGENT_BRIDAL_GROOM';
     clientName: string;
     clientPhone: string;
@@ -4312,52 +4341,123 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setServices((prev) => prev.map((s) => (s.id === id ? { ...s, price: newPrice } : s)));
   };
 
+  const resolvedSalonPublicCode =
+    conciergeState?.publicCode ||
+    (currentSalon.id === '1'
+      ? 'wc_7k9m2p4x8q2a'
+      : currentSalon.id === '2'
+      ? 'wc_3r8v5n2w9c4j'
+      : currentSalon.id === '3'
+      ? 'wc_9p4d6t2m8y1k'
+      : currentSalon.id === '4'
+      ? 'wc_5w2h8z4f7b3n'
+      : currentSalon.id === '5'
+      ? 'wc_6m9q3x7v2p5d'
+      : currentSalon.id);
+
+  const handleAddStylistLeave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetStylist = leaveStylistName || barbersList[0];
+    if (!targetStylist || !leaveDate) return;
+    setSavingLeave(true);
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/stylist-leaves`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            stylistName: targetStylist,
+            date: leaveDate,
+            fullDay: leaveFullDay,
+            startTime: leaveFullDay ? undefined : leaveStartTime,
+            endTime: leaveFullDay ? undefined : leaveEndTime,
+            reason: leaveReason.trim() || undefined,
+          }),
+        }
+      );
+      const data = await res.json();
+      if (res.ok && data.state) {
+        setConciergeState(data.state);
+        setLeaveReason('');
+        setMaintToast(`✓ Leave saved for ${targetStylist} on ${leaveDate}.`);
+        setTimeout(() => setMaintToast(null), 4000);
+      } else {
+        setMaintToast(data.error || 'Could not save stylist leave.');
+        setTimeout(() => setMaintToast(null), 4000);
+      }
+    } catch {
+      setMaintToast('Could not save stylist leave.');
+      setTimeout(() => setMaintToast(null), 4000);
+    } finally {
+      setSavingLeave(false);
+    }
+  };
+
+  const handleDeleteStylistLeave = async (leaveId: string) => {
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/stylist-leaves/${encodeURIComponent(leaveId)}`,
+        { method: 'DELETE', credentials: 'include' }
+      );
+      const data = await res.json();
+      if (res.ok && data.state) {
+        setConciergeState(data.state);
+        setMaintToast('✓ Stylist leave removed.');
+        setTimeout(() => setMaintToast(null), 3500);
+      }
+    } catch {
+      setMaintToast('Could not remove stylist leave.');
+    }
+  };
+
   const handleUpdateStatus = (
     id: string,
-    status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED',
+    status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED',
     isAutoCompleted = false
   ) => {
     const targetBooking = bookings.find((b) => b.id === id);
-    setBookings((prev) =>
-      prev.map((b) => {
-        if (b.id === id) {
-          if (status === 'COMPLETED') {
-            setMaintToast(
-              isAutoCompleted
-                ? `⏱ Auto-Done (+15m past end): ${b.clientName}'s chair freed automatically.`
-                : `✓ Done! ${b.clientName}'s chair freed & visit recorded.`
-            );
-            setTimeout(() => setMaintToast(null), 4500);
-          } else if (status === 'IN_CHAIR') {
-            setMaintToast(`💈 ${b.clientName} is now In-Chair with ${b.barberName}.`);
-            setTimeout(() => setMaintToast(null), 4000);
+    if (status === 'CANCELED') {
+      setBookings((prev) => prev.filter((b) => b.id !== id));
+      setMaintToast(`✓ Canceled ${targetBooking?.clientName || 'appointment'}.`);
+      setTimeout(() => setMaintToast(null), 4000);
+    } else {
+      setBookings((prev) =>
+        prev.map((b) => {
+          if (b.id === id) {
+            if (status === 'COMPLETED') {
+              setMaintToast(
+                isAutoCompleted
+                  ? `⏱ Auto-Done (+15m past end): ${b.clientName}'s chair freed automatically.`
+                  : `✓ Done! ${b.clientName}'s chair freed & visit recorded.`
+              );
+              setTimeout(() => setMaintToast(null), 4500);
+            } else if (status === 'IN_CHAIR') {
+              setMaintToast(`💈 ${b.clientName} is now In-Chair with ${b.barberName}.`);
+              setTimeout(() => setMaintToast(null), 4000);
+            }
+            return { ...b, status };
           }
-          return { ...b, status };
-        }
-        return b;
-      })
-    );
-
-    if (status === 'COMPLETED' && targetBooking) {
-      fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/appointments/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          appointmentId: targetBooking.id,
-          clientName: targetBooking.clientName,
-          clientPhone: targetBooking.phone,
-          barberName: targetBooking.barberName,
-          service: targetBooking.service,
-          price: targetBooking.price,
-          timeSlot: targetBooking.timeSlot,
-        }),
-      })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (data?.state) setConciergeState(data.state);
+          return b;
         })
-        .catch(() => {});
+      );
     }
+
+    fetch(
+      `/api/salons/${encodeURIComponent(currentSalon.id)}/appointments/${encodeURIComponent(id)}/status`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      }
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.state) setConciergeState(data.state);
+      })
+      .catch(() => {});
   };
 
   const handleToggleFlagBooking = (id: string) => {
@@ -5573,41 +5673,67 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       {/* ========================================================================= */}
       {currentSectionMode === 'LIVE' && (
         <div className="space-y-4">
-          {/* TEMP TEST LAUNCHER ON LIVE DASHBOARD (Easy to remove cleanly once verified) */}
+          {/* WEB-FIRST PUBLIC BOOKING LINK & MONTHLY BOOKING QUOTA METER */}
           <section
-            aria-label="Customer WhatsApp Live Demo Shortcut"
-            className="rounded-2xl border border-[#116329] bg-[#0D2118] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            aria-label="Web-First Storefront and Usage Meter"
+            className="rounded-2xl border border-[#116329] bg-[#0D2118] p-4 space-y-3"
           >
-            <div className="space-y-0.5 min-w-0">
-              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#3FB950] block">
-                CUSTOMER WHATSAPP EXPERIENCE · LIVE SANDBOX
-              </span>
-              <h2 className="text-sm font-black text-[#F0F6FC]">
-                Test &ldquo;Hi&rdquo; Welcome, Services, Timing, Deals &amp; Booking Flow
-              </h2>
-              <p className="text-xs text-[#8B949E] font-sans">
-                Opens the complete end-user WhatsApp conversation &amp; booking confirmation Flow using your live salon setup without altering real bookings.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5 min-w-0">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#3FB950] block">
+                  WEB-FIRST QR STOREFRONT · /s/{resolvedSalonPublicCode}
+                </span>
+                <h2 className="text-sm font-black text-[#F0F6FC]">
+                  Live Customer Web Booking Link &amp; Optional Meta Preview
+                </h2>
+                <p className="text-xs text-[#8B949E] font-sans">
+                  Clients scan your QR code or open your web link with zero app install and save their returning link directly to their WhatsApp chat.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <a
+                  href={`/s/${encodeURIComponent(resolvedSalonPublicCode)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] inline-flex items-center gap-1.5 transition"
+                >
+                  <ExternalLink className="size-3.5" />
+                  <span>Open Web Booking</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setIsLiveWhatsAppDemoOpen(true)}
+                  className="min-h-[46px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-4 py-2 text-xs font-mono font-black uppercase tracking-wide inline-flex items-center gap-2 shadow-lg transition active:scale-95"
+                >
+                  <MessageSquare className="size-4 shrink-0" />
+                  <span>Meta Add-On Preview</span>
+                </button>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <a
-                href={`/flow/${encodeURIComponent(currentSalon.id)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] inline-flex items-center gap-1.5 transition"
-              >
-                <ExternalLink className="size-3.5" />
-                <span>Open Public Flow</span>
-              </a>
-              <button
-                type="button"
-                onClick={() => setIsLiveWhatsAppDemoOpen(true)}
-                className="min-h-[46px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-4 py-2 text-xs font-mono font-black uppercase tracking-wide inline-flex items-center gap-2 shadow-lg transition active:scale-95"
-              >
-                <MessageSquare className="size-4 shrink-0" />
-                <span>Launch Live Demo</span>
-              </button>
-            </div>
+
+            {conciergeState?.usageMeter && (
+              <div className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono">
+                <span className="text-[#8B949E]">
+                  Monthly Quota ({conciergeState.usageMeter.planTier}):{' '}
+                  <strong className="text-[#F0F6FC] tabular-nums">
+                    {conciergeState.usageMeter.billableBookings.toLocaleString()} /{' '}
+                    {conciergeState.usageMeter.monthlyLimit.toLocaleString()}
+                  </strong>{' '}
+                  bookings ({conciergeState.usageMeter.pctUsed}%)
+                </span>
+                <span
+                  className={`font-bold ${
+                    conciergeState.usageMeter.status === 'BLOCKED'
+                      ? 'text-[#F85149]'
+                      : conciergeState.usageMeter.status === 'GRACE' || conciergeState.usageMeter.status === 'WARN_90'
+                      ? 'text-[#D29922]'
+                      : 'text-[#3FB950]'
+                  }`}
+                >
+                  {conciergeState.usageMeter.remainingInPlan.toLocaleString()} remaining in plan
+                </span>
+              </div>
+            )}
           </section>
 
           {/* 1. URGENT ALERTS CARD (TOP PRIORITY · GATED BY PACKAGE TIER) */}
@@ -5630,7 +5756,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
               </div>
 
               <div className="space-y-2.5">
-                {/* A. OWNER_INTERVENTION_NEEDED (1–3 Star Feedback Alerts - PRO / PRO++ ONLY) */}
+                {/* A. OWNER_INTERVENTION_NEEDED */}
                 {activeReviewAlerts.map((alert) => (
                   <div
                     key={alert.id}
@@ -5642,7 +5768,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           OWNER_INTERVENTION_NEEDED · {alert.rating}★
                         </span>
                         <span className="text-xs font-mono text-[#D29922]">
-                          Google Link Suppressed
+                          Private Follow-Up Alert
                         </span>
                       </div>
                       <p className="text-sm font-bold text-[#F0F6FC]">
@@ -6225,13 +6351,24 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         )}
 
                         {booking.status !== 'COMPLETED' ? (
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateStatus(booking.id, 'COMPLETED')}
-                            className="min-h-[48px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/60 px-3.5 py-2 text-xs font-mono font-bold text-[#3FB950] transition active:scale-95"
-                          >
-                            {ui.markDone}
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateStatus(booking.id, 'COMPLETED')}
+                              className="min-h-[48px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/60 px-3.5 py-2 text-xs font-mono font-bold text-[#3FB950] transition active:scale-95"
+                            >
+                              {ui.markDone}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateStatus(booking.id, 'CANCELED')}
+                              className="min-h-[48px] rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#5e2223] px-2.5 py-2 text-xs font-mono font-bold text-[#F85149] transition"
+                              title="Cancel booking"
+                              aria-label="Cancel booking"
+                            >
+                              <X className="size-4" />
+                            </button>
+                          </div>
                         ) : (
                           <span className="min-h-[48px] inline-flex items-center gap-1.5 rounded-xl border border-[#116329] bg-[#0D3822]/50 px-3 py-2 text-[11px] font-mono font-bold text-[#3FB950]">
                             <CheckCircle2 className="size-3.5" />
@@ -6499,7 +6636,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                           </div>
                           <p className="text-xs text-[#8B949E] font-sans truncate">
                             {pass.packageTitle} · {regionConfig.symbol}
-                            {pass.pricePaid.toLocaleString()}
+                            {(pass.pricePaid ?? pass.amountPaid ?? 0).toLocaleString()}
                           </p>
                         </div>
                         <button
@@ -7272,6 +7409,130 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 })()}
               </div>
             </PortalCard>
+
+            {/* Stylist Leaves & Off-Hours Manager */}
+            <PortalCard
+              title="Stylist Leaves & Schedule Off-Blocks"
+              kicker="REAL-TIME AVAILABILITY EXCLUSIONS"
+            >
+              <div className="space-y-4">
+                <form
+                  onSubmit={handleAddStylistLeave}
+                  className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 items-end"
+                >
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] font-mono text-[#8B949E]">Stylist / Barber</span>
+                    <select
+                      value={leaveStylistName || barbersList[0] || ''}
+                      onChange={(e) => setLeaveStylistName(e.target.value)}
+                      className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-xs font-mono text-[#F0F6FC]"
+                    >
+                      {barbersList.map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] font-mono text-[#8B949E]">Date</span>
+                    <input
+                      type="date"
+                      dir="ltr"
+                      value={leaveDate}
+                      onChange={(e) => setLeaveDate(e.target.value)}
+                      className="w-full min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-xs font-mono text-[#F0F6FC]"
+                    />
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] font-mono text-[#8B949E]">Leave Type</span>
+                    <button
+                      type="button"
+                      onClick={() => setLeaveFullDay((v) => !v)}
+                      className={`w-full min-h-[44px] rounded-xl border px-3 text-xs font-mono font-bold transition ${
+                        leaveFullDay
+                          ? 'border-[#D29922] bg-[#3B2E0B] text-[#D29922]'
+                          : 'border-[#06B6D4] bg-[#0D1117] text-[#06B6D4]'
+                      }`}
+                    >
+                      {leaveFullDay ? 'Full Day Off' : 'Time Window'}
+                    </button>
+                  </label>
+
+                  {!leaveFullDay ? (
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={leaveStartTime}
+                        onChange={(e) => setLeaveStartTime(e.target.value)}
+                        placeholder="12:00 PM"
+                        className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-2 text-xs font-mono text-[#F0F6FC]"
+                      />
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={leaveEndTime}
+                        onChange={(e) => setLeaveEndTime(e.target.value)}
+                        placeholder="04:00 PM"
+                        className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-2 text-xs font-mono text-[#F0F6FC]"
+                      />
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      value={leaveReason}
+                      onChange={(e) => setLeaveReason(e.target.value)}
+                      placeholder="Reason (optional)"
+                      className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-xs text-[#F0F6FC]"
+                    />
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={savingLeave}
+                    className="min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#22D3EE] text-[#0D1117] px-4 text-xs font-mono font-bold uppercase transition"
+                  >
+                    {savingLeave ? 'Saving...' : 'Add Leave'}
+                  </button>
+                </form>
+
+                {conciergeState?.stylistLeaves && conciergeState.stylistLeaves.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {conciergeState.stylistLeaves.map((lv) => (
+                      <div
+                        key={lv.id}
+                        className="rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-bold text-[#F0F6FC] truncate">
+                            {lv.stylistName} · <span className="font-mono text-[#D29922]">{lv.date}</span>
+                          </p>
+                          <p className="text-[11px] font-mono text-[#8B949E]">
+                            {lv.fullDay ? 'Full Day Off' : `${lv.startTime} – ${lv.endTime}`}
+                            {lv.reason ? ` · ${lv.reason}` : ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteStylistLeave(lv.id)}
+                          aria-label="Remove leave"
+                          className="size-8 rounded-lg border border-[#30363D] text-[#8B949E] hover:text-[#F85149] grid place-items-center shrink-0"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs font-mono text-[#8B949E]">
+                    No active stylist leaves scheduled. All rostered staff show open during salon hours.
+                  </p>
+                )}
+              </div>
+            </PortalCard>
           </div>
           )}
 
@@ -7930,6 +8191,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 salonName={currentSalon.name}
                 salonCategory={isLadies ? 'LADIES' : 'MENS'}
                 whatsappNumber={currentSalon.phone}
+                salonPublicCode={resolvedSalonPublicCode}
+                publicContactPhone={conciergeState?.settings?.publicContactPhone || currentSalon.phone}
                 location={currentSalon.location}
                 initialLanguage={ownerLang}
                 onDownloaded={(fileName) => {
@@ -8510,6 +8773,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       )}
       <CustomerWhatsAppDemoModal
         salonId={currentSalon.id}
+        salonPublicCode={resolvedSalonPublicCode}
         isOpen={isLiveWhatsAppDemoOpen}
         onClose={() => setIsLiveWhatsAppDemoOpen(false)}
       />
