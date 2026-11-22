@@ -31,8 +31,23 @@ import { PublicSalonDealPage } from './PublicSalonDealPage';
 
 interface CustomerWhatsAppDemoModalProps {
   salonId: string;
+  salonPublicCode?: string;
   isOpen: boolean;
   onClose: () => void;
+}
+
+const DEMO_SALON_PUBLIC_CODES: Record<string, string> = {
+  '1': 'wc_7k9m2p4x8q2a',
+  '2': 'wc_3r8v5n2w9c4j',
+  '3': 'wc_9p4d6t2m8y1k',
+  '4': 'wc_5w2h8z4f7b3n',
+  '5': 'wc_6m9q3x7v2p5d',
+};
+
+function resolveDemoPublicCode(idOrCode: string, fallbackCode?: string): string {
+  if (idOrCode.startsWith('wc_')) return idOrCode;
+  if (DEMO_SALON_PUBLIC_CODES[idOrCode]) return DEMO_SALON_PUBLIC_CODES[idOrCode];
+  return fallbackCode || idOrCode;
 }
 
 interface ChatBubbleItem {
@@ -119,10 +134,12 @@ function formatLocalizedDealBadge(
 
 export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps> = ({
   salonId,
+  salonPublicCode,
   isOpen,
   onClose,
 }) => {
-  const [activeSalonId, setActiveSalonId] = useState<string>(salonId);
+  const initialPublicCode = resolveDemoPublicCode(salonId, salonPublicCode);
+  const [activeSalonId, setActiveSalonId] = useState<string>(initialPublicCode);
   const [config, setConfig] = useState<CustomerExperienceConfig | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeLang, setActiveLang] = useState<ClientPreferredLang>('en');
@@ -138,28 +155,29 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
   >(null);
 
   useEffect(() => {
-    setActiveSalonId(salonId);
-  }, [salonId]);
+    setActiveSalonId(resolveDemoPublicCode(salonId, salonPublicCode));
+  }, [salonId, salonPublicCode]);
 
   const getDemoClientIdentity = (
     mode: 'NEW' | 'SAVED',
-    targetSalonId: string,
+    targetSalonCode: string,
     cfg?: CustomerExperienceConfig | null
   ) => {
+    const isDubai = targetSalonCode === DEMO_SALON_PUBLIC_CODES['3'] || targetSalonCode === '3';
     if (mode === 'SAVED') {
-      if (targetSalonId === '3') {
+      if (isDubai) {
         return {
           fromPhone: '+971 50 8923411',
-          clientName: cfg?.customerProfile?.savedName || 'Zayed Al-Hashmi',
+          clientName: cfg?.returningClient?.clientName || 'Zayed Al-Hashmi',
         };
       }
       return {
         fromPhone: '+92 300 1234567',
-        clientName: cfg?.customerProfile?.savedName || 'Bilal Ahmed',
+        clientName: cfg?.returningClient?.clientName || 'Bilal Ahmed',
       };
     }
     return {
-      fromPhone: targetSalonId === '3' ? '+971 50 0009999' : '+92 300 0009999',
+      fromPhone: isDubai ? '+971 50 0009999' : '+92 300 0009999',
       clientName: '',
     };
   };
@@ -183,15 +201,15 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
   ) => {
     setLoading(true);
     setActiveSheet(null);
-    const targetSalon = salonOverride || activeSalonId || salonId;
+    const targetSalon = resolveDemoPublicCode(salonOverride || activeSalonId || initialPublicCode, salonPublicCode);
     const chosenLang = langOverride || activeLang || 'en';
     const useMode = modeOverride || customerMode;
-    const identity = getDemoClientIdentity(useMode, targetSalon, config);
     try {
       const cfgRes = await fetch(
         `/api/public/salons/${encodeURIComponent(targetSalon)}/customer-experience?lang=${encodeURIComponent(
           chosenLang
-        )}&phone=${encodeURIComponent(identity.fromPhone)}`
+        )}`,
+        { credentials: 'include' }
       );
       let loadedCfg = config;
       if (cfgRes.ok) {
@@ -251,9 +269,9 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
     if (!isOpen) return;
     setActiveLang('en');
     setSimulateBusyBarber('');
-    void loadConfigAndStartHi('en', customerMode, salonId);
+    void loadConfigAndStartHi('en', customerMode, initialPublicCode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, salonId]);
+  }, [isOpen, initialPublicCode]);
 
   if (!isOpen) return null;
 
@@ -430,7 +448,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
         {/* Top Bar with Larger Transparent Top-Left WorkCraft Logo */}
         <header className="px-4 sm:px-6 py-3 border-b border-[#30363D] bg-[#0D1117] flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-0.5">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
               <img
                 src={LOGO_URL}
                 alt="WorkCraft"
@@ -438,13 +456,13 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
               />
               <MessageSquare className="size-4 text-[#25D366] shrink-0" />
               <h2 className="text-sm sm:text-base font-black text-[#F0F6FC]">
-                Customer WhatsApp Experience — Live Demo
+                Optional Paid Meta WhatsApp Add-On Preview
               </h2>
             </div>
             <p className="text-[11px] font-mono text-[#D29922] flex items-center gap-1.5">
               <ShieldAlert className="size-3.5 shrink-0" />
               <span>
-                DEMO SANDBOX · Uses your real salon setup, never modifies real appointments or sends real WhatsApp messages.
+                DEMO SANDBOX · Standard salon QR booking runs on the web at $0 API cost; Meta WhatsApp Cloud API is an optional paid add-on.
               </span>
             </p>
           </div>
@@ -476,9 +494,9 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
                 <div className="grid grid-cols-1 gap-1.5">
                   <button
                     type="button"
-                    onClick={() => handlePreviewSalonSwitch(salonId, 'en')}
+                    onClick={() => handlePreviewSalonSwitch(initialPublicCode, 'en')}
                     className={`min-h-[38px] rounded-xl border px-3 py-1.5 text-xs font-semibold text-left transition ${
-                      activeSalonId === salonId
+                      activeSalonId === initialPublicCode
                         ? 'border-[#06B6D4] bg-[#06B6D4]/15 text-[#F0F6FC]'
                         : 'border-[#30363D] bg-[#161B22] text-[#8B949E]'
                     }`}
@@ -487,9 +505,9 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
                   </button>
                   <button
                     type="button"
-                    onClick={() => handlePreviewSalonSwitch('3', 'ar')}
+                    onClick={() => handlePreviewSalonSwitch(DEMO_SALON_PUBLIC_CODES['3'], 'ar')}
                     className={`min-h-[38px] rounded-xl border px-3 py-1.5 text-xs font-semibold text-left transition ${
-                      activeSalonId === '3'
+                      activeSalonId === DEMO_SALON_PUBLIC_CODES['3']
                         ? 'border-[#25D366] bg-[#0B2E1E] text-[#F0F6FC]'
                         : 'border-[#30363D] bg-[#161B22] text-[#8B949E]'
                     }`}
@@ -498,9 +516,9 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
                   </button>
                   <button
                     type="button"
-                    onClick={() => handlePreviewSalonSwitch('5', 'en')}
+                    onClick={() => handlePreviewSalonSwitch(DEMO_SALON_PUBLIC_CODES['5'], 'en')}
                     className={`min-h-[38px] rounded-xl border px-3 py-1.5 text-xs font-semibold text-left transition ${
-                      activeSalonId === '5'
+                      activeSalonId === DEMO_SALON_PUBLIC_CODES['5']
                         ? 'border-[#EC4899] bg-[#EC4899]/15 text-[#F0F6FC]'
                         : 'border-[#30363D] bg-[#161B22] text-[#8B949E]'
                     }`}
@@ -849,6 +867,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
                 <div className="absolute inset-0 z-30 bg-[#0B141A]">
                   <CustomerBookingFlow
                     salonId={activeSalonId}
+                    salonCode={activeSalonId}
                     initialDealId={activeSheet.dealId}
                     initialLang={activeLang}
                     initialClientPhone={currentIdentity.fromPhone}
@@ -865,6 +884,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
                 <div className="absolute inset-0 z-30 bg-[#0B141A] overflow-y-auto">
                   <PublicSalonDealPage
                     salonId={activeSalonId}
+                    salonCode={activeSalonId}
                     dealId={activeSheet.dealId}
                     initialLang={activeLang}
                     isDemo={true}
