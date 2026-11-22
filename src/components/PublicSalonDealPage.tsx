@@ -12,14 +12,17 @@ import {
   X,
 } from 'lucide-react';
 import { LOGO_URL } from '../data/portalData';
-import type { ClientPreferredLang, PublicDealPageResponse } from '../types/concierge';
+import type { AdAttributionChannel, ClientPreferredLang, PublicDealPageResponse } from '../types/concierge';
 import { CustomerBookingFlow } from './CustomerBookingFlow';
 
 interface PublicSalonDealPageProps {
   salonId: string;
+  salonCode?: string;
   dealId: string;
+  adSource?: AdAttributionChannel;
   initialLang?: ClientPreferredLang;
   isDemo?: boolean;
+  onNavigate?: (path: string) => void;
   onBookDealInDemo?: (dealId: string) => void;
   onClose?: () => void;
 }
@@ -101,12 +104,16 @@ const DEAL_COPY: Record<
 
 export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
   salonId,
+  salonCode,
   dealId,
+  adSource = 'DIRECT',
   initialLang = 'en',
   isDemo = false,
+  onNavigate,
   onBookDealInDemo,
   onClose,
 }) => {
+  const effectiveCode = salonCode || salonId;
   const [payload, setPayload] = useState<PublicDealPageResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +126,7 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
     setLoading(true);
     setError(null);
     fetch(
-      `/api/public/salons/${encodeURIComponent(salonId)}/deals/${encodeURIComponent(dealId)}`
+      `/api/public/salons/${encodeURIComponent(effectiveCode)}/deals/${encodeURIComponent(dealId)}`
     )
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Deal not found'))))
       .then((data: PublicDealPageResponse) => {
@@ -140,16 +147,19 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [salonId, dealId]);
+  }, [effectiveCode, dealId]);
 
   if (showFlow && payload) {
     return (
       <CustomerBookingFlow
-        salonId={salonId}
+        salonId={payload.salonId || effectiveCode}
+        salonCode={payload.publicCode || effectiveCode}
+        adSource={adSource}
         initialDealId={payload.isExpired ? null : payload.deal.id}
         initialLang={lang}
         isDemo={isDemo}
         standalone={!onClose}
+        onNavigate={onNavigate}
         onClose={() => setShowFlow(false)}
       />
     );
