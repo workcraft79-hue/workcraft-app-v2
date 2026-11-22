@@ -5,15 +5,20 @@ import { GoogleGenAI, Type } from '@google/genai';
 import QRCode from 'qrcode';
 import {
   addChairLock,
+  addStylistLeave,
   addWalkInQueueItem,
+  cancelBookingByAccessToken,
   completeAppointmentAndRecordVisit,
   consumeServicePackageSession,
   createCustomerFlowBooking,
   createSalonDeal,
   deleteSalonDeal,
+  findSalonIdByMetaPhoneNumberId,
   getAvailableSlotsAndBarbers,
+  getBookingByAccessToken,
   getCustomerExperienceConfig,
   getDealVideoFileInfo,
+  getMonthlyUsageSnapshot,
   getPublicDealPayload,
   getSalonConciergeState,
   handleCustomerWhatsAppAction,
@@ -22,15 +27,20 @@ import {
   listSalonsForAgent,
   processWhatsAppWebhook,
   removeChairLock,
+  removeStylistLeave,
+  rescheduleBookingByAccessToken,
   resolveOwnerAlert,
+  resolveSalonIdByPublicCode,
   runBirthdayCron,
   runDealExpiryAndVideoRetentionCron,
   runPostServiceReviewCron,
   runWinBackCron,
+  saveFirstTimeClientProfile,
   setCounterSleepState,
   setSalonBillingStatus,
   settleBridalBookingBalance,
   syncSalonBarbers,
+  updateAppointmentStatus,
   updateRetentionSettings,
   updateWalkInQueueStatus,
   upsertBridalBooking,
@@ -40,14 +50,20 @@ import {
 import {
   AuthenticatedRequest,
   checkFounderPinAttemptAllowed,
+  claimInitialFounderPin,
   clearFounderPinFailures,
   clearSessionCookie,
   consumeAgentInviteTokenAndRegisterAgent,
   createAgentInviteToken,
   extractAuthUserFromRequest,
+  getCustomerCookieName,
+  getFounderAuthStatus,
   getFounderSessionUser,
   hydrateSecurityStoreFromKv,
   inspectAgentInviteToken,
+  isJwtSecretConfigured,
+  issueOwnerLoginChallenge,
+  parseCookieHeader,
   recordFounderPinFailure,
   registerSalonAssignment,
   registerSalonOwnerAccount,
@@ -55,12 +71,18 @@ import {
   requireRole,
   requireSalonTenantAccess,
   requireWebhookSecret,
+  rotateAllSessions,
   sanitizePhone,
   sanitizePlainText,
+  setCustomerBrowserCookie,
   setSessionCookie,
   signSessionToken,
+  verifyCustomerRecognizeToken,
   verifyFounderPin,
+  verifyOwnerLoginChallenge,
 } from './security.js';
+import { enforceRateLimit, extractClientIpKey } from './rateLimiter.js';
+import { assertProductionDatabaseReady } from './postgresRepo.js';
 import {
   resolveTargetLocale,
   synthesizeEdgeTtsInMemory,
@@ -309,8 +331,6 @@ const telemetryRateBuckets = new Map<string, { count: number; resetAt: number }>
 export function createApiApp(port = 3000): express.Express {
   const app = express();
   app.disable('x-powered-by');
-  // Allow larger JSON payloads specifically for deal promo video uploads (<=25MB)
-  app.use('/api/salons/:salonId/deals', express.json({ limit: '25mb' }));
   app.use('/api/whatsapp/meta-webhook', express.json({
     limit: '2mb',
     verify: (req, _res, buf) => {
@@ -319,28 +339,35 @@ export function createApiApp(port = 3000): express.Express {
   }));
   app.use(express.json({ limit: '4mb' }));
 
-  app.use('/api', async (_req, _res, next) => {
+  app.use('/api', async (req, res, next) => {
+    if (req.path !== '/health') {
+      const dbReady = assertProductionDatabaseReady();
+      if (!dbReady.ok) {
+        return res.status(503).json({ error: dbReady.error });
+      }
+    }
     try {
       await ensureKvHydrated();
     } catch {
-      // Non-fatal fallback to local/tmp stores
+      // Non-fatal fallback to local/tmp stores in non-production preview
     }
-    next();
+    return next();
   });
 
   app.get('/api/health', (_req, res) => {
+    const dbReady = assertProductionDatabaseReady();
     res.json({
       ok: true,
       status: 'HEALTHY',
       port,
       runtime: process.env.VERCEL ? 'vercel-node' : 'node',
       kvConfigured: isKvConfigured(),
+      postgresReady: dbReady.ok,
     });
   });
 
   // ===========================================================================
-  // DIRECT 4-ROLE SESSION, FOUNDER PIN + MOBILE BIOMETRIC (WEBAUTHN)
-  // Zero PIN walls & zero IP rate limits for Salons, Agents, or End-Users
+  // 4-ROLE SESSION AUTH, FOUNDER PIN/BIOMETRICS & OWNER/AGENT CHALLENGE SIGN-IN
   // ===========================================================================
   app.get('/api/auth/session', (req, res) => {
     const user = extractAuthUserFromRequest(req);
@@ -350,8 +377,37 @@ export function createApiApp(port = 3000): express.Express {
     return res.json({ authenticated: true, user });
   });
 
-  // Founder PIN Gate (WC3118) — isolated strictly to Founder Command Center access
-  app.post('/api/auth/founder-session', (req, res) => {
+  app.get('/api/auth/founder-status', (_req, res) => {
+    return res.json(getFounderAuthStatus());
+  });
+
+  // Initial Founder PIN setup (strictly non-production preview when no PIN is configured yet)
+  app.post('/api/auth/founder-setup', async (req, res) => {
+    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+    const rl = await enforceRateLimit(`auth:founder-setup:${ipKey}`, 5, 300);
+    if (!rl.allowed) {
+      return res.status(429).json({
+        error: `Too many attempts. Retry in ${rl.retryAfterSec}s.`,
+      });
+    }
+    const pin = typeof req.body?.pin === 'string' ? req.body.pin : '';
+    const claimed = claimInitialFounderPin(pin);
+    if (!claimed.ok) {
+      return res.status(400).json({ error: claimed.error });
+    }
+    const founder = getFounderSessionUser();
+    const token = signSessionToken(founder);
+    setSessionCookie(res, token, req);
+    return res.status(201).json({ authenticated: true, user: founder });
+  });
+
+  // Founder PIN Verification (Fail-closed when unconfigured; zero default PINs or hints)
+  app.post('/api/auth/founder-session', async (req, res) => {
+    if (!isJwtSecretConfigured() || getFounderAuthStatus().productionMisconfigured) {
+      return res.status(503).json({
+        error: 'Founder authentication is not configured in server environment (JWT_SECRET & FOUNDER_PIN required).',
+      });
+    }
     const existing = extractAuthUserFromRequest(req);
     if (existing?.userRole === 'FOUNDER') {
       const token = signSessionToken(existing);
@@ -359,11 +415,15 @@ export function createApiApp(port = 3000): express.Express {
       return res.json({ authenticated: true, user: existing });
     }
 
-    const clientKey = sanitizePlainText(
-      String(req.header('x-forwarded-for') || req.ip || 'founder-client').split(',')[0],
-      64
-    );
-    const attemptGate = checkFounderPinAttemptAllowed(clientKey);
+    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+    const rl = await enforceRateLimit(`auth:founder:${ipKey}`, 10, 60);
+    if (!rl.allowed) {
+      return res.status(429).json({
+        error: `Too many authentication attempts. Wait ${rl.retryAfterSec}s before retrying.`,
+      });
+    }
+
+    const attemptGate = checkFounderPinAttemptAllowed(ipKey);
     if (!attemptGate.allowed) {
       return res.status(429).json({
         error: `Too many incorrect Founder PIN attempts. Wait ${attemptGate.retryAfterSec}s before trying again.`,
@@ -372,17 +432,64 @@ export function createApiApp(port = 3000): express.Express {
 
     const pin = typeof req.body?.pin === 'string' ? req.body.pin : '';
     if (!verifyFounderPin(pin)) {
-      recordFounderPinFailure(clientKey);
+      recordFounderPinFailure(ipKey);
       return res.status(401).json({
-        error: 'Invalid Founder PIN. Enter your 6-character Founder PIN (e.g., WC3118).',
+        error: 'Invalid Founder PIN.',
       });
     }
 
-    clearFounderPinFailures(clientKey);
+    clearFounderPinFailures(ipKey);
     const founder = getFounderSessionUser();
     const token = signSessionToken(founder);
     setSessionCookie(res, token, req);
     return res.json({ authenticated: true, user: founder });
+  });
+
+  app.post('/api/auth/rotate-sessions', requireAuth, requireRole('FOUNDER'), (req, res) => {
+    const newVersion = rotateAllSessions();
+    const founder = getFounderSessionUser();
+    const freshToken = signSessionToken(founder);
+    setSessionCookie(res, freshToken, req);
+    return res.json({ ok: true, sessionVersion: newVersion });
+  });
+
+  // Standalone Salon Owner / Field Agent OTP Challenge Login (works directly on /salon or /agent URL)
+  app.post('/api/auth/owner-challenge', async (req, res) => {
+    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+    const rl = await enforceRateLimit(`auth:owner-challenge:${ipKey}`, 8, 300);
+    if (!rl.allowed) {
+      return res.status(429).json({
+        error: `Too many verification code requests. Try again in ${rl.retryAfterSec}s.`,
+      });
+    }
+    const identifier = sanitizePlainText(req.body?.identifier, 120);
+    if (!identifier) {
+      return res.status(400).json({ error: 'Enter your registered mobile number or email.' });
+    }
+    const issued = issueOwnerLoginChallenge(identifier);
+    if (!issued.ok) {
+      return res.status(404).json({ error: issued.error });
+    }
+    return res.json(issued);
+  });
+
+  app.post('/api/auth/owner-verify', async (req, res) => {
+    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+    const rl = await enforceRateLimit(`auth:owner-verify:${ipKey}`, 15, 300);
+    if (!rl.allowed) {
+      return res.status(429).json({
+        error: `Too many verification attempts. Try again in ${rl.retryAfterSec}s.`,
+      });
+    }
+    const challengeId = sanitizePlainText(req.body?.challengeId, 80);
+    const code = sanitizePlainText(req.body?.code, 12);
+    const verified = verifyOwnerLoginChallenge(challengeId, code);
+    if (!verified.ok) {
+      return res.status(401).json({ error: verified.error });
+    }
+    const token = signSessionToken(verified.user);
+    setSessionCookie(res, token, req);
+    return res.json({ authenticated: true, user: verified.user });
   });
 
   // WebAuthn Mobile Biometric Challenge (Thumb / Face ID)
@@ -557,11 +664,17 @@ export function createApiApp(port = 3000): express.Express {
     return res.status(201).json({ salonId: newId, state });
   });
 
-  // Unlimited Multi-Branch Public Salon Self-Onboarding (Zero IP Limits · Honeypot Protected)
-  // Assigns billing_status = 'PENDING_ACTIVATION' & immediately opens Live Salon Dashboard
-  app.post('/api/onboarding/complete', (req, res) => {
+  // Public Salon Self-Onboarding (Distributed Rate-Limit + Honeypot Protected)
+  app.post('/api/onboarding/complete', async (req, res) => {
     try {
-      // Invisible CSS Honeypot: silently drop automated bot spam with zero friction to real users
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`onboarding:${ipKey}`, 10, 3600);
+      if (!rl.allowed) {
+        return res.status(429).json({
+          error: `Too many onboarding submissions. Retry after ${rl.retryAfterSec}s.`,
+        });
+      }
+
       const honeypot =
         (typeof req.body?.websiteUrl === 'string' && req.body.websiteUrl.trim()) ||
         (typeof req.body?.companyFax === 'string' && req.body.companyFax.trim());
@@ -572,9 +685,16 @@ export function createApiApp(port = 3000): express.Express {
       const salonName = sanitizePlainText(req.body?.salonName, 100);
       const ownerName = sanitizePlainText(req.body?.ownerName, 80) || 'Salon Owner';
       const whatsappPhone = sanitizePhone(req.body?.phone);
+      const publicContactPhone = sanitizePhone(req.body?.publicContactPhone) || whatsappPhone;
       const rawPlanId = sanitizePlainText(req.body?.planId, 20).toUpperCase();
-      const packageTier: 'STARTER' | 'PRO' | 'PRO++' =
-        rawPlanId === 'STARTER' ? 'STARTER' : rawPlanId === 'GROWTH' || rawPlanId === 'PRO' ? 'PRO' : 'PRO++';
+      const packageTier: 'STARTER' | 'PRO' | 'PRO++' | 'CUSTOM' =
+        rawPlanId === 'STARTER'
+          ? 'STARTER'
+          : rawPlanId === 'CUSTOM'
+          ? 'CUSTOM'
+          : rawPlanId === 'GROWTH' || rawPlanId === 'PRO'
+          ? 'PRO'
+          : 'PRO++';
       const rawCategory = sanitizePlainText(req.body?.salonCategory, 16).toUpperCase();
       const salonCategory: 'MENS' | 'LADIES' | undefined =
         rawCategory === 'LADIES' ? 'LADIES' : rawCategory === 'MENS' ? 'MENS' : undefined;
@@ -586,11 +706,10 @@ export function createApiApp(port = 3000): express.Express {
         : [];
 
       if (!salonName || !whatsappPhone) {
-        return res.status(400).json({ error: 'Salon name and WhatsApp phone number are required.' });
+        return res.status(400).json({ error: 'Salon name and owner mobile number are required.' });
       }
 
-      const newSalonId = `salon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
-      // Enforce strictly ONE unique WhatsApp number per salon branch
+      const newSalonId = `salon-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
       const reg = registerSalonOwnerAccount({
         salonId: newSalonId,
         salonName,
@@ -602,7 +721,7 @@ export function createApiApp(port = 3000): express.Express {
       if (!reg.ok) {
         return res.status(409).json({
           error:
-            'Each salon branch requires its own unique WhatsApp number. That WhatsApp number is already bound to an active branch.',
+            'Each salon branch requires its own unique owner number, or sign in first to add another branch.',
         });
       }
 
@@ -618,6 +737,9 @@ export function createApiApp(port = 3000): express.Express {
       updateRetentionSettings(newSalonId, {
         salonName,
         ownerName,
+        ownerAuthPhone: whatsappPhone,
+        publicContactPhone,
+        publicWhatsappPhone: publicContactPhone,
         whatsappPhone,
         packageTier,
         salonCategory,
@@ -628,7 +750,6 @@ export function createApiApp(port = 3000): express.Express {
       }
 
       const finalState = getSalonConciergeState(newSalonId);
-      // Directly issue verified, tenant-locked SALON_OWNER session cookie (Zero PIN walls)
       const token = signSessionToken(reg.user);
       setSessionCookie(res, token, req);
 
@@ -636,6 +757,7 @@ export function createApiApp(port = 3000): express.Express {
         authenticated: true,
         user: reg.user,
         salonId: newSalonId,
+        publicCode: finalState.publicCode,
         salonName,
         ownerName,
         phone: whatsappPhone,
@@ -1277,31 +1399,7 @@ export function createApiApp(port = 3000): express.Express {
     }
   );
 
-  // External WhatsApp Gateway Webhook: Protected by x-workcraft-webhook-secret (Zero IP rate limits)
-  app.post('/api/whatsapp/webhook', requireWebhookSecret, (req, res) => {
-    try {
-      const { salonId, fromPhone, messageText, clientName, appointmentIdForReview, forceLanguagePrompt } =
-        req.body || {};
-      if (!salonId || !fromPhone || typeof messageText !== 'string') {
-        return res.status(400).json({ error: 'salonId, fromPhone, and messageText are required.' });
-      }
-      const outcome = processWhatsAppWebhook({
-        salonId: sanitizePlainText(String(salonId), 60),
-        fromPhone: sanitizePlainText(String(fromPhone), 24),
-        messageText: sanitizePlainText(messageText, 500),
-        clientName: typeof clientName === 'string' ? sanitizePlainText(clientName, 80) : undefined,
-        appointmentIdForReview:
-          typeof appointmentIdForReview === 'string'
-            ? sanitizePlainText(appointmentIdForReview, 60)
-            : undefined,
-        forceLanguagePrompt: Boolean(forceLanguagePrompt),
-      });
-      return res.json(outcome);
-    } catch (err) {
-      console.error('WhatsApp webhook error:', err);
-      return res.status(500).json({ error: 'Webhook processing failed.' });
-    }
-  });
+  // Unofficial third-party WhatsApp gateway webhook removed. Only official Meta Cloud API (/api/whatsapp/meta-webhook) is supported when enabled as an optional paid add-on.
 
   // External Cron Trigger: Protected by x-workcraft-webhook-secret
   app.post('/api/salons/:salonId/cron/run', requireWebhookSecret, (req, res) => {
@@ -1379,18 +1477,42 @@ export function createApiApp(port = 3000): express.Express {
   );
 
   // ===========================================================================
-  // PHASE 1: PUBLIC CUSTOMER WHATSAPP EXPERIENCE, FLOW BOOKING & DEAL VIDEOS
+  // WEB-FIRST PUBLIC CUSTOMER BOOKING, RETURNING TOKEN/COOKIE, DEALS & /b/:token
+  // Strictly keyed by unguessable public `salonCode` (raw numeric IDs return 404).
   // ===========================================================================
-  app.get('/api/public/salons/:salonId/customer-experience', (req, res) => {
+  app.get('/api/public/salons/:salonCode/customer-experience', async (req, res) => {
     try {
-      const salonId = sanitizePlainText(req.params.salonId, 60);
-      const phone = typeof req.query.phone === 'string' ? req.query.phone : undefined;
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`pub:cx:${ipKey}`, 120, 60);
+      if (!rl.allowed) {
+        return res.status(429).json({ error: 'Too many requests. Please wait a moment.' });
+      }
+
+      const salonCode = sanitizePlainText(req.params.salonCode, 60);
+      const salonId = resolveSalonIdByPublicCode(salonCode);
+      if (!salonId) {
+        return res.status(404).json({ error: 'Salon booking link not found.' });
+      }
+
+      const queryToken = typeof req.query.c === 'string' ? req.query.c.trim() : '';
+      const cookies = parseCookieHeader(req.header('cookie'));
+      const cookieToken = cookies[getCustomerCookieName(salonCode)] || '';
+      const activeToken = queryToken || cookieToken || undefined;
+
+      // Refresh HttpOnly cookie when client arrives weeks later via their saved personal ?c= link
+      if (queryToken) {
+        const verified = verifyCustomerRecognizeToken(queryToken, salonId);
+        if (verified) {
+          setCustomerBrowserCookie(res, salonCode, queryToken, req);
+        }
+      }
+
       const rawLang = typeof req.query.lang === 'string' ? req.query.lang : undefined;
       const lang =
         rawLang === 'en' || rawLang === 'roman_ur' || rawLang === 'ur' || rawLang === 'ar'
           ? rawLang
           : undefined;
-      const config = getCustomerExperienceConfig(salonId, phone, lang);
+      const config = getCustomerExperienceConfig(salonId, activeToken, lang);
       return res.json(config);
     } catch (err) {
       console.error('Customer experience config error:', err);
@@ -1398,9 +1520,61 @@ export function createApiApp(port = 3000): express.Express {
     }
   });
 
-  app.post('/api/public/salons/:salonId/customer-message', (req, res) => {
+  // First-time QR onboarding: saves Name + Phone + opt-in, sets HttpOnly cookie & returns signed WhatsApp share link
+  app.post('/api/public/salons/:salonCode/client-profile', async (req, res) => {
     try {
-      const salonId = sanitizePlainText(req.params.salonId, 60);
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`pub:profile:${ipKey}`, 30, 60);
+      if (!rl.allowed) {
+        return res.status(429).json({ error: 'Too many requests. Please wait a moment.' });
+      }
+
+      const salonCode = sanitizePlainText(req.params.salonCode, 60);
+      const body = req.body || {};
+      const preferredLanguage =
+        body.preferredLanguage === 'en' ||
+        body.preferredLanguage === 'roman_ur' ||
+        body.preferredLanguage === 'ur' ||
+        body.preferredLanguage === 'ar'
+          ? body.preferredLanguage
+          : undefined;
+
+      const saved = saveFirstTimeClientProfile(salonCode, {
+        name: String(body.name || ''),
+        phone: String(body.phone || ''),
+        preferredLanguage,
+        marketingOptIn: Boolean(body.marketingOptIn),
+      });
+      if (!saved.ok) {
+        return res.status(saved.statusCode).json({ ok: false, error: saved.error });
+      }
+      setCustomerBrowserCookie(res, saved.publicCode, saved.cookieToken, req);
+      return res.status(201).json({
+        ok: true,
+        publicCode: saved.publicCode,
+        personalReturningShareUrl: saved.personalReturningShareUrl,
+        returningClient: saved.returningClient,
+      });
+    } catch (err) {
+      console.error('Save first-time client profile error:', err);
+      return res.status(500).json({ ok: false, error: 'Could not save client details.' });
+    }
+  });
+
+  app.post('/api/public/salons/:salonCode/customer-message', async (req, res) => {
+    try {
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`pub:msg:${ipKey}`, 60, 60);
+      if (!rl.allowed) {
+        return res.status(429).json({ error: 'Too many requests. Please wait a moment.' });
+      }
+
+      const salonCode = sanitizePlainText(req.params.salonCode, 60);
+      const salonId = resolveSalonIdByPublicCode(salonCode);
+      if (!salonId) {
+        return res.status(404).json({ error: 'Salon booking link not found.' });
+      }
+
       const body = req.body || {};
       const preferredLang =
         body.preferredLang === 'en' ||
@@ -1425,7 +1599,7 @@ export function createApiApp(port = 3000): express.Express {
         actionId,
         preferredLang,
         clientName: typeof body.clientName === 'string' ? body.clientName : undefined,
-        isDemo: Boolean(body.isDemo),
+        isDemo: body.isDemo !== false,
       });
       return res.json(outcome);
     } catch (err) {
@@ -1434,11 +1608,26 @@ export function createApiApp(port = 3000): express.Express {
     }
   });
 
-  app.get('/api/public/salons/:salonId/availability', (req, res) => {
+  app.get('/api/public/salons/:salonCode/availability', async (req, res) => {
     try {
-      const salonId = sanitizePlainText(req.params.salonId, 60);
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`pub:avail:${ipKey}`, 120, 60);
+      if (!rl.allowed) {
+        return res.status(429).json({ error: 'Too many availability requests. Please wait a moment.' });
+      }
+
+      const salonCode = sanitizePlainText(req.params.salonCode, 60);
+      const salonId = resolveSalonIdByPublicCode(salonCode);
+      if (!salonId) {
+        return res.status(404).json({ error: 'Salon booking link not found.' });
+      }
+
       const date = typeof req.query.date === 'string' ? req.query.date : '';
       const durationMins = Number(req.query.durationMins || 40);
+      const serviceIdsRaw = typeof req.query.serviceIds === 'string' ? req.query.serviceIds : '';
+      const serviceIds = serviceIdsRaw
+        ? serviceIdsRaw.split(',').map((s) => sanitizePlainText(s, 60)).filter(Boolean)
+        : undefined;
       const isDemo = req.query.isDemo === 'true' || req.query.isDemo === '1';
       const demoBusyBarber =
         isDemo && typeof req.query.demoBusyBarber === 'string'
@@ -1453,6 +1642,7 @@ export function createApiApp(port = 3000): express.Express {
         salonId,
         date,
         durationMins,
+        serviceIds,
         demoBusyBarber,
         demoBusyTimeSlot,
       });
@@ -1463,30 +1653,95 @@ export function createApiApp(port = 3000): express.Express {
     }
   });
 
-  app.post('/api/public/salons/:salonId/flow/book', (req, res) => {
+  app.post('/api/public/salons/:salonCode/flow/book', async (req, res) => {
     try {
-      const salonId = sanitizePlainText(req.params.salonId, 60);
-      const result = createCustomerFlowBooking(salonId, req.body || {});
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`pub:book:${ipKey}`, 30, 60);
+      if (!rl.allowed) {
+        return res.status(429).json({
+          ok: false,
+          error: `Too many booking attempts. Retry after ${rl.retryAfterSec}s.`,
+        });
+      }
+
+      const salonCode = sanitizePlainText(req.params.salonCode, 60);
+      const salonId = resolveSalonIdByPublicCode(salonCode);
+      if (!salonId) {
+        return res.status(404).json({ ok: false, error: 'Salon booking link not found.' });
+      }
+
+      const cookies = parseCookieHeader(req.header('cookie'));
+      const queryToken = typeof req.query.c === 'string' ? req.query.c.trim() : '';
+      const cookieToken = cookies[getCustomerCookieName(salonCode)] || '';
+      const claims = verifyCustomerRecognizeToken(queryToken || cookieToken, salonId);
+
+      const result = await createCustomerFlowBooking(salonId, {
+        ...(req.body || {}),
+        verifiedClientId: claims?.clientId,
+      });
+      if (result.recognizeCookieToken) {
+        setCustomerBrowserCookie(res, salonCode, result.recognizeCookieToken, req);
+      }
       return res.status(result.statusCode).json(result.payload);
     } catch (err) {
       console.error('Customer Flow booking error:', err);
-      return res.status(500).json({ ok: false, error: 'Failed to submit booking Flow.' });
+      return res.status(500).json({ ok: false, error: 'Failed to submit booking.' });
     }
   });
 
-  app.get('/api/public/salons/:salonId/deals/:dealId', (req, res) => {
+  app.get('/api/public/salons/:salonCode/deals/:dealId', async (req, res) => {
     try {
-      const salonId = sanitizePlainText(req.params.salonId, 60);
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`pub:deal:${ipKey}`, 120, 60);
+      if (!rl.allowed) {
+        return res.status(429).json({ error: 'Too many requests.' });
+      }
+
+      const salonCode = sanitizePlainText(req.params.salonCode, 60);
       const dealId = sanitizePlainText(req.params.dealId, 80);
-      const payload = getPublicDealPayload(salonId, dealId);
+      const payload = getPublicDealPayload(salonCode, dealId);
       if (!payload) {
-        return res.status(404).json({ error: 'Deal not found.' });
+        return res.status(404).json({ error: 'Deal or salon not found.' });
       }
       return res.json(payload);
     } catch (err) {
       console.error('Public deal load error:', err);
       return res.status(500).json({ error: 'Failed to load deal details.' });
     }
+  });
+
+  // Signed Expiring & Revocable "My Booking" Portal (/b/:token)
+  app.get('/api/public/bookings/:token', async (req, res) => {
+    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+    const rl = await enforceRateLimit(`pub:bget:${ipKey}`, 60, 60);
+    if (!rl.allowed) {
+      return res.status(429).json({ ok: false, error: 'Too many requests.' });
+    }
+    const booking = getBookingByAccessToken(req.params.token);
+    if (!booking) {
+      return res.status(404).json({ ok: false, error: 'Booking link is invalid, expired, or revoked.' });
+    }
+    return res.json(booking);
+  });
+
+  app.post('/api/public/bookings/:token/reschedule', async (req, res) => {
+    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+    const rl = await enforceRateLimit(`pub:bmod:${ipKey}`, 20, 60);
+    if (!rl.allowed) {
+      return res.status(429).json({ ok: false, error: 'Too many requests. Please wait.' });
+    }
+    const result = rescheduleBookingByAccessToken(req.params.token, req.body || {});
+    return res.status(result.statusCode).json(result);
+  });
+
+  app.post('/api/public/bookings/:token/cancel', async (req, res) => {
+    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+    const rl = await enforceRateLimit(`pub:bcan:${ipKey}`, 20, 60);
+    if (!rl.allowed) {
+      return res.status(429).json({ ok: false, error: 'Too many requests. Please wait.' });
+    }
+    const result = cancelBookingByAccessToken(req.params.token, req.body?.reason);
+    return res.status(result.statusCode).json(result);
   });
 
   app.get('/api/public/deal-videos/:fileName', (req, res) => {
@@ -1588,7 +1843,7 @@ export function createApiApp(port = 3000): express.Express {
     }
   );
 
-  // Meta WhatsApp Cloud API Webhook Verification & Live Handler (active when Meta env vars are set)
+  // Optional Paid Add-On: Official Meta WhatsApp Cloud API Webhook (strictly disabled unless salon enables add-on + matches phone_number_id)
   app.get('/api/whatsapp/meta-webhook', (req, res) => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
@@ -1624,22 +1879,32 @@ export function createApiApp(port = 3000): express.Express {
       if (!msg) {
         return res.status(200).json({ ok: true, ignored: true });
       }
+      const inboundPhoneNumberId = String(entry?.metadata?.phone_number_id || '').trim();
+      const matchedSalonId = findSalonIdByMetaPhoneNumberId(inboundPhoneNumberId);
+      if (!matchedSalonId) {
+        return res.status(200).json({
+          ok: true,
+          ignored: true,
+          reason: 'whatsapp_addon_disabled_or_unmapped_phone_number_id',
+        });
+      }
+
       const fromPhone = String(msg.from || '');
       const textBody =
         msg.text?.body ||
         msg.interactive?.button_reply?.id ||
         msg.interactive?.list_reply?.id ||
         'Hi';
-      const salonId = sanitizePlainText(String(req.query.salonId || '1'), 60);
       const outcome = processWhatsAppWebhook({
-        salonId,
+        salonId: matchedSalonId,
         fromPhone,
         messageText: String(textBody),
         clientName: contact?.profile?.name,
       });
 
       const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || '').trim();
-      const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
+      const phoneNumberId =
+        inboundPhoneNumberId || (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
       let sentViaMeta = false;
       if (accessToken && phoneNumberId && fromPhone) {
         const metaRes = await fetch(
@@ -1667,6 +1932,70 @@ export function createApiApp(port = 3000): express.Express {
       return res.status(200).json({ ok: false });
     }
   });
+
+  // Salon Owner Monthly Usage Meter, Stylist Leaves & Booking Status Mutations
+  app.get(
+    '/api/salons/:salonId/usage-meter',
+    requireAuth,
+    requireSalonTenantAccess(true),
+    (req, res) => {
+      return res.json(getMonthlyUsageSnapshot(req.params.salonId));
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/stylist-leaves',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      try {
+        const state = addStylistLeave(req.params.salonId, req.body || {});
+        return res.status(201).json(state);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to save stylist leave.';
+        return res.status(400).json({ error: msg });
+      }
+    }
+  );
+
+  app.delete(
+    '/api/salons/:salonId/stylist-leaves/:leaveId',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      const state = removeStylistLeave(
+        req.params.salonId,
+        sanitizePlainText(req.params.leaveId, 60)
+      );
+      return res.json(state);
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/appointments/:bookingId/status',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      const rawStatus = sanitizePlainText(req.body?.status, 24).toUpperCase();
+      const nextStatus: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED' =
+        rawStatus === 'IN_CHAIR'
+          ? 'IN_CHAIR'
+          : rawStatus === 'COMPLETED'
+          ? 'COMPLETED'
+          : rawStatus === 'CANCELED'
+          ? 'CANCELED'
+          : 'CONFIRMED';
+      const outcome = updateAppointmentStatus(
+        req.params.salonId,
+        sanitizePlainText(req.params.bookingId, 60),
+        nextStatus
+      );
+      if (!outcome.ok) {
+        return res.status(404).json({ error: outcome.error });
+      }
+      return res.json(outcome);
+    }
+  );
 
   app.post(
     '/api/salons/:salonId/concierge/trigger-cron',
