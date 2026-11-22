@@ -14,7 +14,7 @@
   ],
   "rewrites": [
     { "source": "/api/translate-voice", "destination": "/api/translate-voice" },
-    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/api/(.*)", "destination": "/api/index?__wc_path=$1" },
     { "source": "/((?!api/|assets/|.*\\..*).*)", "destination": "/index.html" }
   ]
 }
