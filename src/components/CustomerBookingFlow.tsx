@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Calendar,
+  CalendarPlus,
   Check,
   CheckCircle2,
   Clock,
@@ -9,6 +10,9 @@ import {
   Edit2,
   ExternalLink,
   MapPin,
+  MessageCircle,
+  Phone,
+  RotateCcw,
   Scissors,
   Sparkles,
   Tag,
@@ -16,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import type {
+  AdAttributionChannel,
   ClientPreferredLang,
   CustomerAvailabilityResponse,
   CustomerExperienceConfig,
@@ -26,6 +31,9 @@ import { LOGO_URL } from '../data/portalData';
 
 interface CustomerBookingFlowProps {
   salonId: string;
+  salonCode?: string;
+  cToken?: string;
+  adSource?: AdAttributionChannel;
   initialDealId?: string | null;
   initialLang?: ClientPreferredLang;
   initialClientPhone?: string;
@@ -35,6 +43,7 @@ interface CustomerBookingFlowProps {
   demoBusyBarber?: string;
   demoBusyTimeSlot?: string;
   standalone?: boolean;
+  onNavigate?: (path: string) => void;
   onBookingConfirmed?: (res: CustomerFlowBookingResponse) => void;
   onClose?: () => void;
 }
@@ -51,6 +60,15 @@ interface FlowCopy {
   yourPhoneLabel: string;
   bookedForLabel: string;
   returningWelcome: string;
+  visitsLabel: string;
+  rebookLastBtn: string;
+  firstTimeTitle: string;
+  firstTimeSubtitle: string;
+  marketingOptInLabel: string;
+  saveDetailsBtn: string;
+  savingDetailsBtn: string;
+  saveWhatsappLinkBtn: string;
+  detailsSavedMsg: string;
   summaryTitle: string;
   clientNameRow: string;
   phoneRow: string;
@@ -73,6 +91,8 @@ interface FlowCopy {
   confirmedSubtitle: string;
   demoNoPersistNote: string;
   bookingIdLabel: string;
+  manageBookingBtn: string;
+  addToCalendarBtn: string;
   openMapsBtn: string;
   copyLocationBtn: string;
   copiedBtn: string;
@@ -87,6 +107,8 @@ interface FlowCopy {
   errSelectService: string;
   errSelectSlotBarber: string;
   errEnterName: string;
+  errEnterPhone: string;
+  callSalonLabel: string;
   demoHiddenBarberNote: (barber: string, slot: string) => string;
 }
 
@@ -103,6 +125,15 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     yourPhoneLabel: 'WhatsApp Number',
     bookedForLabel: 'Saved Profile',
     returningWelcome: 'Welcome back',
+    visitsLabel: 'visits',
+    rebookLastBtn: 'Rebook Last Visit',
+    firstTimeTitle: 'First-Time Visit? Save Your Profile',
+    firstTimeSubtitle: 'Enter your name & mobile once, then save your personal link to your WhatsApp chat for 2-tap rebooking.',
+    marketingOptInLabel: 'Opt in to birthday & return offers',
+    saveDetailsBtn: 'Save My Details',
+    savingDetailsBtn: 'Saving...',
+    saveWhatsappLinkBtn: 'Save Link to My WhatsApp',
+    detailsSavedMsg: 'Profile recognized. Save your personal booking link in your WhatsApp chat:',
     summaryTitle: 'Booking Summary',
     clientNameRow: 'Client Name',
     phoneRow: 'Phone Number',
@@ -122,9 +153,11 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     freeShort: 'free',
     checkingSlots: 'Checking live salon slots...',
     confirmedTitle: 'Appointment Confirmed',
-    confirmedSubtitle: 'Your chair is reserved inside this booking Flow.',
+    confirmedSubtitle: 'Your chair is reserved. Manage or reschedule anytime from your booking link.',
     demoNoPersistNote: 'DEMO MODE · Real salon appointments were NOT changed.',
     bookingIdLabel: 'Booking Ref',
+    manageBookingBtn: 'Manage / Reschedule / Cancel',
+    addToCalendarBtn: 'Add to Calendar (.ics)',
     openMapsBtn: 'Google Maps Directions',
     copyLocationBtn: 'Copy',
     copiedBtn: 'Copied',
@@ -138,7 +171,9 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     monthsShort: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
     errSelectService: 'Please select at least one service.',
     errSelectSlotBarber: 'Please select an available date, arrival time, and barber.',
-    errEnterName: 'Please enter your name before confirming.',
+    errEnterName: 'Please enter your complete name before confirming.',
+    errEnterPhone: 'Please enter a valid mobile number.',
+    callSalonLabel: 'Call Salon Directly',
     demoHiddenBarberNote: (barber, slot) =>
       `${barber} is busy at ${slot}. You can pick another available stylist below, or choose an earlier or later time slot.`,
   },
@@ -154,6 +189,15 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     yourPhoneLabel: 'WhatsApp Number',
     bookedForLabel: 'Mehfooz Profile',
     returningWelcome: 'Khush amdeed',
+    visitsLabel: 'visits',
+    rebookLastBtn: 'Pichli Service Dobara Book Karein',
+    firstTimeTitle: 'Pehli Martaba Tashreef Laye Hain?',
+    firstTimeSubtitle: 'Apna naam aur mobile number mehfooz karein aur apna zaati link WhatsApp par save karein.',
+    marketingOptInLabel: 'Birthday aur return offers ke liye ijazat dein',
+    saveDetailsBtn: 'Maloomat Mehfooz Karein',
+    savingDetailsBtn: 'Mehfooz ho raha hai...',
+    saveWhatsappLinkBtn: 'Apna Link WhatsApp Par Save Karein',
+    detailsSavedMsg: 'Profile mehfooz ho gayi. Apna zaati booking link WhatsApp mein save karein:',
     summaryTitle: 'Booking Summary',
     clientNameRow: 'Client Naam',
     phoneRow: 'Phone Number',
@@ -173,9 +217,11 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     freeShort: 'free',
     checkingSlots: 'Khali slots check ho rahe hain...',
     confirmedTitle: 'Appointment Confirm Ho Gayi',
-    confirmedSubtitle: 'Aap ki chair reserve ho chuki hai.',
+    confirmedSubtitle: 'Aap ki chair reserve ho chuki hai. Apne booking link se waqt tabdeel ya cancel kar sakte hain.',
     demoNoPersistNote: 'DEMO MODE · Asal bookings mein koi tabdeeli nahi hui.',
     bookingIdLabel: 'Booking Ref',
+    manageBookingBtn: 'Manage / Tabdeel / Cancel',
+    addToCalendarBtn: 'Calendar Mein Save Karein (.ics)',
     openMapsBtn: 'Google Maps Directions',
     copyLocationBtn: 'Copy',
     copiedBtn: 'Copied',
@@ -189,7 +235,9 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     monthsShort: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
     errSelectService: 'Kam az kam aik service chunein.',
     errSelectSlotBarber: 'Tareekh, waqt aur barber muntakhib karein.',
-    errEnterName: 'Confirm karne se pehle apna naam likhein.',
+    errEnterName: 'Confirm karne se pehle apna mukammal naam likhein.',
+    errEnterPhone: 'Sahih mobile number darj karein.',
+    callSalonLabel: 'Salon Ko Call Karein',
     demoHiddenBarberNote: (barber, slot) =>
       `${barber} is waqt (${slot}) masroof hain. Aap neeche se kisi doosre stylist ko chunein ya time slot aage peeche kar lein.`,
   },
@@ -205,6 +253,15 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     yourPhoneLabel: 'واٹس ایپ نمبر',
     bookedForLabel: 'محفوظ پروفائل',
     returningWelcome: 'خوش آمدید',
+    visitsLabel: 'وزٹس',
+    rebookLastBtn: 'پچھلی سروس دوبارہ بک کریں',
+    firstTimeTitle: 'پہلی بار تشریف لائے ہیں؟ پروفائل محفوظ کریں',
+    firstTimeSubtitle: 'اپنا نام اور موبائل نمبر درج کریں اور آئندہ 2-ٹیپ بکنگ کے لیے ذاتی لنک واٹس ایپ پر محفوظ کریں۔',
+    marketingOptInLabel: 'سالگرہ اور واپسی آفرز کی اجازت دیں',
+    saveDetailsBtn: 'تفصیلات محفوظ کریں',
+    savingDetailsBtn: 'محفوظ ہو رہا ہے...',
+    saveWhatsappLinkBtn: 'میرا لنک واٹس ایپ میں محفوظ کریں',
+    detailsSavedMsg: 'پروفائل محفوظ ہو گیا۔ اپنا ذاتی بکنگ لنک واٹس ایپ چیٹ میں محفوظ کریں:',
     summaryTitle: 'بکنگ کا خلاصہ',
     clientNameRow: 'گاہک کا نام',
     phoneRow: 'فون نمبر',
@@ -224,9 +281,11 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     freeShort: 'دستیاب',
     checkingSlots: 'دستیاب اوقات چیک ہو رہے ہیں...',
     confirmedTitle: 'اپائنٹمنٹ کنفرم ہو گئی',
-    confirmedSubtitle: 'آپ کی کرسی محفوظ کر دی گئی ہے۔',
+    confirmedSubtitle: 'آپ کی کرسی محفوظ کر دی گئی ہے۔ اپنے بکنگ لنک سے کسی بھی وقت تبدیلی یا منسوخی کریں۔',
     demoNoPersistNote: 'ڈیمو موڈ · اصل بکنگز میں کوئی تبدیلی نہیں کی گئی۔',
     bookingIdLabel: 'بکنگ ریفرنس',
+    manageBookingBtn: 'بکنگ تبدیل یا منسوخ کریں',
+    addToCalendarBtn: 'کیلنڈر میں شامل کریں (.ics)',
     openMapsBtn: 'گوگل میپس ڈائریکشن',
     copyLocationBtn: 'کاپی',
     copiedBtn: 'کاپی ہو گیا',
@@ -240,7 +299,9 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     monthsShort: ['جنوری', 'فروری', 'مارچ', 'اپریل', 'مئی', 'جون', 'جولائی', 'اگست', 'ستمبر', 'اکتوبر', 'نومبر', 'دسمبر'],
     errSelectService: 'براہ کرم کم از کم ایک سروس منتخب کریں۔',
     errSelectSlotBarber: 'براہ کرم دستیاب تاریخ، وقت اور باربر منتخب کریں۔',
-    errEnterName: 'تصدیق سے پہلے اپنا نام درج کریں۔',
+    errEnterName: 'تصدیق سے پہلے اپنا مکمل نام درج کریں۔',
+    errEnterPhone: 'درست موبائل نمبر درج کریں۔',
+    callSalonLabel: 'سیلون کو براہِ راست کال کریں',
     demoHiddenBarberNote: (barber, slot) =>
       `${barber} اس وقت (${slot}) مصروف ہیں۔ آپ نیچے کسی دوسرے دستیاب اسٹائلسٹ کا انتخاب کر سکتے ہیں یا اپنا وقت تھوڑا آگے پیچھے کر لیں۔`,
   },
@@ -256,6 +317,15 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     yourPhoneLabel: 'رقم الواتساب',
     bookedForLabel: 'ملف محفوظ',
     returningWelcome: 'أهلاً بعودتك',
+    visitsLabel: 'زيارات',
+    rebookLastBtn: 'إعادة حجز الزيارة السابقة',
+    firstTimeTitle: 'زيارتك الأولى؟ احفظ بياناتك الآن',
+    firstTimeSubtitle: 'أدخل اسمك ورقم جوالك مرة واحدة واحفظ رابطك الشخصي في واتساب لإعادة الحجز بضغطتين.',
+    marketingOptInLabel: 'أوافق على استلام عروض أعياد الميلاد والعودة',
+    saveDetailsBtn: 'حفظ بياناتي',
+    savingDetailsBtn: 'جاري الحفظ...',
+    saveWhatsappLinkBtn: 'احفظ الرابط في الواتساب الخاص بي',
+    detailsSavedMsg: 'تم حفظ ملفك. احفظ رابط الحجز الشخصي في محادثة واتساب الخاصة بك:',
     summaryTitle: 'ملخص الحجز',
     clientNameRow: 'اسم العميل',
     phoneRow: 'رقم الهاتف',
@@ -275,9 +345,11 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     freeShort: 'متاح',
     checkingSlots: 'جاري فحص المواعيد المتاحة...',
     confirmedTitle: 'تم تأكيد الموعد',
-    confirmedSubtitle: 'تم تأكيد حجزك مباشرة داخل هذه النافذة.',
+    confirmedSubtitle: 'تم تأكيد حجزك. يمكنك تعديل أو إلغاء الموعد في أي وقت من رابط حجزك.',
     demoNoPersistNote: 'وضع تجريبي · لم يتم تعديل الحجوزات الفعلية.',
     bookingIdLabel: 'رقم الحجز',
+    manageBookingBtn: 'إدارة / تعديل / إلغاء الحجز',
+    addToCalendarBtn: 'إضافة إلى التقويم (.ics)',
     openMapsBtn: 'اتجاهات خرائط جوجل',
     copyLocationBtn: 'نسخ',
     copiedBtn: 'تم النسخ',
@@ -291,51 +363,86 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     monthsShort: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
     errSelectService: 'يرجى اختيار خدمة واحدة على الأقل.',
     errSelectSlotBarber: 'يرجى اختيار التاريخ والوقت والحلاق المتاح.',
-    errEnterName: 'يرجى إدخال اسمك قبل التأكيد.',
+    errEnterName: 'يرجى إدخال اسمك الكامل قبل التأكيد.',
+    errEnterPhone: 'يرجى إدخال رقم هاتف صحيح.',
+    callSalonLabel: 'اتصل بالصالون مباشرة',
     demoHiddenBarberNote: (barber, slot) =>
       `${barber} مشغول في تمام الساعة ${slot}. يمكنك اختيار مصفف آخر متاح أدناه، أو تعديل وقت الحجز قبل أو بعد هذا الموعد.`,
   },
 };
 
-function buildUpcomingDates(
-  baseDateStr: string,
-  copy: FlowCopy,
-  count = 10
-): Array<{ date: string; top: string; sub: string }> {
-  const parts = baseDateStr.split('-').map((n) => parseInt(n, 10));
-  const base =
-    parts.length === 3 && !parts.some((n) => Number.isNaN(n))
-      ? new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0))
-      : new Date();
-  const out: Array<{ date: string; top: string; sub: string }> = [];
-  for (let i = 0; i < count; i++) {
-    const d = new Date(base.getTime() + i * 86400000);
-    const yyyy = d.getUTCFullYear();
-    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(d.getUTCDate()).padStart(2, '0');
-    out.push({
-      date: `${yyyy}-${mm}-${dd}`,
-      top: i === 0 ? copy.todayLabel : i === 1 ? copy.tomorrowLabel : copy.weekdaysShort[d.getUTCDay()],
-      sub: `${dd} ${copy.monthsShort[d.getUTCMonth()]}`,
-    });
+function makeIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
   }
-  return out;
+  return `idem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildBookingIcsDataUrl(params: {
+  bookingId: string;
+  salonName: string;
+  service: string;
+  barberName: string;
+  appointmentDate: string;
+  timeSlot: string;
+  durationMins: number;
+  address: string;
+}): string {
+  const [y, m, d] = (params.appointmentDate || '').split('-').map((n) => parseInt(n, 10));
+  const match = params.timeSlot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  let hh = 12;
+  let mm = 0;
+  if (match) {
+    hh = parseInt(match[1], 10) % 12;
+    if (match[3].toUpperCase() === 'PM') hh += 12;
+    mm = parseInt(match[2], 10);
+  }
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const startDt =
+    y && m && d ? new Date(y, m - 1, d, hh, mm, 0) : new Date(Date.now() + 3600000);
+  const endDt = new Date(startDt.getTime() + Math.max(15, params.durationMins) * 60000);
+  const fmt = (dt: Date) =>
+    `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(
+      dt.getMinutes()
+    )}00`;
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//WorkCraft//Salon Booking//EN',
+    'BEGIN:VEVENT',
+    `UID:${params.bookingId}@workcraft`,
+    `DTSTAMP:${fmt(new Date())}`,
+    `DTSTART:${fmt(startDt)}`,
+    `DTEND:${fmt(endDt)}`,
+    `SUMMARY:${params.salonName} — ${params.service} (${params.barberName})`,
+    `LOCATION:${params.address.replace(/[\r\n]+/g, ' ')}`,
+    `DESCRIPTION:Booking Ref ${params.bookingId}`,
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+  return `data:text/calendar;charset=utf-8,${encodeURIComponent(ics)}`;
 }
 
 export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
   salonId,
+  salonCode,
+  cToken,
+  adSource = 'DIRECT',
   initialDealId = null,
   initialLang = 'en',
-  initialClientPhone = '+92 300 0000000',
+  initialClientPhone = '',
   isDemo = false,
   demoForceNewCustomer,
   demoSavedCustomerName,
   demoBusyBarber,
   demoBusyTimeSlot,
   standalone = false,
+  onNavigate,
   onBookingConfirmed,
   onClose,
 }) => {
+  const effectiveSalonCode = salonCode || salonId;
+
   const [config, setConfig] = useState<CustomerExperienceConfig | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [activeLang, setActiveLang] = useState<ClientPreferredLang>(initialLang || 'en');
@@ -347,11 +454,18 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
   const [selectedBarber, setSelectedBarber] = useState<string>('');
   const [clientPhone, setClientPhone] = useState<string>(initialClientPhone);
   const [clientNameInput, setClientNameInput] = useState<string>('');
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [personalShareUrl, setPersonalShareUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [quotaContactPhone, setQuotaContactPhone] = useState<string | null>(null);
   const [confirmedResult, setConfirmedResult] = useState<CustomerFlowBookingResponse | null>(null);
   const [availabilityReloadTick, setAvailabilityReloadTick] = useState(0);
   const [copiedLocation, setCopiedLocation] = useState(false);
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
+
+  const idempotencyKeyRef = useRef<string>(makeIdempotencyKey());
 
   // Query 3: Progressive collapse chips once user confirms Services / Date / Time
   const [servicesCollapsed, setServicesCollapsed] = useState(false);
@@ -363,7 +477,9 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
   }, [initialLang]);
 
   useEffect(() => {
-    setClientPhone(initialClientPhone);
+    if (initialClientPhone) {
+      setClientPhone(initialClientPhone);
+    }
   }, [initialClientPhone]);
 
   useEffect(() => {
@@ -371,20 +487,27 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
     setLoadingConfig(true);
     setErrorMsg(null);
     const params = new URLSearchParams();
-    if (clientPhone.trim()) params.set('phone', clientPhone.trim());
     params.set('lang', activeLang);
-    fetch(`/api/public/salons/${encodeURIComponent(salonId)}/customer-experience?${params.toString()}`)
+    if (cToken) params.set('c', cToken);
+    fetch(
+      `/api/public/salons/${encodeURIComponent(effectiveSalonCode)}/customer-experience?${params.toString()}`,
+      { credentials: 'include' }
+    )
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load salon'))))
       .then((data: CustomerExperienceConfig) => {
         if (cancelled) return;
         setConfig(data);
         setSelectedDate((prev) => prev || data.todayDate);
 
+        if (cToken && data.publicCode) {
+          setPersonalShareUrl(`/s/${data.publicCode}?c=${encodeURIComponent(cToken)}`);
+        }
+
         if (
           data.availableLanguages.length > 0 &&
           !data.availableLanguages.some((l) => l.lang === activeLang)
         ) {
-          setActiveLang('en');
+          setActiveLang(data.defaultLanguage || 'en');
         }
 
         // Pre-select services from deal if provided, otherwise first service
@@ -409,7 +532,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [salonId, initialDealId, clientPhone]);
+  }, [effectiveSalonCode, initialDealId, cToken]);
 
   const activeDeal: SalonDeal | null = useMemo(() => {
     if (!config || !initialDealId) return null;
@@ -448,6 +571,10 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
   }, [selectedServices, activeDeal]);
 
   useEffect(() => {
+    idempotencyKeyRef.current = makeIdempotencyKey();
+  }, [selectedServiceIds, selectedDate, selectedTimeSlot, selectedBarber]);
+
+  useEffect(() => {
     if (!selectedDate) return;
     let cancelled = false;
     setLoadingSlots(true);
@@ -455,12 +582,17 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
       date: selectedDate,
       durationMins: String(totalDurationMins),
     });
+    if (selectedServiceIds.length > 0) {
+      params.set('serviceIds', selectedServiceIds.join(','));
+    }
     if (isDemo) {
       params.set('isDemo', 'true');
       if (demoBusyBarber) params.set('demoBusyBarber', demoBusyBarber);
       if (demoBusyTimeSlot) params.set('demoBusyTimeSlot', demoBusyTimeSlot);
     }
-    fetch(`/api/public/salons/${encodeURIComponent(salonId)}/availability?${params.toString()}`)
+    fetch(
+      `/api/public/salons/${encodeURIComponent(effectiveSalonCode)}/availability?${params.toString()}`
+    )
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed availability'))))
       .then((data: CustomerAvailabilityResponse) => {
         if (cancelled) return;
@@ -496,9 +628,10 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
       cancelled = true;
     };
   }, [
-    salonId,
+    effectiveSalonCode,
     selectedDate,
     totalDurationMins,
+    selectedServiceIds,
     isDemo,
     demoBusyBarber,
     demoBusyTimeSlot,
@@ -524,9 +657,9 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
   const effectiveSavedName = useMemo(() => {
     if (isDemo && typeof demoForceNewCustomer === 'boolean') {
       if (demoForceNewCustomer) return null;
-      return demoSavedCustomerName || config?.customerProfile.savedName || 'Bilal Ahmed';
+      return demoSavedCustomerName || config?.returningClient?.clientName || 'Bilal Ahmed';
     }
-    return config?.customerProfile.hasSavedName ? config.customerProfile.savedName : null;
+    return config?.returningClient?.clientName || null;
   }, [isDemo, demoForceNewCustomer, demoSavedCustomerName, config]);
 
   const copy = FLOW_COPY[activeLang] || FLOW_COPY.en;
@@ -566,8 +699,65 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
       const avail = slot.barbers.filter((b) => b.available);
       const keepCurrent = avail.find((b) => b.name === selectedBarber);
       setSelectedBarber(keepCurrent?.name || avail[0]?.name || '');
-      // Collapse arrival time step only when at least 1 barber is free; otherwise keep open so client can pick another slot
       setTimeCollapsed(avail.length > 0);
+    }
+  };
+
+  const handleSaveClientProfile = async () => {
+    if (!config) return;
+    setErrorMsg(null);
+    if (!clientNameInput.trim()) {
+      setErrorMsg(copy.errEnterName);
+      return;
+    }
+    if (!clientPhone.trim() || clientPhone.replace(/[^\d]/g, '').length < 7) {
+      setErrorMsg(copy.errEnterPhone);
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      const res = await fetch(
+        `/api/public/salons/${encodeURIComponent(effectiveSalonCode)}/client-profile`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            name: clientNameInput.trim(),
+            phone: clientPhone.trim(),
+            preferredLanguage: activeLang,
+            marketingOptIn,
+          }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setErrorMsg(data.error || copy.errEnterPhone);
+        return;
+      }
+      setPersonalShareUrl(data.personalReturningShareUrl || null);
+      if (data.returningClient) {
+        setConfig((prev) => (prev ? { ...prev, returningClient: data.returningClient } : prev));
+      }
+    } catch {
+      setErrorMsg('Could not save profile right now.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleRebookLastVisit = () => {
+    const rc = config?.returningClient;
+    if (!rc || !rc.lastServiceIds?.length || !config) return;
+    const validIds = rc.lastServiceIds.filter((id) =>
+      config.services.some((s) => (s.id || s.name) === id)
+    );
+    if (validIds.length > 0) {
+      setSelectedServiceIds(validIds);
+      setServicesCollapsed(true);
+    }
+    if (rc.lastBarberName && availableBarbersAtSlot.some((b) => b.name === rc.lastBarberName)) {
+      setSelectedBarber(rc.lastBarberName);
     }
   };
 
@@ -582,10 +772,21 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
     }
   };
 
+  const handleCopyPersonalLink = async (fullUrl: string) => {
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      setCopiedShareLink(true);
+      setTimeout(() => setCopiedShareLink(false), 2500);
+    } catch {
+      setCopiedShareLink(false);
+    }
+  };
+
   const handleConfirmBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!config) return;
     setErrorMsg(null);
+    setQuotaContactPhone(null);
 
     if (selectedServiceIds.length === 0) {
       setErrorMsg(copy.errSelectService);
@@ -601,14 +802,22 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
       setErrorMsg(copy.errEnterName);
       return;
     }
+    if (!config.returningClient && !isDemo && (!clientPhone.trim() || clientPhone.replace(/[^\d]/g, '').length < 7)) {
+      setErrorMsg(copy.errEnterPhone);
+      return;
+    }
 
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/public/salons/${encodeURIComponent(salonId)}/flow/book`, {
+      const bookUrl = cToken
+        ? `/api/public/salons/${encodeURIComponent(effectiveSalonCode)}/flow/book?c=${encodeURIComponent(cToken)}`
+        : `/api/public/salons/${encodeURIComponent(effectiveSalonCode)}/flow/book`;
+      const res = await fetch(bookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
-          clientPhone: clientPhone.trim() || '+92 300 0000000',
+          clientPhone: clientPhone.trim() || undefined,
           clientName: effectiveSavedName || clientNameInput.trim(),
           preferredLanguage: activeLang,
           serviceIds: selectedServiceIds,
@@ -616,17 +825,31 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
           timeSlot: selectedTimeSlot,
           barberName: selectedBarber,
           dealId: activeDeal?.id,
+          adSource,
+          idempotencyKey: idempotencyKeyRef.current,
+          marketingOptIn,
           isDemo,
           demoBusyBarber: isDemo ? demoBusyBarber : undefined,
           demoBusyTimeSlot: isDemo ? demoBusyTimeSlot : undefined,
         }),
       });
       const data = (await res.json()) as CustomerFlowBookingResponse;
+      if (res.status === 402 || data.code === 'QUOTA_EXCEEDED') {
+        setErrorMsg(
+          data.error ||
+            'Online booking limit reached for this salon this month. Please call the salon directly.'
+        );
+        setQuotaContactPhone(data.publicContactPhone || config.publicContactPhone || null);
+        return;
+      }
       if (!res.ok || !data.ok) {
         setErrorMsg(data.error || copy.errSelectSlotBarber);
         setTimeCollapsed(false);
         setAvailabilityReloadTick((t) => t + 1);
         return;
+      }
+      if (data.personalReturningShareUrl) {
+        setPersonalShareUrl(data.personalReturningShareUrl);
       }
       setConfirmedResult(data);
       onBookingConfirmed?.(data);
@@ -720,153 +943,337 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
         </header>
 
         {/* Inside-Flow Success Confirmation State */}
-        {confirmedResult?.appointment ? (
-          <div className="flex-1 overflow-y-auto p-5 space-y-5">
-            <div className="rounded-2xl border border-[#14532D] bg-[#0B2E1E] p-5 text-center space-y-2">
-              <div className="mx-auto size-12 rounded-full bg-[#25D366]/20 border border-[#25D366] grid place-items-center text-[#25D366]">
-                <CheckCircle2 className="size-6" />
+        {confirmedResult?.appointment ? (() => {
+          const sharePath = confirmedResult.personalReturningShareUrl || personalShareUrl;
+          const fullShareUrl =
+            sharePath && typeof window !== 'undefined' ? `${window.location.origin}${sharePath}` : sharePath || '';
+          const waPersonalHref = fullShareUrl
+            ? `https://wa.me/?text=${encodeURIComponent(
+                `${config.salonName} — My Personal 2-Tap Booking Link: ${fullShareUrl}`
+              )}`
+            : '';
+          const icsHref = buildBookingIcsDataUrl({
+            bookingId: confirmedResult.appointment.id,
+            salonName: config.salonName,
+            service: localizedSelectedServicesText || confirmedResult.appointment.service,
+            barberName: confirmedResult.appointment.barberName,
+            appointmentDate: confirmedResult.appointment.appointmentDate || selectedDate,
+            timeSlot: confirmedResult.appointment.timeSlot,
+            durationMins: confirmedResult.appointment.durationMins || totalDurationMins,
+            address: confirmedResult.address || config.address,
+          });
+          return (
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <div className="rounded-2xl border border-[#14532D] bg-[#0B2E1E] p-5 text-center space-y-2">
+                <div className="mx-auto size-12 rounded-full bg-[#25D366]/20 border border-[#25D366] grid place-items-center text-[#25D366]">
+                  <CheckCircle2 className="size-6" />
+                </div>
+                <h2 className="text-lg font-bold text-[#E9EDEF]">{copy.confirmedTitle}</h2>
+                <p className="text-xs text-[#A7F3D0] leading-relaxed">{copy.confirmedSubtitle}</p>
+                {confirmedResult.isDemo && (
+                  <p className="text-[11px] font-mono text-[#FBBF24] pt-1">
+                    {copy.demoNoPersistNote}
+                  </p>
+                )}
               </div>
-              <h2 className="text-lg font-bold text-[#E9EDEF]">{copy.confirmedTitle}</h2>
-              <p className="text-xs text-[#A7F3D0] leading-relaxed">{copy.confirmedSubtitle}</p>
-              {confirmedResult.isDemo && (
-                <p className="text-[11px] font-mono text-[#FBBF24] pt-1">
-                  {copy.demoNoPersistNote}
-                </p>
-              )}
-            </div>
 
-            <div className="rounded-2xl border border-[#2A3942] bg-[#202C33] p-4 space-y-2.5 text-sm">
-              <div className="flex items-center justify-between border-b border-[#2A3942] pb-2">
-                <span className="text-xs font-mono text-[#8696A0]">{copy.bookingIdLabel}</span>
-                <span dir="ltr" className="font-mono font-bold text-[#25D366] tabular-nums">
-                  {confirmedResult.appointment.id}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-[#8696A0]">{copy.clientNameRow}</span>
-                <span className="font-semibold text-[#E9EDEF]">
-                  {confirmedResult.appointment.clientName}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-[#8696A0]">{copy.phoneRow}</span>
-                <span dir="ltr" className="font-mono text-xs font-semibold text-[#D1D7DB] tabular-nums">
-                  {confirmedResult.appointment.clientPhone || clientPhone}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-[#8696A0]">{copy.dateTimeRow}</span>
-                <span dir="ltr" className="font-mono font-semibold text-[#E9EDEF] tabular-nums">
-                  {confirmedResult.appointment.appointmentDate} · {confirmedResult.appointment.timeSlot}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-[#8696A0]">{copy.barberRow}</span>
-                <span className="font-semibold text-[#E9EDEF]">
-                  {confirmedResult.appointment.barberName}
-                </span>
-              </div>
-              <div className="border-t border-[#2A3942] pt-2 space-y-1">
-                <span className="text-xs text-[#8696A0] block">{copy.servicesRow}</span>
-                <p className="text-xs font-medium text-[#E9EDEF]">
-                  {localizedSelectedServicesText || confirmedResult.appointment.service}
-                </p>
-              </div>
-              {confirmedResult.appliedDeal && (
-                <div className="rounded-xl bg-[#111B21] border border-[#2A3942] px-3 py-2 text-xs flex items-center justify-between">
-                  <span className="text-[#25D366] font-semibold">
-                    {activeDeal?.titleTranslations?.[activeLang] || confirmedResult.appliedDeal.title}
-                  </span>
-                  <span dir="ltr" className="font-mono text-[#25D366] tabular-nums">
-                    -{config.currencySymbol}
-                    {confirmedResult.appliedDeal.savings.toLocaleString()}
+              <div className="rounded-2xl border border-[#2A3942] bg-[#202C33] p-4 space-y-2.5 text-sm">
+                <div className="flex items-center justify-between border-b border-[#2A3942] pb-2">
+                  <span className="text-xs font-mono text-[#8696A0]">{copy.bookingIdLabel}</span>
+                  <span dir="ltr" className="font-mono font-bold text-[#25D366] tabular-nums">
+                    {confirmedResult.appointment.id}
                   </span>
                 </div>
-              )}
-
-              {/* Separate Total Amount & Total Time rows */}
-              <div className="border-t border-[#2A3942] pt-2.5 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#8696A0]">{copy.totalAmountLabel}</span>
-                  <span dir="ltr" className="text-base font-mono font-bold text-[#25D366] tabular-nums">
-                    {config.currencySymbol}
-                    {confirmedResult.appointment.price.toLocaleString()}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-[#8696A0]">{copy.clientNameRow}</span>
+                  <span className="font-semibold text-[#E9EDEF]">
+                    {confirmedResult.appointment.clientName}
                   </span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#8696A0]">{copy.totalTimeLabel}</span>
-                  <span className="text-xs font-mono font-bold text-[#E9EDEF] tabular-nums">
-                    {confirmedResult.appointment.durationMins || totalDurationMins} {copy.minShort}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-[#8696A0]">{copy.phoneRow}</span>
+                  <span dir="ltr" className="font-mono text-xs font-semibold text-[#D1D7DB] tabular-nums">
+                    {confirmedResult.maskedPhone || confirmedResult.appointment.clientPhone || clientPhone || '—'}
                   </span>
                 </div>
-              </div>
-            </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-[#8696A0]">{copy.dateTimeRow}</span>
+                  <span dir="ltr" className="font-mono font-semibold text-[#E9EDEF] tabular-nums">
+                    {confirmedResult.appointment.appointmentDate} · {confirmedResult.appointment.timeSlot}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-[#8696A0]">{copy.barberRow}</span>
+                  <span className="font-semibold text-[#E9EDEF]">
+                    {confirmedResult.appointment.barberName}
+                  </span>
+                </div>
+                <div className="border-t border-[#2A3942] pt-2 space-y-1">
+                  <span className="text-xs text-[#8696A0] block">{copy.servicesRow}</span>
+                  <p className="text-xs font-medium text-[#E9EDEF]">
+                    {localizedSelectedServicesText || confirmedResult.appointment.service}
+                  </p>
+                </div>
+                {confirmedResult.appliedDeal && (
+                  <div className="rounded-xl bg-[#111B21] border border-[#2A3942] px-3 py-2 text-xs flex items-center justify-between">
+                    <span className="text-[#25D366] font-semibold">
+                      {activeDeal?.titleTranslations?.[activeLang] || confirmedResult.appliedDeal.title}
+                    </span>
+                    <span dir="ltr" className="font-mono text-[#25D366] tabular-nums">
+                      -{config.currencySymbol}
+                      {confirmedResult.appliedDeal.savings.toLocaleString()}
+                    </span>
+                  </div>
+                )}
 
-            {/* Clean Address + Directions + Copy buttons */}
-            <div className="rounded-2xl border border-[#2A3942] bg-[#182229] p-3.5 space-y-2.5">
-              <div className="flex items-start gap-2 text-xs text-[#D1D7DB]">
-                <MapPin className="size-4 text-[#25D366] shrink-0 mt-0.5" />
-                <span>{confirmedResult.address || config.address}</span>
+                <div className="border-t border-[#2A3942] pt-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-[#8696A0]">{copy.totalAmountLabel}</span>
+                    <span dir="ltr" className="text-base font-mono font-bold text-[#25D366] tabular-nums">
+                      {config.currencySymbol}
+                      {confirmedResult.appointment.price.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-[#8696A0]">{copy.totalTimeLabel}</span>
+                    <span className="text-xs font-mono font-bold text-[#E9EDEF] tabular-nums">
+                      {confirmedResult.appointment.durationMins || totalDurationMins} {copy.minShort}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+
+              {/* Manage / Reschedule / Cancel Portal Link + Calendar .ics + Save Link to My WhatsApp */}
+              <div className="space-y-2">
+                {confirmedResult.bookingManagementPath && (
+                  <a
+                    href={confirmedResult.bookingManagementPath}
+                    onClick={(e) => {
+                      if (onNavigate && confirmedResult.bookingManagementPath) {
+                        e.preventDefault();
+                        onNavigate(confirmedResult.bookingManagementPath);
+                      }
+                    }}
+                    className="w-full min-h-[46px] rounded-xl bg-[#0B2E1E] border border-[#25D366] hover:bg-[#14532D] text-[#25D366] text-xs font-bold flex items-center justify-center gap-2 transition"
+                  >
+                    <Calendar className="size-4" />
+                    <span>{copy.manageBookingBtn}</span>
+                  </a>
+                )}
+
                 <a
-                  href={confirmedResult.googleMapsUrl || config.googleMapsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 min-h-[42px] rounded-xl border border-[#2A3942] bg-[#202C33] hover:bg-[#2A3942] px-3 text-xs font-semibold text-[#53BDEB] flex items-center justify-center gap-1.5 transition"
+                  href={icsHref}
+                  download={`booking-${confirmedResult.appointment.id}.ics`}
+                  className="w-full min-h-[42px] rounded-xl border border-[#2A3942] bg-[#202C33] hover:border-[#53BDEB] text-xs font-semibold text-[#53BDEB] flex items-center justify-center gap-2 transition"
                 >
-                  <ExternalLink className="size-3.5" />
-                  <span>{copy.openMapsBtn}</span>
+                  <CalendarPlus className="size-4" />
+                  <span>{copy.addToCalendarBtn}</span>
                 </a>
+
+                {waPersonalHref && (
+                  <a
+                    href={waPersonalHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full min-h-[44px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] text-xs font-bold flex items-center justify-center gap-2 transition"
+                  >
+                    <MessageCircle className="size-4" />
+                    <span>{copy.saveWhatsappLinkBtn}</span>
+                  </a>
+                )}
+              </div>
+
+              {/* Clean Address + Directions + Copy buttons */}
+              <div className="rounded-2xl border border-[#2A3942] bg-[#182229] p-3.5 space-y-2.5">
+                <div className="flex items-start gap-2 text-xs text-[#D1D7DB]">
+                  <MapPin className="size-4 text-[#25D366] shrink-0 mt-0.5" />
+                  <span>{confirmedResult.address || config.address}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={confirmedResult.googleMapsUrl || config.googleMapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 min-h-[42px] rounded-xl border border-[#2A3942] bg-[#202C33] hover:bg-[#2A3942] px-3 text-xs font-semibold text-[#53BDEB] flex items-center justify-center gap-1.5 transition"
+                  >
+                    <ExternalLink className="size-3.5" />
+                    <span>{copy.openMapsBtn}</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void handleCopyLocation(
+                        confirmedResult.address || config.address,
+                        confirmedResult.googleMapsUrl || config.googleMapsUrl
+                      )
+                    }
+                    className="min-h-[42px] rounded-xl border border-[#2A3942] bg-[#111B21] hover:border-[#25D366] px-3 text-xs font-semibold text-[#E9EDEF] flex items-center gap-1.5 transition shrink-0"
+                  >
+                    {copiedLocation ? (
+                      <Check className="size-3.5 text-[#25D366]" />
+                    ) : (
+                      <Copy className="size-3.5 text-[#8696A0]" />
+                    )}
+                    <span>{copiedLocation ? copy.copiedBtn : copy.copyLocationBtn}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={() =>
-                    void handleCopyLocation(
-                      confirmedResult.address || config.address,
-                      confirmedResult.googleMapsUrl || config.googleMapsUrl
-                    )
-                  }
-                  className="min-h-[42px] rounded-xl border border-[#2A3942] bg-[#111B21] hover:border-[#25D366] px-3 text-xs font-semibold text-[#E9EDEF] flex items-center gap-1.5 transition shrink-0"
+                  onClick={() => {
+                    idempotencyKeyRef.current = makeIdempotencyKey();
+                    setConfirmedResult(null);
+                    setServicesCollapsed(false);
+                    setDateCollapsed(false);
+                    setTimeCollapsed(false);
+                    setAvailabilityReloadTick((t) => t + 1);
+                  }}
+                  className="flex-1 min-h-[48px] rounded-xl border border-[#2A3942] bg-[#202C33] text-xs font-semibold text-[#E9EDEF] hover:bg-[#2A3942] transition"
                 >
-                  {copiedLocation ? (
-                    <Check className="size-3.5 text-[#25D366]" />
-                  ) : (
-                    <Copy className="size-3.5 text-[#8696A0]" />
-                  )}
-                  <span>{copiedLocation ? copy.copiedBtn : copy.copyLocationBtn}</span>
+                  {copy.bookAnotherBtn}
                 </button>
+                {onClose && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="flex-1 min-h-[48px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] text-xs font-bold uppercase tracking-wide transition"
+                  >
+                    {copy.doneBtn}
+                  </button>
+                )}
               </div>
             </div>
-
-            <div className="flex flex-col sm:flex-row gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setConfirmedResult(null);
-                  setServicesCollapsed(false);
-                  setDateCollapsed(false);
-                  setTimeCollapsed(false);
-                  setAvailabilityReloadTick((t) => t + 1);
-                }}
-                className="flex-1 min-h-[48px] rounded-xl border border-[#2A3942] bg-[#202C33] text-xs font-semibold text-[#E9EDEF] hover:bg-[#2A3942] transition"
-              >
-                {copy.bookAnotherBtn}
-              </button>
-              {onClose && (
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="flex-1 min-h-[48px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] text-xs font-bold uppercase tracking-wide transition"
-                >
-                  {copy.doneBtn}
-                </button>
-              )}
-            </div>
-          </div>
-        ) : (
+          );
+        })() : (
           /* Single Continuous Multi-Field Booking Form */
           <form onSubmit={handleConfirmBooking} className="flex-1 flex flex-col min-h-0">
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Returning Client Welcome Banner + 1-Tap Rebook Shortcut */}
+              {effectiveSavedName && (
+                <div className="rounded-xl border border-[#14532D] bg-[#0B2E1E]/80 p-3.5 space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-bold text-[#25D366]">
+                        {copy.returningWelcome}, {effectiveSavedName}!
+                      </p>
+                      <p dir="ltr" className="text-[11px] font-mono text-[#A7F3D0] mt-0.5 tabular-nums">
+                        {config.returningClient?.maskedPhone || clientPhone}
+                        {config.returningClient?.totalVisits
+                          ? ` · ${config.returningClient.totalVisits} ${copy.visitsLabel}`
+                          : ''}
+                      </p>
+                    </div>
+                    {personalShareUrl && typeof window !== 'undefined' && (
+                      <a
+                        href={`https://wa.me/?text=${encodeURIComponent(
+                          `${config.salonName} — My Personal 2-Tap Booking Link: ${window.location.origin}${personalShareUrl}`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="min-h-[34px] rounded-lg bg-[#25D366] hover:bg-[#20BD5A] px-2.5 text-[11px] font-bold text-[#0B141A] inline-flex items-center gap-1 shrink-0 transition"
+                      >
+                        <MessageCircle className="size-3.5" />
+                        <span>WhatsApp Link</span>
+                      </a>
+                    )}
+                  </div>
+                  {config.returningClient?.lastServiceIds &&
+                    config.returningClient.lastServiceIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleRebookLastVisit}
+                        className="w-full min-h-[38px] rounded-lg border border-[#25D366]/60 bg-[#111B21] hover:bg-[#14532D]/60 px-3 text-xs font-bold text-[#25D366] flex items-center justify-center gap-1.5 transition"
+                      >
+                        <RotateCcw className="size-3.5" />
+                        <span>{copy.rebookLastBtn}</span>
+                      </button>
+                    )}
+                </div>
+              )}
+
+              {/* First-Time QR Onboarding Card (Complete Name + Mobile + Save Link to My WhatsApp at $0) */}
+              {!isDemo && !config.returningClient && (
+                <div className="rounded-xl border border-[#2A3942] bg-[#182229] p-3.5 space-y-2.5">
+                  <div>
+                    <p className="text-xs font-bold text-[#E9EDEF]">{copy.firstTimeTitle}</p>
+                    <p className="text-[11px] text-[#8696A0] leading-snug mt-0.5">
+                      {copy.firstTimeSubtitle}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={clientNameInput}
+                      onChange={(e) => setClientNameInput(e.target.value)}
+                      placeholder={copy.yourNamePlaceholder}
+                      className="min-h-[40px] rounded-xl border border-[#2A3942] bg-[#111B21] px-3 text-xs text-[#E9EDEF] placeholder:text-[#8696A0]/60 focus:outline-none focus:border-[#25D366]"
+                    />
+                    <input
+                      type="tel"
+                      dir="ltr"
+                      value={clientPhone}
+                      onChange={(e) => setClientPhone(e.target.value)}
+                      placeholder="+92 300 1234567"
+                      className="min-h-[40px] rounded-xl border border-[#2A3942] bg-[#111B21] px-3 text-xs font-mono text-[#E9EDEF] placeholder:text-[#8696A0]/60 focus:outline-none focus:border-[#25D366]"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-[11px] text-[#D1D7DB] cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={marketingOptIn}
+                      onChange={(e) => setMarketingOptIn(e.target.checked)}
+                      className="size-4 accent-[#25D366] rounded"
+                    />
+                    <span>{copy.marketingOptInLabel}</span>
+                  </label>
+                  <button
+                    type="button"
+                    disabled={savingProfile}
+                    onClick={() => void handleSaveClientProfile()}
+                    className="w-full min-h-[40px] rounded-xl border border-[#25D366]/60 bg-[#0B2E1E] hover:bg-[#14532D] disabled:opacity-50 text-xs font-bold text-[#25D366] flex items-center justify-center gap-1.5 transition"
+                  >
+                    <MessageCircle className="size-3.5" />
+                    <span>{savingProfile ? copy.savingDetailsBtn : copy.saveDetailsBtn}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* After saving first-time details, show 1-click Save Link to My WhatsApp */}
+              {!isDemo && personalShareUrl && typeof window !== 'undefined' && !confirmedResult && (
+                <div className="rounded-xl border border-[#25D366]/50 bg-[#0B2E1E]/60 p-3 space-y-2">
+                  <p className="text-[11px] text-[#A7F3D0]">{copy.detailsSavedMsg}</p>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={`https://wa.me/?text=${encodeURIComponent(
+                        `${config.salonName} — My Personal 2-Tap Booking Link: ${window.location.origin}${personalShareUrl}`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 min-h-[38px] rounded-lg bg-[#25D366] hover:bg-[#20BD5A] px-3 text-xs font-bold text-[#0B141A] flex items-center justify-center gap-1.5 transition"
+                    >
+                      <MessageCircle className="size-3.5" />
+                      <span>{copy.saveWhatsappLinkBtn}</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleCopyPersonalLink(`${window.location.origin}${personalShareUrl}`)
+                      }
+                      className="min-h-[38px] rounded-lg border border-[#2A3942] bg-[#111B21] px-2.5 text-[11px] font-semibold text-[#E9EDEF] flex items-center gap-1 shrink-0"
+                    >
+                      {copiedShareLink ? (
+                        <Check className="size-3.5 text-[#25D366]" />
+                      ) : (
+                        <Copy className="size-3.5 text-[#8696A0]" />
+                      )}
+                      <span>{copiedShareLink ? copy.copiedBtn : copy.copyLocationBtn}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Applied Deal Banner */}
               {activeDeal && (
                 <div className="rounded-xl border border-[#14532D] bg-[#0B2E1E] p-3 flex items-start justify-between gap-3">
@@ -888,14 +1295,27 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                 </div>
               )}
 
-              {/* Inline Conflict / Validation Alert */}
+              {/* Inline Conflict / Validation / 402 Quota Alert */}
               {errorMsg && (
                 <div
                   role="alert"
-                  className="rounded-xl border border-[#B91C1C] bg-[#3B1219] p-3 flex items-start gap-2.5 text-xs text-[#FCA5A5]"
+                  className="rounded-xl border border-[#B91C1C] bg-[#3B1219] p-3 space-y-2 text-xs text-[#FCA5A5]"
                 >
-                  <AlertCircle className="size-4 shrink-0 mt-0.5 text-[#F87171]" />
-                  <span>{errorMsg}</span>
+                  <div className="flex items-start gap-2.5">
+                    <AlertCircle className="size-4 shrink-0 mt-0.5 text-[#F87171]" />
+                    <span>{errorMsg}</span>
+                  </div>
+                  {quotaContactPhone && (
+                    <a
+                      href={`tel:${quotaContactPhone.replace(/\s+/g, '')}`}
+                      className="min-h-[36px] w-full rounded-lg bg-[#25D366] text-[#0B141A] text-xs font-bold flex items-center justify-center gap-1.5"
+                    >
+                      <Phone className="size-3.5" />
+                      <span>
+                        {copy.callSalonLabel}: {quotaContactPhone}
+                      </span>
+                    </a>
+                  )}
                 </div>
               )}
 
@@ -1197,7 +1617,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                 </section>
               )}
 
-              {/* 5. Customer Name / Phone — Hidden completely for returning WhatsApp clients whose identity is already saved */}
+              {/* 5. Customer Name / Phone — Uses saved returning profile when available */}
               {(!effectiveSavedName || standalone) && (
                 <section className="space-y-2">
                   <h2 className="text-xs font-mono font-bold uppercase tracking-wide text-[#8696A0] flex items-center gap-1.5">
@@ -1221,10 +1641,10 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                       </label>
                     )}
 
-                    {standalone && (
+                    {standalone && !config.returningClient && (
                       <label className="block space-y-1">
                         <span className="text-[11px] font-mono text-[#8696A0]">
-                          {copy.yourPhoneLabel}
+                          {copy.yourPhoneLabel} *
                         </span>
                         <input
                           type="tel"
@@ -1241,7 +1661,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                 </section>
               )}
 
-              {/* Final Summary Card — Includes Name & Phone, Separate Total Amount & Total Time, NO Pay-at-Salon note */}
+              {/* Final Summary Card — Includes Name & Masked/Phone, Separate Total Amount & Total Time */}
               <section className="rounded-2xl border border-[#2A3942] bg-[#182229] p-3.5 space-y-2 text-xs">
                 <div className="flex items-center justify-between font-bold text-[#E9EDEF] border-b border-[#2A3942] pb-1.5">
                   <span>{copy.summaryTitle}</span>
@@ -1255,7 +1675,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[#8696A0]">{copy.phoneRow}</span>
                   <span dir="ltr" className="font-mono text-[#D1D7DB] tabular-nums">
-                    {clientPhone || '—'}
+                    {config.returningClient?.maskedPhone || clientPhone || '—'}
                   </span>
                 </div>
                 <p className="text-[#D1D7DB] leading-snug pt-1 border-t border-[#2A3942]">
