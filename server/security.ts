@@ -93,24 +93,56 @@ export function getFounderAuthStatus(): {
   configured: boolean;
   setupRequired: boolean;
   productionMisconfigured: boolean;
+  founderPinConfigured: boolean;
+  jwtSecretConfigured: boolean;
+  missingEnvVars: string[];
 } {
   const envPin = (process.env.FOUNDER_PIN || process.env.FOUNDER_ACCESS_KEY || '').trim();
+  const hasEnvPin = envPin.length >= 4;
+  const hasJwt = isJwtSecretConfigured();
   if (IS_PRODUCTION) {
-    const prodReady = envPin.length >= 4 && isJwtSecretConfigured();
+    const missingEnvVars: string[] = [];
+    if (!hasJwt) missingEnvVars.push('JWT_SECRET');
+    if (!hasEnvPin) missingEnvVars.push('FOUNDER_PIN');
+    const prodReady = hasEnvPin && hasJwt;
     return {
       configured: prodReady,
       setupRequired: false,
       productionMisconfigured: !prodReady,
+      founderPinConfigured: hasEnvPin,
+      jwtSecretConfigured: hasJwt,
+      missingEnvVars,
     };
   }
-  if (envPin.length >= 4) {
-    return { configured: true, setupRequired: false, productionMisconfigured: false };
+  if (hasEnvPin) {
+    return {
+      configured: true,
+      setupRequired: false,
+      productionMisconfigured: false,
+      founderPinConfigured: true,
+      jwtSecretConfigured: true,
+      missingEnvVars: [],
+    };
   }
   const stored = readStoredFounderCred();
   if (stored) {
-    return { configured: true, setupRequired: false, productionMisconfigured: false };
+    return {
+      configured: true,
+      setupRequired: false,
+      productionMisconfigured: false,
+      founderPinConfigured: true,
+      jwtSecretConfigured: true,
+      missingEnvVars: [],
+    };
   }
-  return { configured: false, setupRequired: true, productionMisconfigured: false };
+  return {
+    configured: false,
+    setupRequired: true,
+    productionMisconfigured: false,
+    founderPinConfigured: false,
+    jwtSecretConfigured: true,
+    missingEnvVars: [],
+  };
 }
 
 export function claimInitialFounderPin(rawPin: string): { ok: true } | { ok: false; error: string } {
