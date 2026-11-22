@@ -7,57 +7,186 @@ import { kvGetJson, kvSetJson } from './kvBridge.js';
 
 export const SESSION_COOKIE_NAME = 'wc_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days persistent session
+const CUSTOMER_COOKIE_TTL_SECONDS = 60 * 60 * 24 * 180; // 180 days for weeks-later QR returning recognition
 const AGENT_INVITE_TTL_MS = 1000 * 60 * 60 * 72; // 72 hours single-use invite expiry
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-// Founder Unlock PIN (Default WC3118; override via FOUNDER_PIN in production env)
-const EXPECTED_FOUNDER_PIN = (process.env.FOUNDER_PIN || process.env.FOUNDER_ACCESS_KEY || 'WC3118')
-  .trim()
-  .toUpperCase();
+const AUTH_DATA_DIR = process.env.VERCEL
+  ? path.join('/tmp', 'workcraft-data')
+  : path.resolve(process.cwd(), '.data');
+const AUTH_USERS_FILE = path.join(AUTH_DATA_DIR, 'auth-users.json');
+const FOUNDER_CRED_FILE = path.join(AUTH_DATA_DIR, 'founder-cred.json');
+const DEV_JWT_KEY_FILE = path.join(AUTH_DATA_DIR, 'dev-jwt.key');
 
-// In production, prefer configured JWT_SECRET (>=32 chars); never crash cold starts if unset yet.
+// In production, JWT_SECRET (>= 32 chars) MUST be explicitly configured (fail closed if missing).
+export function isJwtSecretConfigured(): boolean {
+  const configured = (process.env.JWT_SECRET || '').trim();
+  if (IS_PRODUCTION) {
+    return configured.length >= 32;
+  }
+  return true;
+}
+
 const RUNTIME_JWT_SECRET: string = (() => {
   const configured = (process.env.JWT_SECRET || '').trim();
   if (configured.length >= 32) return configured;
-  if (IS_PRODUCTION && !configured) {
-    console.warn(
-      'WARNING: JWT_SECRET not set in production environment variables; using derived serverless fallback.'
+  if (IS_PRODUCTION) {
+    console.error(
+      'CRITICAL SECURITY CONFIG: JWT_SECRET (>= 32 chars) is missing in production. Auth endpoints will fail closed.'
     );
-    const seed =
-      process.env.WORKCRAFT_WEBHOOK_SECRET ||
-      process.env.GEMINI_API_KEY ||
-      process.env.VERCEL_PROJECT_ID ||
-      crypto.randomBytes(16).toString('hex');
-    return crypto.createHash('sha256').update(`wc-jwt:${seed}`).digest('hex');
+    return '';
   }
-  return configured || crypto.randomBytes(32).toString('hex');
+  // Dev/preview local convenience: persist random dev secret in .data/ so restarts keep dev cookies valid
+  try {
+    if (fs.existsSync(DEV_JWT_KEY_FILE)) {
+      const saved = fs.readFileSync(DEV_JWT_KEY_FILE, 'utf8').trim();
+      if (saved.length >= 32) return saved;
+    }
+    if (!fs.existsSync(AUTH_DATA_DIR)) {
+      fs.mkdirSync(AUTH_DATA_DIR, { recursive: true });
+    }
+    const generated = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(DEV_JWT_KEY_FILE, generated, { mode: 0o600 });
+    return generated;
+  } catch {
+    return configured || crypto.randomBytes(32).toString('hex');
+  }
 })();
 
 const RUNTIME_WEBHOOK_SECRET: string = (() => {
   const configured = (process.env.WORKCRAFT_WEBHOOK_SECRET || '').trim();
   if (configured) return configured;
   if (IS_PRODUCTION) return '';
-  // Ephemeral server-only secret for dev environment; never sent to browser JS
   return crypto.randomBytes(24).toString('hex');
 })();
 
-// Failed Founder PIN attempt guard (strictly scoped to Founder PIN guesses ONLY — never salon onboarding)
+// -----------------------------------------------------------------------------
+// Founder PIN / Salted Scrypt Credential & Fail-Closed Status
+// -----------------------------------------------------------------------------
+
+interface PersistedFounderCred {
+  salt: string;
+  hash: string;
+  createdAt: string;
+}
+
+function readStoredFounderCred(): PersistedFounderCred | null {
+  try {
+    if (!fs.existsSync(FOUNDER_CRED_FILE)) return null;
+    const raw = fs.readFileSync(FOUNDER_CRED_FILE, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<PersistedFounderCred>;
+    if (typeof parsed?.salt === 'string' && typeof parsed?.hash === 'string') {
+      return {
+        salt: parsed.salt,
+        hash: parsed.hash,
+        createdAt: parsed.createdAt || new Date().toISOString(),
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function getFounderAuthStatus(): {
+  configured: boolean;
+  setupRequired: boolean;
+  productionMisconfigured: boolean;
+} {
+  const envPin = (process.env.FOUNDER_PIN || process.env.FOUNDER_ACCESS_KEY || '').trim();
+  if (IS_PRODUCTION) {
+    const prodReady = envPin.length >= 4 && isJwtSecretConfigured();
+    return {
+      configured: prodReady,
+      setupRequired: false,
+      productionMisconfigured: !prodReady,
+    };
+  }
+  if (envPin.length >= 4) {
+    return { configured: true, setupRequired: false, productionMisconfigured: false };
+  }
+  const stored = readStoredFounderCred();
+  if (stored) {
+    return { configured: true, setupRequired: false, productionMisconfigured: false };
+  }
+  return { configured: false, setupRequired: true, productionMisconfigured: false };
+}
+
+export function claimInitialFounderPin(rawPin: string): { ok: true } | { ok: false; error: string } {
+  if (IS_PRODUCTION) {
+    return {
+      ok: false,
+      error: 'Initial PIN setup via UI is disabled in production. Configure FOUNDER_PIN in server environment.',
+    };
+  }
+  const status = getFounderAuthStatus();
+  if (!status.setupRequired) {
+    return { ok: false, error: 'Founder PIN is already configured.' };
+  }
+  const clean = (rawPin || '').trim().toUpperCase();
+  if (clean.length < 6 || clean.length > 24 || !/^[A-Z0-9!@#$%^&*_-]+$/.test(clean)) {
+    return {
+      ok: false,
+      error: 'Choose a Founder PIN of 6–24 alphanumeric characters.',
+    };
+  }
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(clean, salt, 64).toString('hex');
+  try {
+    if (!fs.existsSync(AUTH_DATA_DIR)) {
+      fs.mkdirSync(AUTH_DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(
+      FOUNDER_CRED_FILE,
+      JSON.stringify({ salt, hash, createdAt: new Date().toISOString() }, null, 2),
+      { mode: 0o600 }
+    );
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'Could not persist Founder PIN credential on disk.' };
+  }
+}
+
 const founderFailureTracker = new Map<string, { count: number; lockedUntil: number }>();
 
 export function verifyFounderPin(candidate: string): boolean {
   const clean = (candidate || '').trim().toUpperCase();
   if (!clean) return false;
-  const a = crypto.createHash('sha256').update(clean).digest();
-  const b = crypto.createHash('sha256').update(EXPECTED_FOUNDER_PIN).digest();
-  return crypto.timingSafeEqual(a, b);
+
+  const envPin = (process.env.FOUNDER_PIN || process.env.FOUNDER_ACCESS_KEY || '').trim().toUpperCase();
+  if (envPin) {
+    const a = crypto.createHash('sha256').update(clean).digest();
+    const b = crypto.createHash('sha256').update(envPin).digest();
+    return crypto.timingSafeEqual(a, b);
+  }
+
+  if (IS_PRODUCTION) {
+    return false;
+  }
+
+  const stored = readStoredFounderCred();
+  if (!stored) return false;
+  try {
+    const derived = crypto.scryptSync(clean, stored.salt, 64);
+    const expected = Buffer.from(stored.hash, 'hex');
+    if (derived.length !== expected.length) return false;
+    return crypto.timingSafeEqual(derived, expected);
+  } catch {
+    return false;
+  }
 }
 
-export function checkFounderPinAttemptAllowed(clientKey: string): { allowed: true } | { allowed: false; retryAfterSec: number } {
+export function checkFounderPinAttemptAllowed(
+  clientKey: string
+): { allowed: true } | { allowed: false; retryAfterSec: number } {
   const rec = founderFailureTracker.get(clientKey);
   if (!rec) return { allowed: true };
   if (rec.lockedUntil > Date.now()) {
-    return { allowed: false, retryAfterSec: Math.max(1, Math.ceil((rec.lockedUntil - Date.now()) / 1000)) };
+    return {
+      allowed: false,
+      retryAfterSec: Math.max(1, Math.ceil((rec.lockedUntil - Date.now()) / 1000)),
+    };
   }
   return { allowed: true };
 }
@@ -73,15 +202,21 @@ export function clearFounderPinFailures(clientKey: string): void {
   founderFailureTracker.delete(clientKey);
 }
 
+// -----------------------------------------------------------------------------
+// Auth Directory, Multi-Branch Binding & Session Version Rotation
+// -----------------------------------------------------------------------------
+
 export interface AuthJwtClaims {
   sub: string;
   user_role: AuthRole;
   salon_id: string | null;
+  allowed_salon_ids?: string[];
   agent_id: string | null;
   display_name: string;
   email: string;
   phone: string;
   salon_name?: string;
+  sv: number;
   iat: number;
   exp: number;
 }
@@ -94,7 +229,8 @@ interface StoredUserRecord extends AuthUser {
   badge: string;
 }
 
-// Authoritative server-side user & tenant binding registry
+let currentSessionVersion = 1;
+
 const USER_DIRECTORY: StoredUserRecord[] = [
   {
     userId: 'usr-founder-1',
@@ -133,6 +269,7 @@ const USER_DIRECTORY: StoredUserRecord[] = [
     email: 'hamza@sevencuts.pk',
     phone: '+92 321 8472910',
     salonId: '1',
+    allowedSalonIds: ['1'],
     agentId: 'agent-pk-1',
     salonName: 'Seven Cuts Studio',
     badge: 'Salon #1 · Seven Cuts Studio (PRO++)',
@@ -144,6 +281,7 @@ const USER_DIRECTORY: StoredUserRecord[] = [
     email: 'tariq@royalfade.pk',
     phone: '+92 300 9876543',
     salonId: '2',
+    allowedSalonIds: ['2'],
     agentId: 'agent-pk-1',
     salonName: 'Royal Fade Lounge',
     badge: 'Salon #2 · Royal Fade Lounge (STARTER)',
@@ -155,6 +293,7 @@ const USER_DIRECTORY: StoredUserRecord[] = [
     email: 'aslam@alnoor.ae',
     phone: '+971 50 8923411',
     salonId: '3',
+    allowedSalonIds: ['3'],
     agentId: 'agent-ae-1',
     salonName: 'Al-Noor Executive Grooming',
     badge: 'Salon #3 · Al-Noor Grooming (UAE PRO++)',
@@ -166,6 +305,7 @@ const USER_DIRECTORY: StoredUserRecord[] = [
     email: 'oliver@mayfairblade.co.uk',
     phone: '+44 7911 123456',
     salonId: '4',
+    allowedSalonIds: ['4'],
     agentId: 'agent-uk-1',
     salonName: 'Mayfair Blade & Beard',
     badge: 'Salon #4 · Mayfair Blade (UK STARTER)',
@@ -177,13 +317,13 @@ const USER_DIRECTORY: StoredUserRecord[] = [
     email: 'ayesha@noorbeauty.pk',
     phone: '+92 333 4412345',
     salonId: '5',
+    allowedSalonIds: ['5'],
     agentId: 'agent-pk-1',
     salonName: 'Noor Beauty Lounge (Ladies Parlor)',
     badge: 'Salon #5 · Noor Beauty Lounge (PRO)',
   },
 ];
 
-// Authoritative salon -> assigned_agent_id mapping for tenant RLS enforcement
 const SALON_AGENT_ASSIGNMENTS = new Map<string, string>([
   ['1', 'agent-pk-1'],
   ['2', 'agent-pk-1'],
@@ -192,11 +332,6 @@ const SALON_AGENT_ASSIGNMENTS = new Map<string, string>([
   ['5', 'agent-pk-1'],
 ]);
 
-const AUTH_DATA_DIR = process.env.VERCEL
-  ? path.join('/tmp', 'workcraft-data')
-  : path.resolve(process.cwd(), '.data');
-const AUTH_USERS_FILE = path.join(AUTH_DATA_DIR, 'auth-users.json');
-
 function loadPersistedDynamicUsers() {
   try {
     if (!fs.existsSync(AUTH_USERS_FILE)) return;
@@ -204,11 +339,20 @@ function loadPersistedDynamicUsers() {
     const parsed = JSON.parse(raw) as {
       users?: StoredUserRecord[];
       assignments?: Array<[string, string]>;
+      sessionVersion?: number;
     };
+    if (typeof parsed.sessionVersion === 'number' && parsed.sessionVersion >= 1) {
+      currentSessionVersion = parsed.sessionVersion;
+    }
     if (Array.isArray(parsed.users)) {
       for (const u of parsed.users) {
-        if (u?.userId && !USER_DIRECTORY.some((e) => e.userId === u.userId)) {
-          USER_DIRECTORY.push(u);
+        if (u?.userId) {
+          const idx = USER_DIRECTORY.findIndex((e) => e.userId === u.userId);
+          if (idx >= 0) {
+            USER_DIRECTORY[idx] = { ...USER_DIRECTORY[idx], ...u };
+          } else {
+            USER_DIRECTORY.push(u);
+          }
         }
       }
     }
@@ -220,12 +364,14 @@ function loadPersistedDynamicUsers() {
       }
     }
   } catch {
-    // Ignore corrupt cache and boot cleanly from seeded directory
+    // boot cleanly
   }
 }
 
 function persistDynamicUsers() {
-  const dynamicUsers = USER_DIRECTORY.filter((u) => u.userId.startsWith('usr-onboard-'));
+  const dynamicUsers = USER_DIRECTORY.filter(
+    (u) => u.userId.startsWith('usr-onboard-') || (u.allowedSalonIds && u.allowedSalonIds.length > 1)
+  );
   const assignments = Array.from(SALON_AGENT_ASSIGNMENTS.entries());
   try {
     if (!fs.existsSync(AUTH_DATA_DIR)) {
@@ -233,25 +379,42 @@ function persistDynamicUsers() {
     }
     fs.writeFileSync(
       AUTH_USERS_FILE,
-      JSON.stringify({ users: dynamicUsers, assignments }, null, 2),
+      JSON.stringify(
+        { users: dynamicUsers, assignments, sessionVersion: currentSessionVersion },
+        null,
+        2
+      ),
       'utf8'
     );
   } catch (err) {
     console.warn('Could not persist dynamic auth users:', err);
   }
-  void kvSetJson('wc:auth:v1', { users: dynamicUsers, assignments });
+  void kvSetJson('wc:auth:v1', {
+    users: dynamicUsers,
+    assignments,
+    sessionVersion: currentSessionVersion,
+  });
 }
 
 export async function hydrateSecurityStoreFromKv(): Promise<void> {
   const parsed = await kvGetJson<{
     users?: StoredUserRecord[];
     assignments?: Array<[string, string]>;
+    sessionVersion?: number;
   }>('wc:auth:v1');
   if (!parsed) return;
+  if (typeof parsed.sessionVersion === 'number' && parsed.sessionVersion > currentSessionVersion) {
+    currentSessionVersion = parsed.sessionVersion;
+  }
   if (Array.isArray(parsed.users)) {
     for (const u of parsed.users) {
-      if (u?.userId && !USER_DIRECTORY.some((e) => e.userId === u.userId)) {
-        USER_DIRECTORY.push(u);
+      if (u?.userId) {
+        const idx = USER_DIRECTORY.findIndex((e) => e.userId === u.userId);
+        if (idx >= 0) {
+          USER_DIRECTORY[idx] = { ...USER_DIRECTORY[idx], ...u };
+        } else {
+          USER_DIRECTORY.push(u);
+        }
       }
     }
   }
@@ -266,6 +429,16 @@ export async function hydrateSecurityStoreFromKv(): Promise<void> {
 
 loadPersistedDynamicUsers();
 
+export function rotateAllSessions(): number {
+  currentSessionVersion += 1;
+  persistDynamicUsers();
+  return currentSessionVersion;
+}
+
+export function getSessionVersion(): number {
+  return currentSessionVersion;
+}
+
 export function registerSalonAssignment(salonId: string, agentId: string | null) {
   if (salonId && agentId) {
     SALON_AGENT_ASSIGNMENTS.set(salonId, agentId);
@@ -279,19 +452,44 @@ export function registerSalonOwnerAccount(params: {
   ownerName: string;
   phone: string;
   agentId?: string | null;
+  allowMultiBranch?: boolean;
 }): { ok: true; user: AuthUser } | { ok: false; error: string } {
   const cleanPhone = sanitizePhone(params.phone);
   const digits = normalizePhoneDigits(cleanPhone);
   if (digits.length < 7) {
-    return { ok: false, error: 'A valid WhatsApp phone number is required.' };
+    return { ok: false, error: 'A valid owner contact phone number is required.' };
   }
 
-  // Block hijacking an existing registered phone number belonging to another account
   const existing = findUserByIdentifier(cleanPhone);
   if (existing) {
+    if (params.allowMultiBranch && existing.userRole === 'SALON_OWNER') {
+      const nextAllowed = Array.from(
+        new Set([...(existing.allowedSalonIds || (existing.salonId ? [existing.salonId] : [])), params.salonId])
+      );
+      existing.allowedSalonIds = nextAllowed;
+      if (params.agentId) {
+        SALON_AGENT_ASSIGNMENTS.set(params.salonId, params.agentId);
+      }
+      persistDynamicUsers();
+      return {
+        ok: true,
+        user: {
+          userId: existing.userId,
+          userRole: existing.userRole,
+          displayName: existing.displayName,
+          email: existing.email,
+          phone: existing.phone,
+          salonId: existing.salonId,
+          allowedSalonIds: nextAllowed,
+          agentId: existing.agentId,
+          salonName: existing.salonName,
+          sessionVersion: currentSessionVersion,
+        },
+      };
+    }
     return {
       ok: false,
-      error: 'This WhatsApp number is already registered. Please sign in with OTP.',
+      error: 'This mobile number is already registered. Please sign in to add another branch.',
     };
   }
 
@@ -304,6 +502,7 @@ export function registerSalonOwnerAccount(params: {
     email: `${params.salonId}@salon.workcraft.local`,
     phone: cleanPhone,
     salonId: params.salonId,
+    allowedSalonIds: [params.salonId],
     agentId: params.agentId ?? null,
     salonName: cleanSalonName,
     badge: `Onboarded · ${cleanSalonName}`,
@@ -323,8 +522,10 @@ export function registerSalonOwnerAccount(params: {
       email: newUser.email,
       phone: newUser.phone,
       salonId: newUser.salonId,
+      allowedSalonIds: newUser.allowedSalonIds,
       agentId: newUser.agentId,
       salonName: newUser.salonName,
+      sessionVersion: currentSessionVersion,
     },
   };
 }
@@ -343,20 +544,16 @@ export function isSalonAssignedToAgent(salonId: string, agentId: string | null):
 }
 
 // -----------------------------------------------------------------------------
-// Input Sanitization & Validation Helpers (Zero XSS / Script / Control Injection)
+// Input Sanitization & Masking Helpers
 // -----------------------------------------------------------------------------
 
 export function sanitizePlainText(value: unknown, maxLength = 500): string {
   if (typeof value !== 'string') return '';
   let cleaned = value
-    // Strip <script> / <style> blocks with contents first
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
-    // Strip remaining HTML/XML tags
     .replace(/<[^>]*>/g, ' ')
-    // Remove ASCII control characters except common whitespace (\n, \t)
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-    // Strip dangerous javascript: / data: inline schemes if passed raw
     .replace(/\b(?:javascript|vbscript|data):/gi, '')
     .trim();
 
@@ -380,12 +577,21 @@ export function sanitizeMultilineTemplate(value: unknown, maxLength = 600): stri
 
 export function sanitizePhone(value: unknown, maxLength = 24): string {
   if (typeof value !== 'string') return '';
-  const cleaned = value.replace(/[^\d+\-\s()]/g, '').trim().slice(0, maxLength);
-  return cleaned;
+  return value.replace(/[^\d+\-\s()]/g, '').trim().slice(0, maxLength);
 }
 
 export function normalizePhoneDigits(phone: string): string {
   return phone.replace(/\D/g, '');
+}
+
+export function maskPhoneNumber(phone: string): string {
+  const digits = normalizePhoneDigits(phone);
+  if (digits.length < 4) return '•••';
+  const last4 = digits.slice(-4);
+  const trimmed = (phone || '').trim();
+  const prefixMatch = trimmed.match(/^\+\d{1,3}/);
+  const cc = prefixMatch ? prefixMatch[0] : '';
+  return cc ? `${cc} ••• •••${last4}` : `••• •••${last4}`;
 }
 
 export function sanitizeBirthDate(value: unknown): string {
@@ -420,7 +626,7 @@ export function clampInteger(value: unknown, min: number, max: number, fallback:
 }
 
 // -----------------------------------------------------------------------------
-// HS256 Signed JWT Session Helpers (Node built-in crypto, zero dependencies)
+// HS256 Signed JWT Session & Returning Client Token Helpers
 // -----------------------------------------------------------------------------
 
 function base64UrlEncode(input: Buffer | string): string {
@@ -438,17 +644,22 @@ function base64UrlDecode(input: string): Buffer {
 }
 
 export function signSessionToken(user: AuthUser): string {
+  if (!RUNTIME_JWT_SECRET) {
+    throw new Error('JWT_SECRET is not configured in production.');
+  }
   const nowSec = Math.floor(Date.now() / 1000);
   const header = base64UrlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const payloadObj: AuthJwtClaims = {
     sub: user.userId,
     user_role: user.userRole,
     salon_id: user.salonId,
+    allowed_salon_ids: user.allowedSalonIds,
     agent_id: user.agentId,
     display_name: user.displayName,
     email: user.email,
     phone: user.phone,
     salon_name: user.salonName,
+    sv: currentSessionVersion,
     iat: nowSec,
     exp: nowSec + SESSION_TTL_SECONDS,
   };
@@ -462,6 +673,7 @@ export function signSessionToken(user: AuthUser): string {
 
 export function verifySessionToken(token: string): AuthUser | null {
   try {
+    if (!RUNTIME_JWT_SECRET) return null;
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const [headerB64, payloadB64, sigB64] = parts;
@@ -480,6 +692,9 @@ export function verifySessionToken(token: string): AuthUser | null {
     if (!claims.sub || !claims.user_role || !claims.exp || claims.exp < nowSec) {
       return null;
     }
+    if (typeof claims.sv === 'number' && claims.sv !== currentSessionVersion) {
+      return null;
+    }
 
     return {
       userId: claims.sub,
@@ -488,8 +703,10 @@ export function verifySessionToken(token: string): AuthUser | null {
       email: claims.email,
       phone: claims.phone,
       salonId: claims.salon_id ?? null,
+      allowedSalonIds: claims.allowed_salon_ids,
       agentId: claims.agent_id ?? null,
       salonName: claims.salon_name,
+      sessionVersion: claims.sv,
     };
   } catch {
     return null;
@@ -497,6 +714,9 @@ export function verifySessionToken(token: string): AuthUser | null {
 }
 
 export function signServerBlob<T extends Record<string, unknown>>(payload: T): string {
+  if (!RUNTIME_JWT_SECRET) {
+    throw new Error('JWT_SECRET is not configured in production.');
+  }
   const data = base64UrlEncode(JSON.stringify(payload));
   const sig = base64UrlEncode(
     crypto.createHmac('sha256', RUNTIME_JWT_SECRET).update(`wc-blob:${data}`).digest()
@@ -506,6 +726,7 @@ export function signServerBlob<T extends Record<string, unknown>>(payload: T): s
 
 export function verifyServerBlob<T extends Record<string, unknown>>(blob: string): T | null {
   try {
+    if (!RUNTIME_JWT_SECRET) return null;
     const parts = (blob || '').split('.');
     if (parts.length !== 2) return null;
     const [data, sig] = parts;
@@ -521,6 +742,47 @@ export function verifyServerBlob<T extends Record<string, unknown>>(blob: string
   } catch {
     return null;
   }
+}
+
+export interface CustomerRecognizeTokenClaims extends Record<string, unknown> {
+  kind: 'wc-client-recognize';
+  salonId: string;
+  publicCode: string;
+  clientId: string;
+  exp: number;
+}
+
+export function signCustomerRecognizeToken(params: {
+  salonId: string;
+  publicCode: string;
+  clientId: string;
+  ttlSeconds?: number;
+}): string {
+  const exp = Math.floor(Date.now() / 1000) + (params.ttlSeconds ?? CUSTOMER_COOKIE_TTL_SECONDS);
+  return signServerBlob<CustomerRecognizeTokenClaims>({
+    kind: 'wc-client-recognize',
+    salonId: params.salonId,
+    publicCode: params.publicCode,
+    clientId: params.clientId,
+    exp,
+  });
+}
+
+export function verifyCustomerRecognizeToken(
+  token: string,
+  expectedSalonId?: string
+): CustomerRecognizeTokenClaims | null {
+  const claims = verifyServerBlob<CustomerRecognizeTokenClaims>(token);
+  if (!claims || claims.kind !== 'wc-client-recognize') return null;
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (!claims.exp || claims.exp < nowSec) return null;
+  if (expectedSalonId && claims.salonId !== expectedSalonId) return null;
+  return claims;
+}
+
+export function getCustomerCookieName(publicCode: string): string {
+  const safe = (publicCode || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+  return `wc_cli_${safe}`;
 }
 
 export function parseCookieHeader(cookieHeader: string | undefined): Record<string, string> {
@@ -542,32 +804,176 @@ export function parseCookieHeader(cookieHeader: string | undefined): Record<stri
   return out;
 }
 
-export function setSessionCookie(res: Response, token: string, req?: Request) {
-  const isHttps =
-    req?.secure || req?.header('x-forwarded-proto') === 'https' || IS_PRODUCTION;
-  const parts = [
-    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    `Max-Age=${SESSION_TTL_SECONDS}`,
-  ];
-  if (isHttps) {
-    parts.push('Secure');
+function appendSetCookie(res: Response, cookieStr: string) {
+  const existing = res.getHeader('Set-Cookie');
+  if (!existing) {
+    res.setHeader('Set-Cookie', cookieStr);
+  } else if (Array.isArray(existing)) {
+    res.setHeader('Set-Cookie', [...existing, cookieStr]);
+  } else {
+    res.setHeader('Set-Cookie', [String(existing), cookieStr]);
   }
-  res.setHeader('Set-Cookie', parts.join('; '));
 }
 
-export function clearSessionCookie(res: Response) {
-  res.setHeader(
-    'Set-Cookie',
-    `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
-  );
+function buildCookieAttributes(req?: Request, maxAge = SESSION_TTL_SECONDS): string[] {
+  const isHttps =
+    Boolean(req?.secure) || req?.header('x-forwarded-proto') === 'https' || IS_PRODUCTION;
+  if (isHttps) {
+    return ['Path=/', 'HttpOnly', 'SameSite=None', 'Secure', 'Partitioned', `Max-Age=${maxAge}`];
+  }
+  return ['Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${maxAge}`];
+}
+
+export function setSessionCookie(res: Response, token: string, req?: Request) {
+  const attrs = buildCookieAttributes(req, SESSION_TTL_SECONDS);
+  appendSetCookie(res, `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; ${attrs.join('; ')}`);
+}
+
+export function clearSessionCookie(res: Response, req?: Request) {
+  const attrs = buildCookieAttributes(req, 0);
+  appendSetCookie(res, `${SESSION_COOKIE_NAME}=; ${attrs.join('; ')}`);
+}
+
+export function setCustomerBrowserCookie(
+  res: Response,
+  publicCode: string,
+  token: string,
+  req?: Request
+) {
+  const cookieName = getCustomerCookieName(publicCode);
+  const attrs = buildCookieAttributes(req, CUSTOMER_COOKIE_TTL_SECONDS);
+  appendSetCookie(res, `${cookieName}=${encodeURIComponent(token)}; ${attrs.join('; ')}`);
+}
+
+export function clearCustomerBrowserCookie(res: Response, publicCode: string, req?: Request) {
+  const cookieName = getCustomerCookieName(publicCode);
+  const attrs = buildCookieAttributes(req, 0);
+  appendSetCookie(res, `${cookieName}=; ${attrs.join('; ')}`);
+}
+
+export function verifySameOriginMutation(req: Request): boolean {
+  const origin = req.header('origin');
+  if (!origin) return true;
+  const host = req.header('x-forwarded-host') || req.header('host') || '';
+  if (!host) return true;
+  try {
+    const parsed = new URL(origin);
+    return parsed.host.toLowerCase() === host.split(',')[0].trim().toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Standalone Owner / Agent Login Challenge Store (No hardcoded secret bypass)
+// -----------------------------------------------------------------------------
+
+interface LoginChallengeRecord {
+  challengeId: string;
+  userId: string;
+  codeHash: string;
+  expiresAtMs: number;
+  attempts: number;
+}
+
+const ownerLoginChallenges = new Map<string, LoginChallengeRecord>();
+
+export function issueOwnerLoginChallenge(rawIdentifier: string):
+  | {
+      ok: true;
+      challengeId: string;
+      maskedPhone: string;
+      role: AuthRole;
+      displayName: string;
+      devPreviewCode?: string;
+    }
+  | { ok: false; error: string } {
+  const user = findUserByIdentifier(rawIdentifier);
+  if (!user || (user.userRole !== 'SALON_OWNER' && user.userRole !== 'AGENT')) {
+    return {
+      ok: false,
+      error: 'No Salon Owner or Field Agent account matched that phone or email.',
+    };
+  }
+
+  const code = String(crypto.randomInt(100000, 999999));
+  const challengeId = `chl_${crypto.randomBytes(12).toString('hex')}`;
+  const codeHash = crypto.createHash('sha256').update(`${challengeId}:${code}`).digest('hex');
+
+  if (ownerLoginChallenges.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of ownerLoginChallenges.entries()) {
+      if (v.expiresAtMs < now) ownerLoginChallenges.delete(k);
+    }
+  }
+
+  ownerLoginChallenges.set(challengeId, {
+    challengeId,
+    userId: user.userId,
+    codeHash,
+    expiresAtMs: Date.now() + 5 * 60_000,
+    attempts: 0,
+  });
+
+  return {
+    ok: true,
+    challengeId,
+    maskedPhone: maskPhoneNumber(user.phone),
+    role: user.userRole,
+    displayName: user.displayName,
+    devPreviewCode: IS_PRODUCTION ? undefined : code,
+  };
+}
+
+export function verifyOwnerLoginChallenge(
+  challengeId: string,
+  candidateCode: string
+): { ok: true; user: AuthUser } | { ok: false; error: string } {
+  const rec = ownerLoginChallenges.get((challengeId || '').trim());
+  if (!rec) {
+    return { ok: false, error: 'Login verification session expired or not found.' };
+  }
+  if (rec.expiresAtMs < Date.now()) {
+    ownerLoginChallenges.delete(rec.challengeId);
+    return { ok: false, error: 'Verification code expired. Request a new code.' };
+  }
+  if (rec.attempts >= 5) {
+    ownerLoginChallenges.delete(rec.challengeId);
+    return { ok: false, error: 'Too many invalid code attempts. Request a new code.' };
+  }
+  rec.attempts += 1;
+
+  const cleanCode = (candidateCode || '').trim();
+  const candidateHash = crypto.createHash('sha256').update(`${rec.challengeId}:${cleanCode}`).digest();
+  const expectedHash = Buffer.from(rec.codeHash, 'hex');
+  if (candidateHash.length !== expectedHash.length || !crypto.timingSafeEqual(candidateHash, expectedHash)) {
+    return { ok: false, error: 'Incorrect 6-digit verification code.' };
+  }
+
+  ownerLoginChallenges.delete(rec.challengeId);
+  const userRec = findUserById(rec.userId);
+  if (!userRec) {
+    return { ok: false, error: 'Account record no longer exists.' };
+  }
+  return {
+    ok: true,
+    user: {
+      userId: userRec.userId,
+      userRole: userRec.userRole,
+      displayName: userRec.displayName,
+      email: userRec.email,
+      phone: userRec.phone,
+      salonId: userRec.salonId,
+      allowedSalonIds: userRec.allowedSalonIds,
+      agentId: userRec.agentId,
+      salonName: userRec.salonName,
+      sessionVersion: currentSessionVersion,
+    },
+  };
 }
 
 // -----------------------------------------------------------------------------
 // Direct Persistent Founder Session + Single-Use Agent Invite Token Store
-// (Zero 6-digit PIN walls & zero IP rate limits)
 // -----------------------------------------------------------------------------
 
 export function getFounderSessionUser(): AuthUser {
@@ -581,6 +987,7 @@ export function getFounderSessionUser(): AuthUser {
     salonId: f.salonId,
     agentId: f.agentId,
     salonName: f.salonName,
+    sessionVersion: currentSessionVersion,
   };
 }
 
@@ -807,6 +1214,7 @@ export function consumeAgentInviteTokenAndRegisterAgent(params: {
       phone: agentRecord.phone,
       salonId: null,
       agentId: rec.agentId,
+      sessionVersion: currentSessionVersion,
     },
   };
 }
@@ -832,9 +1240,19 @@ export function extractAuthUserFromRequest(req: Request): AuthUser | null {
 }
 
 export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (!isJwtSecretConfigured()) {
+    return res.status(503).json({
+      error: 'Server authentication is not configured (missing JWT_SECRET).',
+    });
+  }
   const user = extractAuthUserFromRequest(req);
   if (!user) {
     return res.status(401).json({ error: 'Authentication required. Please open your portal link.' });
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !req.header('authorization')) {
+    if (!verifySameOriginMutation(req)) {
+      return res.status(403).json({ error: 'Cross-origin cookie mutation rejected.' });
+    }
   }
   req.authUser = user;
   return next();
@@ -870,7 +1288,11 @@ export function requireSalonTenantAccess(allowAgentReadOnly = false) {
     }
 
     if (user.userRole === 'SALON_OWNER') {
-      if (user.salonId !== requestedSalonId) {
+      const allowed = new Set<string>([
+        ...(user.salonId ? [user.salonId] : []),
+        ...(Array.isArray(user.allowedSalonIds) ? user.allowedSalonIds : []),
+      ]);
+      if (!allowed.has(requestedSalonId)) {
         return res.status(403).json({
           error: 'Forbidden: tenant isolation blocks cross-salon access.',
         });
@@ -895,10 +1317,6 @@ export function requireSalonTenantAccess(allowAgentReadOnly = false) {
     return res.status(403).json({ error: 'Forbidden.' });
   };
 }
-
-// -----------------------------------------------------------------------------
-// Webhook Header Secret Check (Zero IP Rate Limits)
-// -----------------------------------------------------------------------------
 
 export function requireWebhookSecret(req: Request, res: Response, next: NextFunction) {
   if (!RUNTIME_WEBHOOK_SECRET) {
