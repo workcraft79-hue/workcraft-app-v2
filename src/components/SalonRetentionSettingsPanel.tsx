@@ -117,17 +117,17 @@ const RETENTION_UI_I18N: Record<
     winbackTplLabel: 'Win-Back Message Template',
     runScanBtn: 'Run 30-Day Win-Back Scan',
     testRebookBtn: 'Test 1-Tap "REBOOK" Reply',
-    mod4Title: '4. Post-Service Google Review & Rating Booster (T+2 Hours)',
-    mod4Desc: 'Routes 4–5★ to Google Maps and intercepts 1–3★ privately with an Owner Alert.',
-    boosterOn: 'T+2h Booster: ON',
-    boosterOff: 'T+2h Booster: OFF',
+    mod4Title: '4. Post-Completion Google Review Link (T+2 Hours)',
+    mod4Desc: 'Sends the exact same direct Google Review link to every customer after appointment completion (no rating gating).',
+    boosterOn: 'T+2h Review Link: ON',
+    boosterOff: 'T+2h Review Link: OFF',
     googleUrlLabel: 'Direct Google Review URL (google_review_url)',
-    testStarsLabel: 'Test Smart Reputation Routing (Simulate Client Reply)',
+    testStarsLabel: 'Preview Post-Completion Google Review Prompt',
     dispatchT2hBtn: 'Dispatch T+2h Prompts Now',
     profilesTitle: 'Client Retention Profiles (Birth Date & Last Completed Visit)',
     trackedCount: 'Tracked Profiles',
     saveProfileBtn: 'Save Client Profile',
-    recentLogsLabel: 'Recent Automated WhatsApp Webhook & Cron Dispatches',
+    recentLogsLabel: 'Recent Automated & Retention Activity Logs',
   },
   ur: {
     mod1Title: '1. علاقائی زبان منتخب کرنے کا مینو',
@@ -158,17 +158,17 @@ const RETENTION_UI_I18N: Record<
     winbackTplLabel: 'ون بیک پیغام کا سانچہ',
     runScanBtn: '30 دن کا ون بیک اسکین چلائیں',
     testRebookBtn: '1-ٹیپ "REBOOK" جواب ٹیسٹ کریں',
-    mod4Title: '4. سروس کے 2 گھنٹے بعد گوگل ریویو بوسٹر',
-    mod4Desc: '4–5 اسٹار گاہک کو گوگل میپس پر بھیجتا ہے اور 1–3 اسٹار کو نجی الرٹ کے ساتھ روک لیتا ہے۔',
-    boosterOn: 'ریویو بوسٹر: آن',
-    boosterOff: 'ریویو بوسٹر: آف',
+    mod4Title: '4. سروس مکمل ہونے کے 2 گھنٹے بعد گوگل ریویو لنک',
+    mod4Desc: 'سروس مکمل ہونے کے بعد ہر گاہک کو یکساں گوگل ریویو لنک بھیجا جاتا ہے (بغیر کسی ریٹنگ فلٹر کے)۔',
+    boosterOn: 'ریویو لنک: آن',
+    boosterOff: 'ریویو لنک: آف',
     googleUrlLabel: 'براہِ راست گوگل ریویو لنک (URL)',
-    testStarsLabel: 'اسمارٹ ریٹنگ راؤٹنگ ٹیسٹ کریں (جواب سیمولیشن)',
+    testStarsLabel: 'گوگل ریویو پیغام کا پیش نظارہ',
     dispatchT2hBtn: '2 گھنٹے والے ریویو پیغامات ابھی چلائیں',
     profilesTitle: 'گاہکوں کے پروفائلز (تاریخِ پیدائش اور آخری وزٹ)',
     trackedCount: 'محفوظ پروفائلز',
     saveProfileBtn: 'گاہک پروفائل محفوظ کریں',
-    recentLogsLabel: 'حالیہ خودکار واٹس ایپ پیغامات کا لاگ',
+    recentLogsLabel: 'حالیہ خودکار پیغامات کا لاگ',
   },
   ar: {
     mod1Title: '1. قائمة اختيار اللغة حسب المنطقة',
@@ -199,17 +199,17 @@ const RETENTION_UI_I18N: Record<
     winbackTplLabel: 'قالب رسالة الاسترجاع',
     runScanBtn: 'تشغيل فحص استرجاع 30 يوماً',
     testRebookBtn: 'تجربة رد "REBOOK" المباشر',
-    mod4Title: '4. معزز تقييم جوجل بعد الخدمة بساعتين (T+2h)',
-    mod4Desc: 'يوجه تقييمات 4–5 نجوم إلى خرائط جوجل ويحول 1–3 نجوم لتنبيه خاص للمالك.',
-    boosterOn: 'معزز التقييم: مفعل',
-    boosterOff: 'معزز التقييم: متوقف',
+    mod4Title: '4. رابط تقييم جوجل بعد إتمام الزيارة بساعتين (T+2h)',
+    mod4Desc: 'يرسل نفس رابط تقييم جوجل مباشرة إلى جميع العملاء بعد إتمام الخدمة بدون أي فرز حسب التقييم.',
+    boosterOn: 'رابط التقييم: مفعل',
+    boosterOff: 'رابط التقييم: متوقف',
     googleUrlLabel: 'رابط تقييم جوجل المباشر (URL)',
-    testStarsLabel: 'اختبار توجيه التقييم الذكي',
+    testStarsLabel: 'معاينة رسالة رابط تقييم جوجل',
     dispatchT2hBtn: 'إرسال طلبات التقييم الآن',
     profilesTitle: 'ملفات احتفاظ العملاء (تاريخ الميلاد وآخر زيارة)',
     trackedCount: 'ملفات مسجلة',
     saveProfileBtn: 'حفظ ملف العميل',
-    recentLogsLabel: 'سجل رسائل واتساب التلقائية الأخيرة',
+    recentLogsLabel: 'سجل الرسائل التلقائية الأخيرة',
   },
 };
 
@@ -396,7 +396,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
     }
   };
 
-  const handleSimulateStarFeedback = async (stars: number) => {
+  const handleSendNeutralReviewTest = async () => {
     setIsWebhookBusy(true);
     try {
       const sampleClient = conciergeState.clients[0];
@@ -410,26 +410,22 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
         body: JSON.stringify({
           fromPhone: targetPhone,
           clientName: targetName,
-          messageText: `${stars} stars`,
+          messageText: 'Thank you',
           appointmentIdForReview: latestCompleted?.id,
         }),
       });
-      if (!res.ok) throw new Error('Failed to simulate rating');
+      if (!res.ok) throw new Error('Failed to preview review prompt');
       const data = await res.json();
       setRatingSimOutcome({
-        rating: stars,
+        rating: 5,
         routedAction: data.routedAction,
         replyText: data.replyText,
         replyDir: data.replyDir,
       });
       onStateUpdated(data.state);
-      if (stars <= 3) {
-        onShowToast('🚨 Low rating (1–3★) intercepted! Google Review URL suppressed & Owner Alert triggered.');
-      } else {
-        onShowToast(`✓ ${stars}★ Positive review routed directly to your Google Review link!`);
-      }
+      onShowToast('✓ Direct Google Review link sent equally to all completed bookings.');
     } catch {
-      onShowToast('Could not simulate star rating.');
+      onShowToast('Could not preview review prompt.');
     } finally {
       setIsWebhookBusy(false);
     }
@@ -643,42 +639,134 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
       )}
 
       {/* ========================================================================= */}
-      {/* PHASE 1: CUSTOMER WHATSAPP EXPERIENCE — LIVE DEMO & PUBLIC FLOW LINKS     */}
+      {/* WEB-FIRST PUBLIC BOOKING LINK & MONTHLY BOOKING QUOTA USAGE METER         */}
       {/* ========================================================================= */}
       <section className="rounded-2xl border border-[#116329] bg-[#0D2118] p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#3FB950]">
-              WHATSAPP CUSTOMER EXPERIENCE · INTERACTIVE SANDBOX
+              WEB-FIRST QR STOREFRONT · 0% API COST
             </span>
             <h3 className="text-base font-black text-[#F0F6FC]">
-              Customer WhatsApp Experience — Live Demo
+              Public Customer Booking Link &amp; Monthly Quota Meter
             </h3>
             <p className="text-xs text-[#8B949E] font-sans leading-relaxed">
-              Test the complete customer journey (&ldquo;Hi&rdquo; welcome, English/Urdu/Roman Urdu/Arabic switching, real Services, Hours, Location/Maps, Deals &amp; embedded Booking Flow) without altering real appointments.
+              Customers scan your salon QR (<code className="text-[#06B6D4]">/s/{conciergeState.publicCode}</code>) with zero app install and save their returning link directly in their own WhatsApp chat.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const fullUrl = `${window.location.origin}/s/${encodeURIComponent(conciergeState.publicCode)}?src=web`;
+                void navigator.clipboard?.writeText(fullUrl);
+                onShowToast('✓ Public web booking link copied.');
+              }}
+              className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#F0F6FC] inline-flex items-center gap-1.5 transition"
+            >
+              <Copy className="size-3.5 text-[#06B6D4]" />
+              <span>Copy Web Link</span>
+            </button>
             <a
-              href={`/flow/${encodeURIComponent(salonId)}`}
+              href={`/s/${encodeURIComponent(conciergeState.publicCode)}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="min-h-[46px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-4 py-2 text-xs font-mono font-bold text-[#06B6D4] inline-flex items-center gap-2 transition"
+              className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] inline-flex items-center gap-1.5 transition"
             >
               <ExternalLink className="size-3.5" />
-              <span>Open Public Flow</span>
+              <span>Open Booking Page</span>
             </a>
             <button
               type="button"
               onClick={() => setIsLiveDemoOpen(true)}
-              className="min-h-[48px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-5 py-2.5 text-xs font-mono font-black uppercase tracking-wide inline-flex items-center gap-2 shadow-lg transition active:scale-95"
+              className="min-h-[46px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-4 py-2 text-xs font-mono font-black uppercase tracking-wide inline-flex items-center gap-2 shadow-lg transition active:scale-95"
             >
               <MessageSquare className="size-4" />
-              <span>Launch Live Demo</span>
+              <span>Meta Add-On Preview</span>
             </button>
           </div>
         </div>
+
+        {/* Monthly Booking Usage Meter (750 / 1,500 / 3,000 / >3,000 Custom) */}
+        {conciergeState.usageMeter && (
+          <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+              <span className="font-bold text-[#F0F6FC]">
+                Monthly Plan Usage ({conciergeState.usageMeter.planTier} · {conciergeState.usageMeter.billingMonth})
+              </span>
+              <span
+                className={`font-bold ${
+                  conciergeState.usageMeter.status === 'BLOCKED'
+                    ? 'text-[#F85149]'
+                    : conciergeState.usageMeter.status === 'GRACE' || conciergeState.usageMeter.status === 'WARN_90'
+                    ? 'text-[#D29922]'
+                    : 'text-[#3FB950]'
+                }`}
+              >
+                {conciergeState.usageMeter.billableBookings.toLocaleString()} / {conciergeState.usageMeter.monthlyLimit.toLocaleString()} bookings ({conciergeState.usageMeter.pctUsed}%)
+              </span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-[#161B22] overflow-hidden border border-[#30363D]">
+              <div
+                className={`h-full transition-all ${
+                  conciergeState.usageMeter.status === 'BLOCKED'
+                    ? 'bg-[#F85149]'
+                    : conciergeState.usageMeter.status === 'GRACE' || conciergeState.usageMeter.status === 'WARN_90'
+                    ? 'bg-[#D29922]'
+                    : 'bg-[#3FB950]'
+                }`}
+                style={{ width: `${Math.min(100, Math.max(2, conciergeState.usageMeter.pctUsed))}%` }}
+              />
+            </div>
+            <p className="text-[11px] font-sans text-[#8B949E]">
+              Owner walk-ins &amp; customer reschedules consume 0 quota. Grace buffer: +{conciergeState.usageMeter.graceLimit} bookings above plan limit before calls fallback to your public phone.
+            </p>
+          </div>
+        )}
       </section>
+
+      {/* TODAY'S RETENTION OPPORTUNITIES ($0.00 Manual WhatsApp Handoff Links) */}
+      {conciergeState.opportunities && conciergeState.opportunities.length > 0 && (
+        <section className="rounded-2xl border border-[#30363D] bg-[#161B22] p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#30363D] pb-3">
+            <div>
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#D29922]">
+                $0.00 API COST · MANUAL OWNER HANDOFF
+              </span>
+              <h3 className="text-base font-bold text-[#F0F6FC]">
+                Today&apos;s Retention Opportunities ({conciergeState.opportunities.length})
+              </h3>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {conciergeState.opportunities.map((opp) => (
+              <div
+                key={`${opp.clientId}-${opp.reason}`}
+                className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2 text-xs"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-[#F0F6FC]">{opp.clientName}</span>
+                  <span className="rounded-md border border-[#9E6A03] bg-[#3B2E0B] px-2 py-0.5 text-[10px] font-mono font-bold text-[#D29922]">
+                    {opp.reason === 'BIRTHDAY'
+                      ? 'BIRTHDAY'
+                      : `${opp.daysSinceLastVisit || 30}D DORMANT`}
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#8B949E] leading-relaxed">{opp.suggestedMessage}</p>
+                <a
+                  href={opp.whatsappHandoffUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-[38px] w-full rounded-lg bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] font-bold flex items-center justify-center gap-1.5 transition"
+                >
+                  <Send className="size-3.5" />
+                  <span>Open in Owner WhatsApp ($0)</span>
+                </a>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ========================================================================= */}
       {/* CUSTOMER STOREFRONT INFO, CLIENT LANGUAGES & DEALS / VIDEO MANAGER        */}
@@ -689,11 +777,11 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             <div className="flex items-center gap-2">
               <MapPin className="size-4 text-[#06B6D4] shrink-0" />
               <h3 className="text-base font-bold text-[#F0F6FC]">
-                Customer WhatsApp Location, Languages &amp; Promo Deals
+                Storefront Contact, Timezone, Languages &amp; Promo Deals
               </h3>
             </div>
             <p className="text-xs text-[#8B949E] font-sans">
-              Configure the address, Google Maps pin, client language options, active video deals, and post-expiry video auto-delete period.
+              Configure your public contact phone, Google Maps pin, timezone, optional Meta WhatsApp add-on, client languages, and local ad deals.
             </p>
           </div>
           <button
@@ -707,14 +795,40 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             ) : (
               <Save className="size-4" />
             )}
-            <span>Save Location &amp; Languages</span>
+            <span>Save Storefront Settings</span>
           </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="space-y-1.5 block">
             <span className="text-xs font-mono text-[#8B949E] block">
-              Salon Street Address (Shown in WhatsApp &amp; Flow)
+              Public Contact Phone (Displayed on QR &amp; Booking Portal)
+            </span>
+            <input
+              type="tel"
+              dir="ltr"
+              value={draft.publicContactPhone || ''}
+              onChange={(e) => updateDraft({ ...draft, publicContactPhone: e.target.value })}
+              placeholder="+92 300 4567890"
+              className="w-full min-h-[46px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+            />
+          </label>
+          <label className="space-y-1.5 block">
+            <span className="text-xs font-mono text-[#8B949E] block">
+              Public WhatsApp Phone (For $0.00 Click-to-Chat Links)
+            </span>
+            <input
+              type="tel"
+              dir="ltr"
+              value={draft.publicWhatsappPhone || ''}
+              onChange={(e) => updateDraft({ ...draft, publicWhatsappPhone: e.target.value })}
+              placeholder="+92 300 4567890"
+              className="w-full min-h-[46px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+            />
+          </label>
+          <label className="space-y-1.5 block">
+            <span className="text-xs font-mono text-[#8B949E] block">
+              Salon Street Address (Shown on Web Booking &amp; Poster)
             </span>
             <input
               type="text"
@@ -737,6 +851,35 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
               className="w-full min-h-[46px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono text-[#06B6D4] focus:border-[#06B6D4] focus:outline-none"
             />
           </label>
+          <label className="space-y-1.5 block">
+            <span className="text-xs font-mono text-[#8B949E] block">
+              Salon Timezone (IANA)
+            </span>
+            <input
+              type="text"
+              dir="ltr"
+              value={draft.timezoneIana || 'Asia/Karachi'}
+              onChange={(e) => updateDraft({ ...draft, timezoneIana: e.target.value })}
+              placeholder="Asia/Karachi"
+              className="w-full min-h-[46px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm font-mono text-[#F0F6FC] focus:border-[#06B6D4] focus:outline-none"
+            />
+          </label>
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={() =>
+                updateDraft({ ...draft, whatsappAddonEnabled: !draft.whatsappAddonEnabled })
+              }
+              className={`w-full min-h-[46px] rounded-xl border px-3.5 py-2 text-xs font-mono font-bold flex items-center justify-between transition ${
+                draft.whatsappAddonEnabled
+                  ? 'border-[#116329] bg-[#0D3822] text-[#3FB950]'
+                  : 'border-[#30363D] bg-[#0D1117] text-[#8B949E]'
+              }`}
+            >
+              <span>Optional Paid Meta WhatsApp Add-On</span>
+              <span>{draft.whatsappAddonEnabled ? 'ENABLED' : 'OFF ($0 Web-Only)'}</span>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-3 items-start">
@@ -915,7 +1058,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {salonDeals.map((deal) => {
               const expired = !deal.active || new Date(deal.expiresAt).getTime() <= Date.now();
-              const dealPath = `/deal/${encodeURIComponent(salonId)}/${encodeURIComponent(deal.id)}`;
+              const dealPath = `/deal/${encodeURIComponent(conciergeState.publicCode)}/${encodeURIComponent(deal.id)}`;
               return (
                 <div
                   key={deal.id}
@@ -1019,14 +1162,14 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             <div className="flex flex-wrap gap-2">
               {conciergeState.languageOptions.map((opt) => (
                 <button
-                  key={opt.index}
+                  key={opt.index || opt.digit}
                   type="button"
                   disabled={isWebhookBusy}
-                  onClick={() => handleSendGreetingWebhook(opt.index)}
+                  onClick={() => handleSendGreetingWebhook(opt.index || opt.digit)}
                   dir={opt.dir}
                   className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3.5 py-2 text-sm font-mono font-bold text-[#F0F6FC] transition"
                 >
-                  [{opt.label}]
+                  [{opt.label || opt.nativeLabel}]
                 </button>
               ))}
             </div>
@@ -1070,13 +1213,13 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
               </button>
               {conciergeState.languageOptions.map((opt) => (
                 <button
-                  key={opt.index}
+                  key={opt.index || opt.digit}
                   type="button"
                   disabled={isWebhookBusy}
-                  onClick={() => handleSendGreetingWebhook(opt.index)}
+                  onClick={() => handleSendGreetingWebhook(opt.index || opt.digit)}
                   className="min-h-[48px] rounded-xl border border-[#30363D] bg-[#161B22] hover:border-[#3FB950] px-3 py-2 text-xs font-mono font-bold text-[#3FB950] transition"
                 >
-                  Reply {opt.index}
+                  Reply {opt.index || opt.digit}
                 </button>
               ))}
             </div>
@@ -1707,14 +1850,14 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
             className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-sm text-left [unicode-bidi:isolate] font-mono text-[#06B6D4] break-all focus:border-[#06B6D4] focus:outline-none"
           />
           <span className="text-[11px] font-mono text-[#8B949E] break-all block">
-            Active Public Link (4–5★ only): {draft.googleReviewUrl}
+            Neutral Public Google Review Link (Sent equally to ALL completed bookings): {draft.googleReviewUrl}
           </span>
         </label>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2">
             <span className="text-[11px] font-mono font-bold text-[#8B949E] uppercase block">
-              T+2 Hours Feedback Prompt ({previewLang.toUpperCase()})
+              T+2 Hours Post-Completion Prompt ({previewLang.toUpperCase()})
             </span>
             <p
               dir={activeDir}
@@ -1727,39 +1870,29 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
           </div>
 
           <div className="rounded-xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2.5">
-            <span className="text-[11px] font-mono font-bold text-[#D29922] uppercase block">
-              Test Smart Reputation Routing (Simulate Client Reply)
+            <span className="text-[11px] font-mono font-bold text-[#3FB950] uppercase block">
+              Policy-Compliant Direct Google Review Routing
             </span>
-            <div className="grid grid-cols-5 gap-1.5">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <button
-                  key={star}
-                  type="button"
-                  disabled={isWebhookBusy}
-                  onClick={() => handleSimulateStarFeedback(star)}
-                  className={`min-h-[48px] rounded-xl border font-mono text-xs font-bold transition ${
-                    star <= 3
-                      ? 'border-[#da3633] bg-[#4C1C1D] text-[#F85149] hover:bg-[#5e2223]'
-                      : 'border-[#116329] bg-[#0D3822] text-[#3FB950] hover:bg-[#114a2d]'
-                  }`}
-                >
-                  {star}★
-                </button>
-              ))}
-            </div>
+            <p className="text-xs text-[#8B949E] leading-relaxed">
+              Every customer with a COMPLETED booking receives the same Google Review link on their management portal (/b/:token) and T+2h follow-up. No star-rating filtering is used.
+            </p>
+            <button
+              type="button"
+              disabled={isWebhookBusy}
+              onClick={handleSendNeutralReviewTest}
+              className="min-h-[44px] w-full rounded-xl border border-[#116329] bg-[#0D3822] text-[#3FB950] hover:bg-[#114a2d] font-mono text-xs font-bold transition"
+            >
+              Preview Post-Completion Google Review Dispatch
+            </button>
             {ratingSimOutcome && (
               <div
                 dir={ratingSimOutcome.replyDir}
-                className={`rounded-xl border p-3 text-xs space-y-1 ${
-                  ratingSimOutcome.rating <= 3
-                    ? 'border-[#da3633] bg-[#4C1C1D] text-[#F0F6FC]'
-                    : 'border-[#116329] bg-[#0D3822] text-[#F0F6FC]'
-                } ${ratingSimOutcome.replyDir === 'rtl' ? 'text-right' : 'text-left'}`}
+                className={`rounded-xl border border-[#116329] bg-[#0D3822] text-[#F0F6FC] p-3 text-xs space-y-1 ${
+                  ratingSimOutcome.replyDir === 'rtl' ? 'text-right' : 'text-left'
+                }`}
               >
                 <span className="text-[10px] font-mono font-bold uppercase block" dir="ltr">
-                  {ratingSimOutcome.rating <= 3
-                    ? 'GOOGLE LINK SUPPRESSED · OWNER_INTERVENTION_NEEDED ALERT SENT'
-                    : '4–5★ POSITIVE · PUBLIC GOOGLE LINK SENT'}
+                  NEUTRAL GOOGLE REVIEW LINK DISPATCHED TO COMPLETED CLIENT
                 </span>
                 <p className="break-all leading-relaxed">{ratingSimOutcome.replyText}</p>
               </div>
@@ -1896,7 +2029,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
                       [{log.module}] {log.direction} · {log.clientName} ({log.clientPhone})
                     </span>
                     <span>
-                      {log.language.toUpperCase()} · {new Date(log.timestamp).toLocaleTimeString()}
+                      {log.language.toUpperCase()} · {new Date(log.timestamp || log.createdAt || Date.now()).toLocaleTimeString()}
                     </span>
                   </div>
                   <p
@@ -1916,6 +2049,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
 
       <CustomerWhatsAppDemoModal
         salonId={salonId}
+        salonPublicCode={conciergeState.publicCode}
         isOpen={isLiveDemoOpen}
         onClose={() => setIsLiveDemoOpen(false)}
       />
