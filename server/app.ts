@@ -340,7 +340,7 @@ export function createApiApp(port = 3000): express.Express {
   app.use(express.json({ limit: '4mb' }));
 
   app.use('/api', async (req, res, next) => {
-    if (req.path !== '/health') {
+    if (req.path !== '/health' && req.path !== '/auth/founder-status') {
       const dbReady = assertProductionDatabaseReady();
       if (!dbReady.ok) {
         return res.status(503).json({ error: dbReady.error });
@@ -378,7 +378,18 @@ export function createApiApp(port = 3000): express.Express {
   });
 
   app.get('/api/auth/founder-status', (_req, res) => {
-    return res.json(getFounderAuthStatus());
+    const status = getFounderAuthStatus();
+    const dbReady = assertProductionDatabaseReady();
+    const missingEnvVars = [...status.missingEnvVars];
+    if (!dbReady.ok && !missingEnvVars.includes('DATABASE_URL')) {
+      missingEnvVars.push('DATABASE_URL');
+    }
+    return res.json({
+      ...status,
+      databaseConfigured: dbReady.ok,
+      missingEnvVars,
+      productionMisconfigured: status.productionMisconfigured || !dbReady.ok,
+    });
   });
 
   // Initial Founder PIN setup (strictly non-production preview when no PIN is configured yet)
