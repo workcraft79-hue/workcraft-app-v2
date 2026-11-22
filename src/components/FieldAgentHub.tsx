@@ -1685,47 +1685,44 @@ export const getLocalizedPackageFeatures = (
     switch (pkgId) {
       case 'STARTER':
         return [
-          { title: '24/7 خودکار واٹس ایپ بکنگ بوٹ (سروس مینو اور فوری بکنگ)', included: true },
+          { title: '24/7 ویب فرسٹ QR بکنگ پیج اور لائیو ریٹ کارڈ (بغیر کسی ایپ انسٹال)', included: true },
           { title: 'ماہانہ 750 گاہک بکنگز کی گنجائش', included: true },
-          { title: 'بکنگ کا فوری واٹس ایپ کنفرمیشن اور ریمائنڈر میسج', included: true },
-          { title: 'باربرز / اسٹائلسٹس چیئر لسٹ اور ٹائم سلاٹس سیٹ اپ', included: true },
-          { title: 'گوگل میپس پن لوکیشن اور سیلون ٹائمنگ آٹو ریپلائی', included: true },
-          { title: 'پرنٹ ایبل سیلون ونڈو پوسٹر اور واٹس ایپ QR کوڈ', included: true },
+          { title: '1-کلک ذاتی واپسی لنک واٹس ایپ میں محفوظ (0 API لاگت)', included: true },
+          { title: 'باربرز / اسٹائلسٹس چیئر لسٹ، چھٹی اور ٹائم سلاٹس سیٹ اپ', included: true },
+          { title: 'گوگل میپس پن لوکیشن اور سیلون ٹائمنگ خودکار ڈسپلے', included: true },
+          { title: 'پرنٹ ایبل سیلون ونڈو پوسٹر اور ویب QR کوڈ', included: true },
         ];
       case 'GROWTH':
         return [
           { title: 'اسٹارٹر پیکیج کی تمام سروسز اور فیچرز شامل ہیں', included: true },
           { title: 'ماہانہ 1,500 گاہک بکنگز کی گنجائش', included: true },
-          { title: 'گوگل 5-اسٹار ریویو بوسٹر (سروس کے 30 منٹ بعد خودکار)', included: true, highlight: true },
-          { title: 'اسمارٹ ریٹنگ فلٹر (5★ گوگل میپس پر اور کم ریٹنگ پرائیویٹ)', included: true },
+          { title: 'گوگل ریویو لنک پرامپٹ (سروس مکمل ہونے کے بعد تمام گاہکوں کے لیے یکساں)', included: true, highlight: true },
           { title: 'ملٹی باربر وقت تصادم چیک اور متبادل خالی باربر کی تجویز', included: true },
-          { title: 'ریگولر گاہکوں کو 21 تا 30 دن بعد واپسی کا پرائیویٹ واٹس ایپ میسج', included: true },
-          { title: '24/7 خودکار کنکشن بحالی اور 60 منٹ سے کم ریکوری', included: true },
+          { title: 'ریگولر گاہکوں کے لیے برتھ ڈے اور 30 دن واپسی ہینڈ آف لنکس', included: true },
+          { title: 'اختیاری پیڈ Meta واٹس ایپ کلاؤڈ API ایڈ آن سپورٹ', included: true },
         ];
       case 'VIP':
         return [
-          { title: 'گروتھ آٹومیشن پیکیج کے تمام فیچرز اور سروسز شامل ہیں', included: true },
+          { title: 'گروتھ پیکیج کے تمام فیچرز اور سروسز شامل ہیں', included: true },
           { title: 'ماہانہ 3,000 گاہک بکنگز کی گنجائش اور VIP ترجیح', included: true },
-          { title: 'ویڈیو ڈیلز اور وائرل ریلز فیچر مکمل انلاکڈ (ویک اینڈ و ہفتہ وار ڈیلز)', included: true, highlight: true },
+          { title: 'Facebook، Instagram اور TikTok لوکل ایڈ ڈیل لینڈنگ پیجز انلاکڈ', included: true, highlight: true },
           {
             title: isDomestic
               ? 'لچکدار ویڈیو مہمات: 1 ویڈیو ڈیل (PKR 1,500) یا 4 ویڈیو ڈیلز (PKR 4,000)'
               : 'لچکدار ویڈیو مہمات: 1 ویڈیو ڈیل ($15) یا 4 ویڈیو ڈیلز ($40)',
             included: true,
           },
-          { title: '7 تا 10 دن کا ویڈیو کنورژن آڈٹ اور بکنگ رزلٹ ٹریکنگ', included: true },
-          { title: 'واٹس ایپ براڈکاسٹ اور گاہک واپسی (Win-Back) مہم ٹولز', included: true },
+          { title: '7 تا 10 دن کا ڈیل کنورژن آڈٹ اور بکنگ رزلٹ ٹریکنگ', included: true },
           { title: 'ڈیڈیکیٹڈ ترجیحی اکاؤنٹ سپورٹ', included: true },
         ];
       case 'CUSTOM':
       default:
         return [
-          { title: 'وی آئی پی ایگزیکٹو کے تمام فیچرز اور اعلیٰ رفتار کارکردگی', included: true },
-          { title: 'ماہانہ 3,000 سے زائد گاہک بکنگز کی گنجائش', included: true, highlight: true },
+          { title: 'وی آئی پی پیکیج کے تمام فیچرز اور اعلیٰ رفتار کارکردگی', included: true },
+          { title: 'ماہانہ 3,000 سے زائد گاہک بکنگز کی گنجائش (کسٹم)', included: true, highlight: true },
           { title: 'سیلون کے لیے لامحدود باربرز، چیئرز اور رش آور کیو کنٹرول', included: true },
-          { title: 'لامحدود گوگل 5-اسٹار ریویو اور گاہک واپسی مہمات', included: true },
-          { title: 'کسٹم ویڈیو ڈیلز پروڈکشن، وائرل پرومو براڈکاسٹ اور کریئیٹر کوآرڈینیشن', included: true },
-          { title: '24/7 ترجیحی انجینئرنگ سپورٹ اور فوری خودکار ریکوری', included: true },
+          { title: 'مکمل گوگل ریویو، لوکل ایڈز اور کلائنٹ ریٹینشن مہمات', included: true },
+          { title: 'اختیاری پیڈ Meta واٹس ایپ ایڈ آن اور کسٹم سپورٹ', included: true },
         ];
     }
   }
@@ -1734,47 +1731,44 @@ export const getLocalizedPackageFeatures = (
     switch (pkgId) {
       case 'STARTER':
         return [
-          { title: 'بوت حجز واتساب آلي يعمل 24/7 (قائمة الخدمات والأسعار الفورية)', included: true },
+          { title: 'صفحة حجز ويب فورية 24/7 عبر رمز QR بدون تحميل تطبيق', included: true },
           { title: 'سعة استيعاب 750 حجز شهرياً', included: true },
-          { title: 'إشعار وتأكيد وتذكير فوري للحجوزات عبر واتساب', included: true },
-          { title: 'إعداد قائمة الحلاقين / المصففين وجدولة الكراسي', included: true },
-          { title: 'رد تلقائي بموقع الصالون على خرائط جوجل وساعات العمل', included: true },
+          { title: 'حفظ رابط الحجز الشخصي بضغطة واحدة في واتساب ($0 API)', included: true },
+          { title: 'إعداد قائمة الحلاقين / المصففين والإجازات وجدولة الكراسي', included: true },
+          { title: 'موقع الصالون على خرائط جوجل وساعات العمل تلقائياً', included: true },
           { title: 'ملصق واجهة الصالون للطباعة مع رمز QR للحجز المباشر', included: true },
         ];
       case 'GROWTH':
         return [
-          { title: 'يشمل جميع مميزات وخدمات باقة التأسيس الأولى', included: true },
+          { title: 'يشمل جميع مميزات باقة التأسيس الأولى', included: true },
           { title: 'سعة استيعاب 1,500 حجز شهرياً', included: true },
-          { title: 'معزز تقييمات جوجل 5 نجوم التلقائي (بعد 30 دقيقة من الزيارة)', included: true, highlight: true },
-          { title: 'فلتر ذكي للتقييمات (5★ لخرائط جوجل والتقييمات الأقل للمالك فقط)', included: true },
+          { title: 'رابط تقييم جوجل المباشر بعد إتمام الزيارة لجميع العملاء بالتساوي', included: true, highlight: true },
           { title: 'فحص تعارض مواعيد الحلاقين واقتراح الحلاق المتاح تلقائياً', included: true },
-          { title: 'تذكير تلقائي للعملاء المعتادين كل 21–30 يوماً للعودة بالسعر الكامل', included: true },
-          { title: 'إصلاح تلقائي للاتصال 24/7 واستعادة فورية في أقل من 60 دقيقة', included: true },
+          { title: 'روابط متابعة أعياد الميلاد والعودة بعد 30 يوماً بتكلفة $0', included: true },
+          { title: 'دعم اختياري لإضافة Meta WhatsApp API المدفوعة', included: true },
         ];
       case 'VIP':
         return [
-          { title: 'يشمل جميع مميزات وخدمات باقة النمو الآلي', included: true },
+          { title: 'يشمل جميع مميزات باقة النمو الأولى', included: true },
           { title: 'سعة استيعاب 3,000 حجز شهرياً بأولوية قصوى', included: true },
-          { title: 'فتح ميزة عروض الفيديو والريلز التسويقية (عروض نهاية الأسبوع والأيام العادية)', included: true, highlight: true },
+          { title: 'صفحات هبوط العروض لإعلانات Facebook و Instagram و TikTok', included: true, highlight: true },
           {
             title: isDomestic
               ? 'حملات مرنة: عرض فيديو واحد (PKR 1,500) أو 4 عروض فيديو (PKR 4,000)'
               : 'حملات مرنة: عرض فيديو واحد ($15) أو 4 عروض فيديو ($40)',
             included: true,
           },
-          { title: 'تدقيق ومتابعة تفاعل الفيديو وتحويل الحجوزات لمدة 7–10 أيام', included: true },
-          { title: 'أدوات البث الجماعي وحملات استعادة العملاء عبر واتساب', included: true },
+          { title: 'تتبع تحويلات العروض ونتائج الحجوزات لمدة 7–10 أيام', included: true },
           { title: 'مدير حساب ودعم فني مخصص بأولوية عالية', included: true },
         ];
       case 'CUSTOM':
       default:
         return [
-          { title: 'يشمل جميع مميزات باقة VIP بأقصى أداء وأولوية للصالون', included: true },
-          { title: 'سعة عالية جداً أكثر من 3,000 حجز شهرياً لصالون واحد', included: true, highlight: true },
+          { title: 'يشمل جميع مميزات باقة VIP بأقصى أداء للصالون', included: true },
+          { title: 'سعة عالية جداً أكثر من 3,000 حجز شهرياً (خطة مخصصة)', included: true, highlight: true },
           { title: 'عدد غير محدود من الحلاقين والكراسي والتحكم بأوقات الذروة', included: true },
-          { title: 'حملات تقييمات جوجل 5 نجوم واستعادة عملاء غير محدودة', included: true },
-          { title: 'إدارة حملات الفيديو المخصصة وبث العروض التسويقية الفيروسية', included: true },
-          { title: 'دعم هندسي مباشر 24/7 واستعادة فورية تلقائية', included: true },
+          { title: 'إدارة حملات العروض وتقييمات جوجل وروابط الحجز', included: true },
+          { title: 'دعم هندسي مباشر وخيار Meta WhatsApp API المدفوع', included: true },
         ];
     }
   }
@@ -1783,47 +1777,44 @@ export const getLocalizedPackageFeatures = (
   switch (pkgId) {
     case 'STARTER':
       return [
-        { title: '24/7 Autonomous WhatsApp Booking Concierge & Live Rate Card', included: true },
+        { title: '24/7 Web-First QR Storefront & Live Rate Card (No App Install)', included: true },
         { title: '750 salon bookings / month capacity', included: true },
-        { title: 'Instant WhatsApp booking confirmation & reminder messages', included: true },
-        { title: 'Staff barber / stylist chair roster & slot scheduling', included: true },
-        { title: 'Google Maps pin & opening hours instant auto-reply', included: true },
-        { title: 'Printable Salon Window Poster PDF & WhatsApp QR Setup', included: true },
+        { title: '1-Click Save Personal Link to WhatsApp ($0.00 API cost)', included: true },
+        { title: 'Staff barber / stylist chair roster, leaves & slot scheduling', included: true },
+        { title: 'Google Maps pin, opening hours & /b/:token booking portal', included: true },
+        { title: 'Printable Salon Window Poster PDF & Web QR Setup', included: true },
       ];
     case 'GROWTH':
       return [
         { title: 'Includes all Starter Setup features & services', included: true },
         { title: '1,500 salon bookings / month capacity', included: true },
-        { title: 'Google 5-Star Review Booster (Auto-sent 30 mins after checkout)', included: true, highlight: true },
-        { title: 'Smart rating router (5★ goes to Google Maps, lower stays private)', included: true },
+        { title: 'Post-Completion Google Review Link (sent equally to all completed clients)', included: true, highlight: true },
         { title: 'Multi-barber conflict check & automatic free barber suggestion', included: true },
-        { title: 'Private 21–30 day regular client return reminders at full rates', included: true },
-        { title: '24/7 automatic connection repair & <60m recovery', included: true },
+        { title: 'Birthday & 30-day win-back $0.00 owner WhatsApp handoff list', included: true },
+        { title: 'Optional Paid Meta WhatsApp Cloud API add-on ready', included: true },
       ];
     case 'VIP':
       return [
-        { title: 'Includes all Growth Automation features & services', included: true },
+        { title: 'Includes all Growth features & services', included: true },
         { title: '3,000 salon bookings / month capacity with priority routing', included: true },
-        { title: 'Viral Video Deals & Reels feature unlocked (weekend & weekday deals)', included: true, highlight: true },
+        { title: 'Facebook, Instagram & TikTok local ad deal landing pages unlocked', included: true, highlight: true },
         {
           title: isDomestic
             ? 'Flexible promo runs: 1 video deal (PKR 1,500) or 4 video deals (PKR 4,000)'
             : 'Flexible promo runs: 1 video deal ($15) or 4 video deals ($40)',
           included: true,
         },
-        { title: '7 to 10 day video conversion tracking & booking audit', included: true },
-        { title: 'WhatsApp broadcast & client win-back promotional tools', included: true },
+        { title: '7 to 10 day deal conversion tracking & attribution analytics', included: true },
         { title: 'Dedicated priority account support', included: true },
       ];
     case 'CUSTOM':
     default:
       return [
         { title: 'Includes all VIP Executive features with maximum performance', included: true },
-        { title: 'High-volume capacity (> 3,000 bookings / month for your salon)', included: true, highlight: true },
+        { title: 'High-volume capacity (> 3,000 bookings / month custom plan)', included: true, highlight: true },
         { title: 'Unlimited barber / stylist chairs & peak-hour queue control', included: true },
-        { title: 'Unlimited Google 5-Star review & client win-back campaigns', included: true },
-        { title: 'Custom video marketing production & viral promo broadcast campaigns', included: true },
-        { title: 'Dedicated 24/7 engineering support & instant auto-recovery', included: true },
+        { title: 'Full Google Review, local social ad attribution & retention suite', included: true },
+        { title: 'Optional Paid Meta WhatsApp add-on & 24/7 priority support', included: true },
       ];
   }
 };
@@ -5494,6 +5485,7 @@ export const FieldAgentHub: React.FC<FieldAgentHubProps> = ({
                       salonName={salonName}
                       salonCategory={serviceCategory}
                       whatsappNumber={phone}
+                      publicContactPhone={phone}
                       location={address}
                       initialLanguage={clientOnboardingLanguage as PosterLang}
                     />
