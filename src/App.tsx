@@ -59,6 +59,8 @@ import {
 } from './components/Modals';
 import { CustomerBookingFlow } from './components/CustomerBookingFlow';
 import { PublicSalonDealPage } from './components/PublicSalonDealPage';
+import { MyBookingPage } from './components/MyBookingPage';
+import type { AdAttributionChannel } from './types/concierge';
 
 const SOCIAL_CAMPAIGN_SOURCE_MAP: Record<string, string> = {
   fb: 'Facebook Ads Campaign',
@@ -70,53 +72,78 @@ const SOCIAL_CAMPAIGN_SOURCE_MAP: Record<string, string> = {
   social: 'Social Media Campaign',
 };
 
-function getInitialRouteIntent() {
+function resolveAdAttribution(params: URLSearchParams): AdAttributionChannel {
+  const src = (params.get('src') || params.get('utm_source') || params.get('ref') || '')
+    .trim()
+    .toLowerCase();
+  if (src === 'fb' || src === 'facebook' || params.has('fbclid')) return 'FB';
+  if (src === 'ig' || src === 'instagram') return 'IG';
+  if (src === 'tiktok' || src === 'tt' || params.has('ttclid')) return 'TIKTOK';
+  if (src === 'qr') return 'QR';
+  if (src === 'web' || src === 'web_link') return 'WEB_LINK';
+  return 'DIRECT';
+}
+
+function getInitialRouteIntent(customHref?: string) {
   if (typeof window === 'undefined') {
     return {
       isAgentInviteRoute: false,
       inviteTokenParam: '',
       socialSource: null as string | null,
       sessionOnboardingLocked: false,
-      publicDealRoute: null as { salonId: string; dealId: string } | null,
-      publicFlowRoute: null as { salonId: string; dealId: string | null; phone?: string } | null,
+      adSource: 'DIRECT' as AdAttributionChannel,
+      publicBookingToken: null as string | null,
+      publicDealRoute: null as { salonCode: string; dealId: string } | null,
+      publicFlowRoute: null as { salonCode: string; dealId: string | null; cToken?: string } | null,
     };
   }
-  const params = new URLSearchParams(window.location.search);
-  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  const url = customHref
+    ? new URL(customHref, window.location.origin)
+    : new URL(window.location.href);
+  const params = url.searchParams;
+  const pathname = url.pathname.replace(/\/+$/, '') || '/';
   const inviteTokenParam = (params.get('token') || '').trim();
   const refParam = (params.get('ref') || '').trim().toLowerCase();
   const utmSource = (params.get('utm_source') || '').trim().toLowerCase();
   const onboardParam = (params.get('onboard') || '').trim().toLowerCase();
   const sourceKey = refParam || utmSource || (onboardParam === 'true' ? 'social' : '');
   const socialSource = sourceKey ? SOCIAL_CAMPAIGN_SOURCE_MAP[sourceKey] || null : null;
+  const adSource = resolveAdAttribution(params);
+  const cToken = (params.get('c') || '').trim() || undefined;
 
-  let publicDealRoute: { salonId: string; dealId: string } | null = null;
+  let publicBookingToken: string | null = null;
+  const bookingMatch = pathname.match(/^\/b\/([^/]+)$/);
+  if (bookingMatch) {
+    publicBookingToken = decodeURIComponent(bookingMatch[1]);
+  }
+
+  let publicDealRoute: { salonCode: string; dealId: string } | null = null;
   const dealMatch = pathname.match(/^\/deal\/([^/]+)\/([^/]+)$/);
   if (dealMatch) {
     publicDealRoute = {
-      salonId: decodeURIComponent(dealMatch[1]),
+      salonCode: decodeURIComponent(dealMatch[1]),
       dealId: decodeURIComponent(dealMatch[2]),
     };
   } else if (params.get('dealSalon') && params.get('dealId')) {
     publicDealRoute = {
-      salonId: params.get('dealSalon')!.trim(),
+      salonCode: params.get('dealSalon')!.trim(),
       dealId: params.get('dealId')!.trim(),
     };
   }
 
-  let publicFlowRoute: { salonId: string; dealId: string | null; phone?: string } | null = null;
-  const flowMatch = pathname.match(/^\/flow\/([^/]+)$/);
-  if (flowMatch) {
+  let publicFlowRoute: { salonCode: string; dealId: string | null; cToken?: string } | null = null;
+  const salonMatch = pathname.match(/^\/(?:s|flow)\/([^/]+)$/);
+  if (salonMatch) {
     publicFlowRoute = {
-      salonId: decodeURIComponent(flowMatch[1]),
+      salonCode: decodeURIComponent(salonMatch[1]),
       dealId: params.get('dealId')?.trim() || null,
-      phone: params.get('phone')?.trim() || undefined,
+      cToken,
     };
   } else if (params.get('flowSalon')) {
     publicFlowRoute = {
-      salonId: params.get('flowSalon')!.trim(),
+      salonCode: params.get('flowSalon')!.trim(),
       dealId: params.get('dealId')?.trim() || null,
-      phone: params.get('phone')?.trim() || undefined,
+      cToken,
     };
   }
 
@@ -131,6 +158,8 @@ function getInitialRouteIntent() {
     inviteTokenParam,
     socialSource,
     sessionOnboardingLocked,
+    adSource,
+    publicBookingToken,
     publicDealRoute,
     publicFlowRoute,
   };
@@ -198,7 +227,24 @@ export default function App() {
     ownerLang: 'ur',
   });
 
-  const initialRoute = React.useMemo(() => getInitialRouteIntent(), []);
+  const [clientLocationHref, setClientLocationHref] = useState<string>(() =>
+    typeof window !== 'undefined' ? window.location.href : '/'
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPopState = () => setClientLocationHref(window.location.href);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const navigatePublicRoute = (path: string) => {
+    if (typeof window === 'undefined') return;
+    window.history.pushState({}, '', path);
+    setClientLocationHref(window.location.href);
+  };
+
+  const initialRoute = React.useMemo(() => getInitialRouteIntent(clientLocationHref), [clientLocationHref]);
   const shouldStartPublicOnboarding = Boolean(
     !initialRoute.isAgentInviteRoute &&
       initialRoute.socialSource &&
@@ -453,7 +499,7 @@ export default function App() {
       setHasCompletedSalonOnboarding(true);
       setIsPublicOnboardingOpen(false);
       showToast(
-        `${data.salonName || payload.salonName} Live Floor Dashboard is active! Automated mass blasts activate once billing is confirmed.`
+        `${data.salonName || payload.salonName} Live Floor Dashboard & Web QR storefront are active! Retention tools activate once billing is confirmed.`
       );
     } catch {
       setPublicOnboardingError('Network error while saving installation details. Try again.');
@@ -802,22 +848,36 @@ export default function App() {
           ['Revenue', WalletCards, 'Revenue'],
         ];
 
-  const publicIntent = getInitialRouteIntent();
+  const publicIntent = getInitialRouteIntent(clientLocationHref);
+  if (publicIntent.publicBookingToken) {
+    return (
+      <MyBookingPage
+        token={publicIntent.publicBookingToken}
+        onNavigate={navigatePublicRoute}
+      />
+    );
+  }
   if (publicIntent.publicDealRoute) {
     return (
       <PublicSalonDealPage
-        salonId={publicIntent.publicDealRoute.salonId}
+        salonId={publicIntent.publicDealRoute.salonCode}
+        salonCode={publicIntent.publicDealRoute.salonCode}
         dealId={publicIntent.publicDealRoute.dealId}
+        adSource={publicIntent.adSource}
+        onNavigate={navigatePublicRoute}
       />
     );
   }
   if (publicIntent.publicFlowRoute) {
     return (
       <CustomerBookingFlow
-        salonId={publicIntent.publicFlowRoute.salonId}
+        salonId={publicIntent.publicFlowRoute.salonCode}
+        salonCode={publicIntent.publicFlowRoute.salonCode}
+        cToken={publicIntent.publicFlowRoute.cToken}
+        adSource={publicIntent.adSource}
         initialDealId={publicIntent.publicFlowRoute.dealId}
-        initialClientPhone={publicIntent.publicFlowRoute.phone}
         standalone={true}
+        onNavigate={navigatePublicRoute}
       />
     );
   }
