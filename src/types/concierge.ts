@@ -1,25 +1,24 @@
-export type ClientPreferredLang = 'en' | 'roman_ur' | 'ur' | 'ar';
-
 export type SalonRegionCode = 'PK' | 'MENA' | 'INTL';
 
-export interface LanguageMenuOption {
-  index: '1' | '2' | '3';
-  lang: ClientPreferredLang;
-  label: string;
-  dir: 'ltr' | 'rtl';
-}
-
-export type SalonPackageTier = 'STARTER' | 'PRO' | 'PRO++';
+export type SalonPackageTier = 'STARTER' | 'PRO' | 'PRO++' | 'CUSTOM';
 
 export type SalonBillingStatus = 'PENDING_ACTIVATION' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED';
 
+export type ClientPreferredLang = 'en' | 'roman_ur' | 'ur' | 'ar';
+
 export type SalonCategory = 'MENS' | 'LADIES';
+
+export type DealDiscountType = 'PCT' | 'FIXED' | 'BUNDLE_PRICE';
+
+export type AdAttributionChannel = 'FB' | 'IG' | 'TIKTOK' | 'QR' | 'WEB_LINK' | 'DIRECT';
 
 export interface SalonServiceRate {
   id?: string;
   name: string;
   price: number;
   durationMins?: number;
+  bufferAfterMins?: number;
+  eligibleStylists?: string[];
   active?: boolean;
   translations?: Partial<Record<ClientPreferredLang, string>>;
 }
@@ -27,105 +26,107 @@ export interface SalonServiceRate {
 export interface SalonOperatingHours {
   monThuOpen: string;
   monThuClose: string;
-  monThuClosed: boolean;
+  monThuClosed?: boolean;
   fridayOpen: string;
   fridayClose: string;
-  fridayBreakStart: string;
-  fridayBreakEnd: string;
-  fridayClosed: boolean;
+  fridayBreakStart?: string;
+  fridayBreakEnd?: string;
+  fridayClosed?: boolean;
   satSunOpen: string;
   satSunClose: string;
-  satSunClosed: boolean;
+  satSunClosed?: boolean;
 }
-
-export type DealDiscountType = 'PCT' | 'FIXED' | 'BUNDLE_PRICE';
 
 export interface SalonDeal {
   id: string;
   salonId: string;
   title: string;
   description: string;
+  adChannel?: AdAttributionChannel;
+  titleTranslations?: Partial<Record<ClientPreferredLang, string>>;
+  descriptionTranslations?: Partial<Record<ClientPreferredLang, string>>;
   discountType: DealDiscountType;
   discountValue: number;
   serviceIds: string[];
   serviceNames: string[];
   startsAt: string;
   expiresAt: string;
-  videoRetentionDaysAfterExpiry: number;
+  videoUrl?: string;
   videoFileName?: string;
   videoMimeType?: string;
-  videoUrl?: string;
+  videoRetentionDaysAfterExpiry: number;
   videoDeletedAt?: string | null;
   active: boolean;
   createdAt: string;
-  titleTranslations?: Partial<Record<ClientPreferredLang, string>>;
-  descriptionTranslations?: Partial<Record<ClientPreferredLang, string>>;
+}
+
+export interface StylistLeaveRecord {
+  id: string;
+  salonId: string;
+  stylistName: string;
+  date: string;
+  startTime?: string;
+  endTime?: string;
+  fullDay?: boolean;
+  reason?: string;
+  createdAt: string;
+}
+
+export interface MonthlyUsageMeter {
+  billingMonth: string;
+  planTier: SalonPackageTier;
+  monthlyLimit: number;
+  graceLimit: number;
+  billableBookings: number;
+  overageBookings: number;
+  remainingInPlan: number;
+  pctUsed: number;
+  status: 'OK' | 'WARN_80' | 'WARN_90' | 'GRACE' | 'BLOCKED';
 }
 
 export interface RetentionSettings {
   salonId: string;
+  publicCode: string;
   salonName: string;
   ownerName: string;
+  ownerAuthPhone: string;
+  publicContactPhone: string;
+  publicWhatsappPhone?: string;
   whatsappPhone: string;
+  whatsappAddonEnabled?: boolean;
+  metaPhoneNumberId?: string;
   countryCode: string;
+  timezoneIana?: string;
   timezoneOffsetHours: number;
   currency: string;
   currencySymbol: string;
+  defaultLang?: ClientPreferredLang;
+  regionConfirmedByOwner?: boolean;
+  packageTier: SalonPackageTier;
+  billingStatus: SalonBillingStatus;
   salonCategory?: SalonCategory;
-  enabledServices?: SalonServiceRate[];
-  address?: string;
-  googleMapsUrl?: string;
-  operatingHours?: SalonOperatingHours;
-  enabledClientLanguages?: ClientPreferredLang[];
-  videoRetentionDaysAfterExpiry?: number;
-  packageTier?: SalonPackageTier;
-  billingStatus?: SalonBillingStatus;
   counterSleptAt?: string | null;
-
-  // Module 2: Automated 9:00 AM Birthday & Special Event Offers
   birthdayEnabled: boolean;
   birthdayEventName?: string;
   birthdayDiscountPct: number;
   birthdayFixedDiscount: number;
   birthdayGiftService: string;
   birthdayMessageTemplate: string;
-
-  // Module 3: Automated 30-Day Dormant Client Win-Back Engine
   winbackEnabled: boolean;
   winbackDays: number;
   winbackDiscountPct: number;
   winbackFixedDiscount?: number;
   winbackAddonService: string;
   winbackMessageTemplate: string;
-
-  // Module 4: Post-Service Google Review & Rating Booster (T+2 Hours)
   reviewBoosterEnabled: boolean;
   googleReviewUrl: string;
-  updatedAt: string;
-}
-
-export interface PendingBarberReroute {
-  requestedBarber: string;
-  requestedTimeSlot: string;
-  requestedMinutes: number;
-  services: string;
-  alternatives: Array<{
-    index: string;
-    type: 'ALT_BARBER' | 'NEXT_SLOT';
-    barberName: string;
-    timeSlot: string;
-  }>;
-}
-
-export interface PendingRescheduleSelection {
-  requestedAt: string;
-  preferredService: string;
-  alternatives: Array<{
-    index: string;
-    barberName: string;
-    timeSlot: string;
-    dateLabel: string;
-  }>;
+  address?: string;
+  googleMapsUrl?: string;
+  operatingHours?: SalonOperatingHours;
+  enabledClientLanguages?: ClientPreferredLang[];
+  videoRetentionDaysAfterExpiry?: number;
+  enabledServices?: SalonServiceRate[];
+  updatedAt?: string;
 }
 
 export interface ConciergeClientProfile {
@@ -135,14 +136,38 @@ export interface ConciergeClientProfile {
   phone: string;
   preferredLanguage: ClientPreferredLang | null;
   awaitingLanguageSelection: boolean;
-  birthDate: string; // Optional DD/MM e.g. "14/11" or ""
-  lastCompletedVisitAt: string | null; // ISO timestamp
+  birthDate: string;
+  lastCompletedVisitAt: string | null;
   lastBirthdaySentYear: number | null;
   lastWinbackSentAt: string | null;
   awaitingWinbackRebook: boolean;
   awaitingReviewAppointmentId: string | null;
-  pendingReroute?: PendingBarberReroute | null;
-  pendingReschedule?: PendingRescheduleSelection | null;
+  marketingOptIn?: boolean;
+  totalVisits?: number;
+  lastServiceIds?: string[];
+  lastBarberName?: string | null;
+  pendingReroute?: {
+    requestedBarber: string;
+    requestedTimeSlot: string;
+    requestedMinutes: number;
+    services: string;
+    alternatives: Array<{
+      index: string;
+      type: 'ALT_BARBER' | 'NEXT_SLOT';
+      barberName: string;
+      timeSlot: string;
+    }>;
+  } | null;
+  pendingReschedule?: {
+    requestedAt: string;
+    preferredService: string;
+    alternatives: Array<{
+      index: string;
+      barberName: string;
+      timeSlot: string;
+      dateLabel: string;
+    }>;
+  } | null;
 }
 
 export interface ConciergeAppointment {
@@ -155,22 +180,43 @@ export interface ConciergeAppointment {
   service: string;
   serviceIds?: string[];
   price: number;
-  appointmentDate?: string; // YYYY-MM-DD in salon local time
+  appointmentDate?: string;
   timeSlot: string;
   durationMins?: number;
   scheduledEndMs?: number;
-  dealId?: string;
+  dealId?: string | null;
   bookedDealTitle?: string;
+  adSource?: AdAttributionChannel;
+  idempotencyKey?: string;
+  proofHash?: string;
   flagged?: boolean;
   canceled?: boolean;
-  sourceType?: 'WHATSAPP_BOT' | 'WALK_IN_BUSY';
-  status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED';
+  sourceType?:
+    | 'WHATSAPP_BOT'
+    | 'WALK_IN_BUSY'
+    | 'WEB_QR'
+    | 'WEB_LINK'
+    | 'FB_AD'
+    | 'IG_AD'
+    | 'TIKTOK_AD'
+    | 'OWNER_WALKIN';
+  status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED';
   scheduledForIso: string;
   completedAt: string | null;
   reviewPromptSentAt: string | null;
   rating: number | null;
   ratingComment: string | null;
   reviewRoutedStatus: 'PENDING' | 'PROMPT_SENT' | 'PUBLIC_GOOGLE_SENT' | 'OWNER_INTERVENTION_NEEDED';
+}
+
+export interface BookingAuditEntry {
+  id: string;
+  salonId: string;
+  bookingId: string;
+  actorType: 'CUSTOMER' | 'OWNER' | 'SYSTEM';
+  action: 'CREATED' | 'RESCHEDULED' | 'CANCELED' | 'IN_CHAIR' | 'COMPLETED';
+  note: string;
+  createdAt: string;
 }
 
 export interface ChairLock {
@@ -186,61 +232,25 @@ export interface ChairLock {
   source: 'VOICE' | 'QUICK_PILL';
   transcript?: string;
   createdAt: string;
-}
-
-export interface WalkInQueueItem {
-  id: string;
-  salonId: string;
-  clientName: string;
-  phone: string;
-  service: string;
-  assignedStaff: string;
-  etaMinutes: number;
-  status: 'WAITING' | 'NOTIFIED' | 'SEATED';
-  createdAt: string;
-}
-
-export interface BridalBookingRecord {
-  id: string;
-  salonId: string;
-  brideOrEventName: string;
-  phone: string;
-  packageName: string;
-  eventDate: string;
-  trialDate?: string;
-  totalAmount: number;
-  advancePaid: number;
-  assignedStylist: string;
-  homeService: boolean;
-  status: 'ADVANCE_LOCKED' | 'SETTLED';
-  createdAt: string;
-}
-
-export interface ServicePackagePass {
-  id: string;
-  salonId: string;
-  clientName: string;
-  phone: string;
-  packageTitle: string;
-  totalSessions: number;
-  usedSessions: number;
-  pricePaid: number;
-  updatedAt: string;
+  busyMinutes?: number;
+  lockedAtIso?: string;
+  expiresAtMs?: number;
+  reason?: string;
 }
 
 export interface OwnerInterventionAlert {
   id: string;
   salonId: string;
+  clientId?: string;
   appointmentId: string;
-  clientId: string;
   clientName: string;
   clientPhone: string;
-  service: string;
+  service?: string;
   rating: number;
   feedbackText: string;
   status: 'OWNER_INTERVENTION_NEEDED' | 'RESOLVED';
   createdAt: string;
-  resolvedAt: string | null;
+  resolvedAt?: string | null;
 }
 
 export interface WhatsAppMessageLog {
@@ -253,24 +263,96 @@ export interface WhatsAppMessageLog {
   language: ClientPreferredLang;
   dir: 'ltr' | 'rtl';
   body: string;
-  timestamp: string;
+  timestamp?: string;
+  createdAt?: string;
   eventMetadata?: {
     eventType:
       | 'APPOINTMENT_CONFIRMED'
+      | 'BARBER_BUSY_REROUTED'
+      | 'URGENT_BRIDAL_GROOM'
       | 'REMINDER_REPLY_CONFIRMED'
       | 'REMINDER_REPLY_LATE'
       | 'REMINDER_REPLY_RESCHEDULE'
-      | 'RESCHEDULE_CONFIRMED'
-      | 'BARBER_BUSY_REROUTED'
-      | 'URGENT_BRIDAL_GROOM'
-      | 'PRICE_MENU_SENT';
+      | 'CHAIR_LOCKED_BUSY';
     barberName?: string;
     services?: string;
     timeSlot?: string;
+    dateLabel?: string;
+    clientId?: string;
   };
 }
 
+export interface LanguageMenuOption {
+  index?: string;
+  digit: '1' | '2' | '3' | '4';
+  lang: ClientPreferredLang;
+  label?: string;
+  nativeLabel: string;
+  dir?: 'ltr' | 'rtl';
+}
+
+export interface WalkInQueueItem {
+  id: string;
+  salonId: string;
+  clientName: string;
+  phone?: string;
+  service?: string;
+  serviceName?: string;
+  assignedStaff?: string;
+  assignedBarber?: string;
+  etaMinutes?: number;
+  estimatedWaitMins?: number;
+  status: 'WAITING' | 'NOTIFIED' | 'SEATED';
+  createdAt: string;
+}
+
+export interface BridalBookingRecord {
+  id: string;
+  salonId: string;
+  brideOrEventName: string;
+  phone?: string;
+  clientPhone?: string;
+  eventDate: string;
+  trialDate?: string;
+  packageName: string;
+  assignedStylist: string;
+  totalAmount: number;
+  advancePaid: number;
+  homeService?: boolean;
+  status: 'ADVANCE_LOCKED' | 'BOOKED' | 'SETTLED';
+  createdAt: string;
+}
+
+export interface ServicePackagePass {
+  id: string;
+  salonId: string;
+  clientName: string;
+  phone?: string;
+  clientPhone?: string;
+  packageTitle: string;
+  totalSessions: number;
+  usedSessions: number;
+  remainingSessions?: number;
+  pricePaid?: number;
+  amountPaid?: number;
+  status?: 'ACTIVE' | 'COMPLETED';
+  updatedAt?: string;
+  createdAt?: string;
+}
+
+export interface RetentionOpportunityItem {
+  clientId: string;
+  clientName: string;
+  clientPhone: string;
+  reason: 'BIRTHDAY' | 'DORMANT_30D';
+  daysSinceLastVisit?: number;
+  suggestedMessage: string;
+  whatsappHandoffUrl: string;
+}
+
 export interface SalonConciergeStateResponse {
+  salonId: string;
+  publicCode: string;
   region: SalonRegionCode;
   regionLabel: string;
   languageOptions: LanguageMenuOption[];
@@ -280,12 +362,23 @@ export interface SalonConciergeStateResponse {
   appointments: ConciergeAppointment[];
   chairLocks: ChairLock[];
   barbers: string[];
+  stylistLeaves: StylistLeaveRecord[];
   alerts: OwnerInterventionAlert[];
   logs: WhatsAppMessageLog[];
-  walkInQueue?: WalkInQueueItem[];
-  bridalBookings?: BridalBookingRecord[];
-  servicePackages?: ServicePackagePass[];
-  deals?: SalonDeal[];
+  walkInQueue: WalkInQueueItem[];
+  bridalBookings: BridalBookingRecord[];
+  servicePackages: ServicePackagePass[];
+  deals: SalonDeal[];
+  usageMeter: MonthlyUsageMeter;
+  opportunities: RetentionOpportunityItem[];
+  bookingAuditLog: BookingAuditEntry[];
+}
+
+export interface CustomerLanguageChoice {
+  lang: ClientPreferredLang;
+  label?: string;
+  nativeLabel: string;
+  dir: 'ltr' | 'rtl';
 }
 
 export type CustomerMenuActionId =
@@ -294,45 +387,11 @@ export type CustomerMenuActionId =
   | 'HOURS_LOCATION'
   | 'CURRENT_DEALS';
 
-export interface CustomerLanguageChoice {
-  lang: ClientPreferredLang;
-  label: string;
-  nativeLabel: string;
-  dir: 'ltr' | 'rtl';
-}
-
-export interface CustomerExperienceConfig {
-  salonId: string;
-  salonName: string;
-  whatsappPhone: string;
-  currency: string;
-  currencySymbol: string;
-  region: SalonRegionCode;
-  address: string;
-  googleMapsUrl: string;
-  operatingHours: SalonOperatingHours;
-  services: SalonServiceRate[];
-  barbers: string[];
-  activeDeals: SalonDeal[];
-  availableLanguages: CustomerLanguageChoice[];
-  defaultLanguage: ClientPreferredLang;
-  customerProfile: {
-    phone: string;
-    hasSavedName: boolean;
-    savedName: string | null;
-    preferredLanguage: ClientPreferredLang;
-  };
-  todayDate: string; // YYYY-MM-DD in salon local time
-}
-
 export interface CustomerWelcomeMenuResponse {
   language: ClientPreferredLang;
   dir: 'ltr' | 'rtl';
   welcomeText: string;
-  options: Array<{
-    id: CustomerMenuActionId;
-    label: string;
-  }>;
+  options: Array<{ id: CustomerMenuActionId; label: string }>;
   availableLanguages: CustomerLanguageChoice[];
 }
 
@@ -341,9 +400,9 @@ export interface CustomerActionMessageResponse {
   dir: 'ltr' | 'rtl';
   action: CustomerMenuActionId | 'WELCOME';
   text: string;
-  openBookingFlow?: boolean;
   showBookCta?: boolean;
   bookCtaLabel?: string;
+  openBookingFlow?: boolean;
   welcome?: CustomerWelcomeMenuResponse;
   services?: SalonServiceRate[];
   hours?: SalonOperatingHours;
@@ -367,6 +426,7 @@ export interface CustomerSlotAvailability {
 
 export interface CustomerAvailabilityResponse {
   salonId: string;
+  publicCode: string;
   date: string;
   dayName: string;
   isOpen: boolean;
@@ -377,15 +437,56 @@ export interface CustomerAvailabilityResponse {
   barbers: string[];
 }
 
+export interface ReturningClientSnapshot {
+  clientId?: string;
+  clientName: string;
+  maskedPhone: string;
+  preferredLanguage: ClientPreferredLang;
+  totalVisits: number;
+  lastServiceIds: string[];
+  lastBarberName?: string | null;
+  marketingOptIn: boolean;
+}
+
+export interface CustomerExperienceConfig {
+  salonId: string;
+  publicCode: string;
+  salonName: string;
+  salonCategory: SalonCategory;
+  region: SalonRegionCode;
+  currency: string;
+  currencySymbol: string;
+  timezoneIana: string;
+  publicContactPhone: string;
+  publicWhatsappPhone?: string;
+  whatsappAddonEnabled: boolean;
+  address: string;
+  googleMapsUrl: string;
+  googleReviewUrl: string;
+  operatingHours: SalonOperatingHours;
+  availableLanguages: CustomerLanguageChoice[];
+  defaultLanguage: ClientPreferredLang;
+  services: SalonServiceRate[];
+  barbers: string[];
+  activeDeals: Array<SalonDeal & { dealPagePath: string }>;
+  returningClient: ReturningClientSnapshot | null;
+  todayDate: string;
+  usageStatus: MonthlyUsageMeter['status'];
+}
+
 export interface CustomerFlowBookingRequest {
-  clientPhone: string;
-  clientName?: string;
-  preferredLanguage?: ClientPreferredLang;
   serviceIds: string[];
   appointmentDate: string;
   timeSlot: string;
   barberName: string;
-  dealId?: string;
+  clientPhone?: string;
+  clientName?: string;
+  verifiedClientId?: string;
+  preferredLanguage?: ClientPreferredLang;
+  dealId?: string | null;
+  adSource?: AdAttributionChannel;
+  idempotencyKey?: string;
+  marketingOptIn?: boolean;
   isDemo?: boolean;
   demoBusyBarber?: string;
   demoBusyTimeSlot?: string;
@@ -394,8 +495,15 @@ export interface CustomerFlowBookingRequest {
 export interface CustomerFlowBookingResponse {
   ok: boolean;
   isDemo?: boolean;
-  code?: 'SLOT_UNAVAILABLE' | 'SALON_CLOSED' | 'INVALID_DEAL' | 'NAME_REQUIRED' | 'VALIDATION_ERROR';
+  code?:
+    | 'SLOT_UNAVAILABLE'
+    | 'NAME_REQUIRED'
+    | 'INVALID_DEAL'
+    | 'SALON_CLOSED'
+    | 'QUOTA_EXCEEDED'
+    | 'VALIDATION_ERROR';
   error?: string;
+  publicContactPhone?: string;
   appointment?: ConciergeAppointment;
   appliedDeal?: {
     id: string;
@@ -407,19 +515,52 @@ export interface CustomerFlowBookingResponse {
   currencySymbol?: string;
   address?: string;
   googleMapsUrl?: string;
+  bookingManagementToken?: string;
+  bookingManagementPath?: string;
+  personalReturningShareUrl?: string;
+  maskedPhone?: string;
+}
+
+export interface BookingManagementPayload {
+  ok: boolean;
+  bookingId: string;
+  bookingRef: string;
+  salonPublicCode: string;
+  salonName: string;
+  publicContactPhone: string;
+  publicWhatsappPhone?: string;
+  clientName: string;
+  maskedPhone: string;
+  service: string;
+  serviceIds: string[];
+  barberName: string;
+  appointmentDate: string;
+  timeSlot: string;
+  durationMins: number;
+  totalPrice: number;
+  currencySymbol: string;
+  status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED';
+  address: string;
+  googleMapsUrl: string;
+  googleReviewUrl: string | null;
+  preferredLanguage: ClientPreferredLang;
+  icsContent: string;
 }
 
 export interface PublicDealPageResponse {
   salonId: string;
+  publicCode: string;
   salonName: string;
+  salonCategory: SalonCategory;
+  currencySymbol: string;
   address: string;
   googleMapsUrl: string;
-  currencySymbol: string;
+  availableLanguages: CustomerLanguageChoice[];
+  defaultLanguage: ClientPreferredLang;
   deal: SalonDeal;
+  services: SalonServiceRate[];
+  matchedServices: SalonServiceRate[];
+  retentionDaysAfterExpiry?: number;
   isExpired: boolean;
   videoPurged: boolean;
-  retentionDaysAfterExpiry: number;
-  matchedServices: SalonServiceRate[];
-  availableLanguages: CustomerLanguageChoice[];
 }
-
