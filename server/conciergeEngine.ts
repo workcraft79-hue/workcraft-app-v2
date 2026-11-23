@@ -42,7 +42,11 @@ import type {
   WhatsAppMessageLog,
 } from '../src/types/concierge.js';
 import { kvGetJson, kvSetJson } from './kvBridge.js';
-import { persistPostgresSnapshotMirror, recordBookingInPostgres } from './postgresRepo.js';
+import {
+  findSalonByPublicCodeInPostgres,
+  persistPostgresSnapshotMirror,
+  recordBookingInPostgres,
+} from './postgresRepo.js';
 import {
   clampInteger,
   getSalonsAssignedToAgent,
@@ -315,15 +319,15 @@ export function detectRegionFromPhone(phone: string): {
 export function getLanguageMenuForRegion(region: SalonRegionCode): LanguageMenuOption[] {
   if (region === 'PK') {
     return [
-      { index: '1', lang: 'en', label: '1. English', dir: 'ltr' },
-      { index: '2', lang: 'roman_ur', label: '2. Roman Urdu', dir: 'ltr' },
-      { index: '3', lang: 'ur', label: '3. اردو (Urdu)', dir: 'rtl' },
+      { index: '1', digit: '1', lang: 'en', label: '1. English', nativeLabel: 'English', dir: 'ltr' },
+      { index: '2', digit: '2', lang: 'roman_ur', label: '2. Roman Urdu', nativeLabel: 'Roman Urdu', dir: 'ltr' },
+      { index: '3', digit: '3', lang: 'ur', label: '3. اردو (Urdu)', nativeLabel: 'اردو', dir: 'rtl' },
     ];
   }
   return [
-    { index: '1', lang: 'en', label: '1. English', dir: 'ltr' },
-    { index: '2', lang: 'ur', label: '2. اردو (Urdu)', dir: 'rtl' },
-    { index: '3', lang: 'ar', label: '3. العربية (Arabic)', dir: 'rtl' },
+    { index: '1', digit: '1', lang: 'en', label: '1. English', nativeLabel: 'English', dir: 'ltr' },
+    { index: '2', digit: '2', lang: 'ur', label: '2. اردو (Urdu)', nativeLabel: 'اردو', dir: 'rtl' },
+    { index: '3', digit: '3', lang: 'ar', label: '3. العربية (Arabic)', nativeLabel: 'العربية', dir: 'rtl' },
   ];
 }
 
@@ -1054,6 +1058,68 @@ export function resolveSalonIdByPublicCode(publicCode: string): string | null {
   return match ? match.salonId : null;
 }
 
+export async function resolveSalonIdByPublicCodeAsync(publicCode: string): Promise<string | null> {
+  const clean = (publicCode || '').trim();
+  if (!clean || !clean.startsWith('wc_')) {
+    return null;
+  }
+  const localMatch = resolveSalonIdByPublicCode(clean);
+  if (localMatch) return localMatch;
+
+  const pgSalon = await findSalonByPublicCodeInPostgres(clean);
+  if (!pgSalon) return null;
+
+  const store = ensureStoreLoaded();
+  const existingByCode = Object.values(store.settingsBySalon).find((s) => s.publicCode === clean);
+  if (existingByCode) return existingByCode.salonId;
+
+  const hydratedId = pgSalon.id;
+  const tier: SalonPackageTier =
+    pgSalon.planTier === 'STARTER' ||
+    pgSalon.planTier === 'PRO' ||
+    pgSalon.planTier === 'PRO++' ||
+    pgSalon.planTier === 'CUSTOM'
+      ? pgSalon.planTier
+      : 'PRO++';
+  const billingStatus: SalonBillingStatus =
+    pgSalon.billingStatus === 'PENDING_ACTIVATION' ||
+    pgSalon.billingStatus === 'PAST_DUE' ||
+    pgSalon.billingStatus === 'SUSPENDED'
+      ? pgSalon.billingStatus
+      : 'ACTIVE';
+  const base = defaultSettingsForSalon(
+    hydratedId,
+    pgSalon.salonName,
+    'Salon Owner',
+    pgSalon.publicContactPhone || pgSalon.ownerAuthPhone,
+    tier,
+    billingStatus,
+    pgSalon.salonCategory
+  );
+  store.settingsBySalon[hydratedId] = {
+    ...base,
+    salonId: hydratedId,
+    publicCode: pgSalon.publicCode,
+    ownerAuthPhone: pgSalon.ownerAuthPhone,
+    publicContactPhone: pgSalon.publicContactPhone,
+    publicWhatsappPhone: pgSalon.publicWhatsappPhone || pgSalon.publicContactPhone,
+    timezoneIana: pgSalon.timezoneIana || base.timezoneIana,
+    timezoneOffsetHours: Number.isFinite(pgSalon.timezoneOffsetHours)
+      ? pgSalon.timezoneOffsetHours
+      : base.timezoneOffsetHours,
+    currency: pgSalon.currencyCode || base.currency,
+    currencySymbol: pgSalon.currencySymbol || base.currencySymbol,
+    defaultLang: pgSalon.defaultLang || base.defaultLang,
+    enabledClientLanguages:
+      pgSalon.enabledLangs.length > 0 ? pgSalon.enabledLangs : base.enabledClientLanguages,
+    whatsappAddonEnabled: pgSalon.whatsappAddonEnabled,
+    address: pgSalon.address || base.address,
+    googleMapsUrl: pgSalon.googleMapsUrl || base.googleMapsUrl,
+    googleReviewUrl: pgSalon.googleReviewUrl || base.googleReviewUrl,
+  };
+  return hydratedId;
+}
+
 export function findSalonIdByMetaPhoneNumberId(phoneNumberId: string): string | null {
   const clean = (phoneNumberId || '').trim();
   if (!clean) return null;
@@ -1142,15 +1208,22 @@ function syncSalonSettingsToPostgres(settings: RetentionSettings) {
     salonId: settings.salonId,
     publicCode: settings.publicCode,
     salonName: settings.salonName,
+    salonCategory: settings.salonCategory,
     ownerAuthPhone: settings.ownerAuthPhone || settings.whatsappPhone,
     publicContactPhone: settings.publicContactPhone || settings.whatsappPhone,
     publicWhatsappPhone: settings.publicWhatsappPhone,
     timezoneIana: settings.timezoneIana || 'Asia/Karachi',
+    timezoneOffsetHours: settings.timezoneOffsetHours,
     currencyCode: settings.currency,
     currencySymbol: settings.currencySymbol,
+    defaultLang: settings.defaultLang,
+    enabledLangs: settings.enabledClientLanguages,
     planTier: tier,
     monthlyLimit: quota.limit,
     billingStatus: settings.billingStatus,
+    address: settings.address,
+    googleMapsUrl: settings.googleMapsUrl,
+    googleReviewUrl: settings.googleReviewUrl,
   });
 }
 
@@ -4044,8 +4117,8 @@ function getScheduleForDate(
     }
     const openMins = parseTimeSlotToMinutes(hours.fridayOpen);
     const closeMins = parseTimeSlotToMinutes(hours.fridayClose);
-    const bStart = parseTimeSlotToMinutes(hours.fridayBreakStart);
-    const bEnd = parseTimeSlotToMinutes(hours.fridayBreakEnd);
+    const bStart = parseTimeSlotToMinutes(hours.fridayBreakStart || '');
+    const bEnd = parseTimeSlotToMinutes(hours.fridayBreakEnd || '');
     return {
       isOpen: openMins >= 0 && closeMins > openMins,
       dayName,
