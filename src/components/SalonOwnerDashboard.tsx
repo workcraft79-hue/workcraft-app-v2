@@ -5691,15 +5691,22 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <a
-                  href={`/s/${encodeURIComponent(resolvedSalonPublicCode)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] inline-flex items-center gap-1.5 transition"
-                >
-                  <ExternalLink className="size-3.5" />
-                  <span>Open Web Booking</span>
-                </a>
+                {resolvedSalonPublicCode.startsWith('wc_') ? (
+                  <a
+                    href={`/s/${encodeURIComponent(resolvedSalonPublicCode)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:border-[#06B6D4] px-3.5 py-2 text-xs font-mono font-bold text-[#06B6D4] inline-flex items-center gap-1.5 transition"
+                  >
+                    <ExternalLink className="size-3.5" />
+                    <span>Open Web Booking</span>
+                  </a>
+                ) : (
+                  <span className="min-h-[44px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3.5 py-2 text-xs font-mono font-bold text-[#8B949E] inline-flex items-center gap-1.5 opacity-75">
+                    <ExternalLink className="size-3.5" />
+                    <span>Loading Booking Link...</span>
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsLiveWhatsAppDemoOpen(true)}
