@@ -8,6 +8,7 @@ import {
   addStylistLeave,
   addWalkInQueueItem,
   cancelBookingByAccessToken,
+  canSendMetaMessage,
   completeAppointmentAndRecordVisit,
   consumeServicePackageSession,
   createCustomerFlowBooking,
@@ -26,8 +27,10 @@ import {
   listSalonDeals,
   listSalonsForAgent,
   processWhatsAppWebhook,
+  recordMetaMessageSent,
   removeChairLock,
   removeStylistLeave,
+  rescheduleAppointmentByOwner,
   rescheduleBookingByAccessToken,
   resolveOwnerAlert,
   resolveSalonIdByPublicCode,
@@ -36,6 +39,7 @@ import {
   runDealExpiryAndVideoRetentionCron,
   runPostServiceReviewCron,
   runWinBackCron,
+  sanitizeClientLang,
   saveFirstTimeClientProfile,
   setCounterSleepState,
   setSalonBillingStatus,
@@ -48,6 +52,7 @@ import {
   upsertClientProfile,
   upsertServicePackage,
 } from './conciergeEngine.js';
+import type { ClientPreferredLang } from '../src/types/concierge.js';
 import {
   AuthenticatedRequest,
   checkFounderPinAttemptAllowed,
@@ -1550,10 +1555,9 @@ export function createApiApp(port = 3000): express.Express {
       }
 
       const rawLang = typeof req.query.lang === 'string' ? req.query.lang : undefined;
-      const lang =
-        rawLang === 'en' || rawLang === 'roman_ur' || rawLang === 'ur' || rawLang === 'ar'
-          ? rawLang
-          : undefined;
+      const lang: ClientPreferredLang | undefined = rawLang
+        ? sanitizeClientLang(rawLang)
+        : undefined;
       const config = getCustomerExperienceConfig(salonId, activeToken, lang);
       return res.json(config);
     } catch (err) {
@@ -1562,7 +1566,7 @@ export function createApiApp(port = 3000): express.Express {
     }
   });
 
-  // First-time QR onboarding: saves Name + Phone + opt-in, sets HttpOnly cookie & returns signed WhatsApp share link
+  // First-time QR onboarding: saves Name + Phone, sets HttpOnly cookie & returns signed WhatsApp share link
   app.post('/api/public/salons/:salonCode/client-profile', async (req, res) => {
     try {
       const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
@@ -1574,12 +1578,9 @@ export function createApiApp(port = 3000): express.Express {
       const salonCode = sanitizePlainText(req.params.salonCode, 60);
       await resolveSalonIdByPublicCodeAsync(salonCode);
       const body = req.body || {};
-      const preferredLanguage =
-        body.preferredLanguage === 'en' ||
-        body.preferredLanguage === 'roman_ur' ||
-        body.preferredLanguage === 'ur' ||
-        body.preferredLanguage === 'ar'
-          ? body.preferredLanguage
+      const preferredLanguage: ClientPreferredLang | undefined =
+        typeof body.preferredLanguage === 'string'
+          ? sanitizeClientLang(body.preferredLanguage)
           : undefined;
 
       const saved = saveFirstTimeClientProfile(salonCode, {
@@ -1596,6 +1597,7 @@ export function createApiApp(port = 3000): express.Express {
         ok: true,
         publicCode: saved.publicCode,
         personalReturningShareUrl: saved.personalReturningShareUrl,
+        availableLanguages: saved.availableLanguages,
         returningClient: saved.returningClient,
       });
     } catch (err) {
@@ -1619,12 +1621,9 @@ export function createApiApp(port = 3000): express.Express {
       }
 
       const body = req.body || {};
-      const preferredLang =
-        body.preferredLang === 'en' ||
-        body.preferredLang === 'roman_ur' ||
-        body.preferredLang === 'ur' ||
-        body.preferredLang === 'ar'
-          ? body.preferredLang
+      const preferredLang: ClientPreferredLang | undefined =
+        typeof body.preferredLang === 'string'
+          ? sanitizeClientLang(body.preferredLang)
           : undefined;
       const actionId =
         body.actionId === 'WELCOME' ||
@@ -1950,27 +1949,41 @@ export function createApiApp(port = 3000): express.Express {
       const phoneNumberId =
         inboundPhoneNumberId || (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
       let sentViaMeta = false;
+      let metaCapBlocked = false;
       if (accessToken && phoneNumberId && fromPhone) {
-        const metaRes = await fetch(
-          `https://graph.facebook.com/v20.0/${encodeURIComponent(phoneNumberId)}/messages`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              messaging_product: 'whatsapp',
-              to: fromPhone,
-              type: 'text',
-              text: { body: outcome.replyText },
-            }),
+        const capCheck = canSendMetaMessage(matchedSalonId);
+        if (!capCheck.allowed) {
+          metaCapBlocked = true;
+        } else {
+          const metaRes = await fetch(
+            `https://graph.facebook.com/v20.0/${encodeURIComponent(phoneNumberId)}/messages`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                to: fromPhone,
+                type: 'text',
+                text: { body: outcome.replyText },
+              }),
+            }
+          );
+          sentViaMeta = metaRes.ok;
+          if (sentViaMeta) {
+            recordMetaMessageSent(matchedSalonId);
           }
-        );
-        sentViaMeta = metaRes.ok;
+        }
       }
 
-      return res.status(200).json({ ok: true, sentViaMeta, routedAction: outcome.routedAction });
+      return res.status(200).json({
+        ok: true,
+        sentViaMeta,
+        ...(metaCapBlocked ? { reason: 'meta_monthly_cap_1000_reached' } : {}),
+        routedAction: outcome.routedAction,
+      });
     } catch (err) {
       console.error('Meta WhatsApp webhook processing error:', err);
       return res.status(200).json({ ok: false });
@@ -2036,6 +2049,23 @@ export function createApiApp(port = 3000): express.Express {
       );
       if (!outcome.ok) {
         return res.status(404).json({ error: outcome.error });
+      }
+      return res.json(outcome);
+    }
+  );
+
+  app.post(
+    '/api/salons/:salonId/appointments/:bookingId/reschedule',
+    requireAuth,
+    requireSalonTenantAccess(false),
+    (req, res) => {
+      const outcome = rescheduleAppointmentByOwner(
+        req.params.salonId,
+        sanitizePlainText(req.params.bookingId, 60),
+        req.body || {}
+      );
+      if (!outcome.ok) {
+        return res.status(outcome.statusCode).json({ ok: false, error: outcome.error });
       }
       return res.json(outcome);
     }
