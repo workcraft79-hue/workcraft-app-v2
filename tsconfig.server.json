@@ -10,7 +10,8 @@
     "noEmit": true
   },
   "include": [
-    "api/**/*.ts",
+    "server/vercelIndex.ts",
+    "server/vercelTranslateVoice.ts",
     "server/app.ts",
     "server/conciergeEngine.ts",
     "server/security.ts",
