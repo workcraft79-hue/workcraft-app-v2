@@ -378,6 +378,41 @@ function makeIdempotencyKey(): string {
   return `idem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+interface UpcomingDateOption {
+  date: string;
+  top: string;
+  sub: string;
+}
+
+function buildUpcomingDates(
+  baseDateStr: string,
+  copy: FlowCopy,
+  count = 10
+): UpcomingDateOption[] {
+  const parts = (baseDateStr || '').split('-').map((n) => parseInt(n, 10));
+  const start =
+    parts.length === 3 && !parts.some((n) => Number.isNaN(n))
+      ? new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0))
+      : new Date();
+  const out: UpcomingDateOption[] = [];
+  for (let i = 0; i < count; i++) {
+    const dt = new Date(start.getTime() + i * 86400000);
+    const yyyy = dt.getUTCFullYear();
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getUTCDate()).padStart(2, '0');
+    const iso = `${yyyy}-${mm}-${dd}`;
+    const top =
+      i === 0
+        ? copy.todayLabel
+        : i === 1
+        ? copy.tomorrowLabel
+        : copy.weekdaysShort[dt.getUTCDay()] || '';
+    const sub = `${dt.getUTCDate()} ${copy.monthsShort[dt.getUTCMonth()] || ''}`.trim();
+    out.push({ date: iso, top, sub });
+  }
+  return out;
+}
+
 function buildBookingIcsDataUrl(params: {
   bookingId: string;
   salonName: string;
@@ -462,6 +497,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
   const [quotaContactPhone, setQuotaContactPhone] = useState<string | null>(null);
   const [confirmedResult, setConfirmedResult] = useState<CustomerFlowBookingResponse | null>(null);
   const [availabilityReloadTick, setAvailabilityReloadTick] = useState(0);
+  const [configReloadTick, setConfigReloadTick] = useState(0);
   const [copiedLocation, setCopiedLocation] = useState(false);
   const [copiedShareLink, setCopiedShareLink] = useState(false);
 
@@ -484,6 +520,11 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
 
   useEffect(() => {
     let cancelled = false;
+    if (!effectiveSalonCode || !effectiveSalonCode.trim()) {
+      setLoadingConfig(false);
+      setErrorMsg('Invalid or missing salon booking link.');
+      return;
+    }
     setLoadingConfig(true);
     setErrorMsg(null);
     const params = new URLSearchParams();
@@ -493,7 +534,27 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
       `/api/public/salons/${encodeURIComponent(effectiveSalonCode)}/customer-experience?${params.toString()}`,
       { credentials: 'include' }
     )
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load salon'))))
+      .then(async (res) => {
+        const raw = await res.text();
+        let parsed: Record<string, unknown> | null = null;
+        try {
+          parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+        } catch {
+          parsed = null;
+        }
+        if (!res.ok) {
+          const msg =
+            (parsed && typeof parsed.error === 'string' && parsed.error) ||
+            (res.status === 404
+              ? 'This salon booking link could not be found or has changed.'
+              : `Booking service returned HTTP ${res.status}. Please retry in a moment.`);
+          throw new Error(msg);
+        }
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('Booking service returned an unexpected response.');
+        }
+        return parsed as unknown as CustomerExperienceConfig;
+      })
       .then((data: CustomerExperienceConfig) => {
         if (cancelled) return;
         setConfig(data);
@@ -523,8 +584,14 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
           return first ? [first.id || first.name] : [];
         });
       })
-      .catch(() => {
-        if (!cancelled) setErrorMsg('Unable to load salon booking details.');
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          const msg =
+            err instanceof Error && err.message
+              ? err.message
+              : 'Unable to load salon booking details.';
+          setErrorMsg(msg);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingConfig(false);
@@ -532,7 +599,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [effectiveSalonCode, initialDealId, cToken]);
+  }, [effectiveSalonCode, initialDealId, cToken, configReloadTick]);
 
   const activeDeal: SalonDeal | null = useMemo(() => {
     if (!config || !initialDealId) return null;
@@ -877,8 +944,45 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
   if (!config) {
     return (
       <div className={containerClass}>
-        <div className="w-full max-w-md mx-auto p-6 text-center text-sm text-[#F85149]">
-          {errorMsg || 'Salon booking Flow unavailable.'}
+        <div className="w-full max-w-md mx-auto my-auto p-6">
+          <div className="rounded-2xl border border-[#222E35] bg-[#111B21] p-6 text-center space-y-4 shadow-xl">
+            <img
+              src={LOGO_URL}
+              alt="WorkCraft"
+              className="size-12 mx-auto bg-transparent object-contain"
+            />
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 text-xs font-mono font-bold uppercase tracking-wider text-[#F85149]">
+                <AlertCircle className="size-4 shrink-0" />
+                <span>Web Booking Unavailable</span>
+              </div>
+              <p className="text-sm text-[#E9EDEF] font-sans">
+                {errorMsg || 'Unable to load salon booking details right now.'}
+              </p>
+              <p className="text-[11px] font-mono text-[#8696A0]">
+                Booking Code: {effectiveSalonCode || 'Missing'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setConfigReloadTick((n) => n + 1)}
+                className="min-h-[42px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-4 py-2 text-xs font-mono font-black uppercase tracking-wide inline-flex items-center gap-1.5 transition"
+              >
+                <RotateCcw className="size-3.5" />
+                <span>Retry Booking Flow</span>
+              </button>
+              {onClose && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="min-h-[42px] rounded-xl border border-[#2A3942] bg-[#202C33] px-4 py-2 text-xs font-mono font-bold text-[#E9EDEF]"
+                >
+                  Close
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     );
