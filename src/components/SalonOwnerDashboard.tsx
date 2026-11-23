@@ -67,7 +67,11 @@ import {
 } from '../data/portalData';
 import { Contact, SalonProfile } from '../types';
 import type { AuthUser } from '../types/auth';
-import type { SalonConciergeStateResponse, SalonPackageTier } from '../types/concierge';
+import type {
+  CustomerAvailabilityResponse,
+  SalonConciergeStateResponse,
+  SalonPackageTier,
+} from '../types/concierge';
 import { generate214Contacts } from '../data/mockData';
 import {
   getLocalizedPackageName,
@@ -3859,6 +3863,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       | 'REMINDER_REPLY_LATE'
       | 'REMINDER_REPLY_RESCHEDULE'
       | 'RESCHEDULE_CONFIRMED'
+      | 'APPOINTMENT_CANCELED'
       | 'PRICE_MENU_SENT'
       | 'BARBER_BUSY_REROUTED'
       | 'CHAIR_LOCKED_BUSY'
@@ -3887,6 +3892,7 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     const isUrgent =
       eventType === 'REMINDER_REPLY_LATE' ||
       eventType === 'REMINDER_REPLY_RESCHEDULE' ||
+      eventType === 'APPOINTMENT_CANCELED' ||
       eventType === 'URGENT_BRIDAL_GROOM';
 
     const localizedServiceText =
@@ -3909,8 +3915,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           ? `${crossLangPrefix}Busy reroute sent! ${clientName} asked for ${barberName} at ${timeSlot}, and WhatsApp bot offered free alternative barbers.`
           : eventType === 'PRICE_MENU_SENT'
           ? `${crossLangPrefix}Price list sent on WhatsApp to ${clientName}.`
+          : eventType === 'APPOINTMENT_CANCELED'
+          ? `${crossLangPrefix}Attention! Booking canceled. ${clientName} canceled the ${timeSlot} appointment with ${barberName}. That chair is now free.`
           : eventType === 'RESCHEDULE_CONFIRMED'
-          ? `${crossLangPrefix}Reschedule confirmed! ${clientName} picked ${timeSlot} with ${barberName}.`
+          ? `${crossLangPrefix}Reschedule confirmed! ${clientName} moved their appointment to ${timeSlot} with ${barberName}.`
           : eventType === 'APPOINTMENT_CONFIRMED'
           ? `${crossLangPrefix}Attention! Appointment confirmed. ${clientName} wants barber ${barberName}. Services: ${localizedServiceText}, for ${timeSlot}. ${translatedRemark}`
           : eventType === 'REMINDER_REPLY_CONFIRMED'
@@ -3925,6 +3933,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           ? `${crossLangPrefix}خودکار ری راؤٹ! ${clientName} نے ${timeSlot} پر ${barberName} مانگا، بوٹ نے متبادل خالی باربرز بھیج دیے ہیں۔`
           : eventType === 'PRICE_MENU_SENT'
           ? `${crossLangPrefix}${clientName} کو واٹس ایپ پر ریٹ لسٹ اور سروس مینو بھیج دیا گیا ہے۔`
+          : eventType === 'APPOINTMENT_CANCELED'
+          ? `${crossLangPrefix}توجہ فرمائیں! بکنگ منسوخ ہو گئی۔ ${clientName} نے ${barberName} کے ساتھ ${timeSlot} کی اپائنٹمنٹ منسوخ کر دی ہے۔ کرسی اب خالی ہے۔`
           : eventType === 'RESCHEDULE_CONFIRMED'
           ? `${crossLangPrefix}نیا وقت کنفرم! ${clientName} نے ${barberName} کے ساتھ ${timeSlot} کا نیا سلاٹ منتخب کر لیا ہے۔`
           : eventType === 'APPOINTMENT_CONFIRMED'
@@ -3941,6 +3951,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           ? `تحويل تلقائي! طلب ${clientName} الحلاق ${barberName} الساعة ${timeSlot} وتم إرسال الحلاقين المتاحين.`
           : eventType === 'PRICE_MENU_SENT'
           ? `تم إرسال قائمة الأسعار تلقائياً عبر واتساب إلى ${clientName}.`
+          : eventType === 'APPOINTMENT_CANCELED'
+          ? `تنبيه! تم إلغاء الحجز. قام ${clientName} بإلغاء موعد ${timeSlot} مع ${barberName} وأصبح المقعد متاحاً الآن.`
           : eventType === 'RESCHEDULE_CONFIRMED'
           ? `تم تأكيد إعادة الجدولة! اختار ${clientName} الموعد الجديد ${timeSlot} مع ${barberName}.`
           : eventType === 'APPOINTMENT_CONFIRMED'
@@ -3963,9 +3975,11 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         : 'REPLY_CONFIRMED';
 
     const summaryLabel =
-      eventType === 'APPOINTMENT_CONFIRMED' ||
-      eventType === 'RESCHEDULE_CONFIRMED' ||
-      eventType === 'URGENT_BRIDAL_GROOM'
+      eventType === 'APPOINTMENT_CANCELED'
+        ? `Canceled ${timeSlot} · Barber: ${barberName} · ${clientName}`
+        : eventType === 'APPOINTMENT_CONFIRMED' ||
+          eventType === 'RESCHEDULE_CONFIRMED' ||
+          eventType === 'URGENT_BRIDAL_GROOM'
         ? `${
             eventType === 'URGENT_BRIDAL_GROOM'
               ? 'URGENT Bridal/Groom'
@@ -4040,7 +4054,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       return;
     }
 
-    if (voiceFilter === 'ALL' || isUrgent || eventType === 'APPOINTMENT_CONFIRMED') {
+    if (
+      voiceFilter === 'ALL' ||
+      isUrgent ||
+      eventType === 'APPOINTMENT_CONFIRMED' ||
+      eventType === 'RESCHEDULE_CONFIRMED'
+    ) {
       speakHandsFree(spokenText, effectiveOwnerLang);
     }
   };
@@ -4160,27 +4179,46 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     const newAppts = nextState.appointments.filter((a) => !seenApptIdsRef.current.has(a.id));
     if (newAppts.length > 0) {
       newAppts.forEach((a) => seenApptIdsRef.current.add(a.id));
-      setBookings((prev) => {
-        const existingIds = new Set(prev.map((b) => b.id));
-        const additions: BookingRecord[] = newAppts
-          .filter((a) => !existingIds.has(a.id))
-          .map((a) => ({
-            id: a.id,
-            clientName: a.clientName,
-            barberName: a.barberName,
-            phone: a.clientPhone,
-            service: a.bookedDealTitle ? `${a.service} · ${a.bookedDealTitle}` : a.service,
-            price: a.price,
-            timeSlot: a.appointmentDate ? `${a.appointmentDate} · ${a.timeSlot}` : a.timeSlot,
-            durationMins: a.durationMins || 35,
-            scheduledEndMs: a.scheduledEndMs || Date.now() + (a.durationMins || 35) * 60000,
-            sourceType: a.sourceType || 'WHATSAPP_BOT',
-            chairLabel: barberChairs[a.barberName],
-            status: a.status,
-          }));
-        return additions.length > 0 ? [...additions, ...prev] : prev;
-      });
     }
+
+    const serverApptById = new Map(nextState.appointments.map((a) => [a.id, a]));
+    setBookings((prev) => {
+      const updatedExisting = prev
+        .map((b) => {
+          const srv = serverApptById.get(b.id);
+          if (!srv) return b;
+          const nextSlot = srv.appointmentDate ? `${srv.appointmentDate} · ${srv.timeSlot}` : srv.timeSlot;
+          return {
+            ...b,
+            barberName: srv.barberName,
+            chairLabel: barberChairs[srv.barberName] || b.chairLabel,
+            timeSlot: nextSlot,
+            status: srv.status,
+            canceled: srv.canceled || srv.status === 'CANCELED',
+            scheduledEndMs: srv.scheduledEndMs || b.scheduledEndMs,
+          };
+        })
+        .filter((b) => !b.canceled && b.status !== 'CANCELED');
+
+      const existingIds = new Set(updatedExisting.map((b) => b.id));
+      const additions: BookingRecord[] = newAppts
+        .filter((a) => !existingIds.has(a.id) && a.status !== 'CANCELED' && !a.canceled)
+        .map((a) => ({
+          id: a.id,
+          clientName: a.clientName,
+          barberName: a.barberName,
+          phone: a.clientPhone,
+          service: a.bookedDealTitle ? `${a.service} · ${a.bookedDealTitle}` : a.service,
+          price: a.price,
+          timeSlot: a.appointmentDate ? `${a.appointmentDate} · ${a.timeSlot}` : a.timeSlot,
+          durationMins: a.durationMins || 35,
+          scheduledEndMs: a.scheduledEndMs || Date.now() + (a.durationMins || 35) * 60000,
+          sourceType: a.sourceType || 'WHATSAPP_BOT',
+          chairLabel: barberChairs[a.barberName],
+          status: a.status,
+        }));
+      return [...additions, ...updatedExisting];
+    });
 
     const newInboundLogs = nextState.logs.filter((l) => {
       if (seenLogIdsRef.current.has(l.id)) return false;
@@ -4409,6 +4447,128 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       }
     } catch {
       setMaintToast('Could not remove stylist leave.');
+    }
+  };
+
+  // Owner Reschedule Modal state + live availability loader
+  const [reschedBookingTarget, setReschedBookingTarget] = useState<BookingRecord | null>(null);
+  const [ownerReschedDate, setOwnerReschedDate] = useState<string>(
+    () => new Date().toISOString().slice(0, 10)
+  );
+  const [ownerReschedAvailability, setOwnerReschedAvailability] =
+    useState<CustomerAvailabilityResponse | null>(null);
+  const [loadingOwnerReschedSlots, setLoadingOwnerReschedSlots] = useState(false);
+  const [ownerReschedSlot, setOwnerReschedSlot] = useState('');
+  const [ownerReschedBarber, setOwnerReschedBarber] = useState('');
+  const [submittingOwnerResched, setSubmittingOwnerResched] = useState(false);
+  const [ownerReschedError, setOwnerReschedError] = useState<string | null>(null);
+
+  const openOwnerRescheduleModal = (booking: BookingRecord) => {
+    const serverAppt = conciergeState?.appointments?.find((a) => a.id === booking.id);
+    const dateFromSlotMatch = booking.timeSlot.match(/^(\d{4}-\d{2}-\d{2})\s*·\s*(.+)$/);
+    const initialDate =
+      serverAppt?.appointmentDate ||
+      (dateFromSlotMatch ? dateFromSlotMatch[1] : new Date().toISOString().slice(0, 10));
+    const initialSlot = serverAppt?.timeSlot || (dateFromSlotMatch ? dateFromSlotMatch[2] : booking.timeSlot);
+    setReschedBookingTarget(booking);
+    setOwnerReschedDate(initialDate);
+    setOwnerReschedSlot(initialSlot);
+    setOwnerReschedBarber(booking.barberName);
+    setOwnerReschedError(null);
+  };
+
+  useEffect(() => {
+    if (!reschedBookingTarget || !ownerReschedDate || !resolvedSalonPublicCode) return;
+    let cancelled = false;
+    setLoadingOwnerReschedSlots(true);
+    const params = new URLSearchParams({
+      date: ownerReschedDate,
+      durationMins: String(reschedBookingTarget.durationMins || 35),
+    });
+    fetch(
+      `/api/public/salons/${encodeURIComponent(resolvedSalonPublicCode)}/availability?${params.toString()}`
+    )
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed availability'))))
+      .then((data: CustomerAvailabilityResponse) => {
+        if (cancelled) return;
+        setOwnerReschedAvailability(data);
+        const openSlots = data.slots.filter((s) => s.availableBarberCount > 0);
+        const chosen = openSlots.find((s) => s.timeSlot === ownerReschedSlot) || openSlots[0] || data.slots[0];
+        if (chosen) {
+          setOwnerReschedSlot(chosen.timeSlot);
+          const freeBarbers = chosen.barbers.filter((b) => b.available);
+          const keep = freeBarbers.find(
+            (b) => b.name === (ownerReschedBarber || reschedBookingTarget.barberName)
+          );
+          setOwnerReschedBarber(keep?.name || freeBarbers[0]?.name || '');
+        } else {
+          setOwnerReschedSlot('');
+          setOwnerReschedBarber('');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setOwnerReschedAvailability(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOwnerReschedSlots(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reschedBookingTarget, ownerReschedDate, resolvedSalonPublicCode]);
+
+  const handleConfirmOwnerReschedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reschedBookingTarget || !ownerReschedDate || !ownerReschedSlot || !ownerReschedBarber) return;
+    setSubmittingOwnerResched(true);
+    setOwnerReschedError(null);
+    const formattedSlot = `${ownerReschedDate} · ${ownerReschedSlot}`;
+    try {
+      const res = await fetch(
+        `/api/salons/${encodeURIComponent(currentSalon.id)}/appointments/${encodeURIComponent(
+          reschedBookingTarget.id
+        )}/reschedule`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            appointmentDate: ownerReschedDate,
+            timeSlot: ownerReschedSlot,
+            barberName: ownerReschedBarber,
+          }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.ok) {
+        if (data.state) setConciergeState(data.state);
+      } else if (res.status !== 404) {
+        setOwnerReschedError(data?.error || 'Could not reschedule slot right now.');
+        setSubmittingOwnerResched(false);
+        return;
+      }
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.id === reschedBookingTarget.id
+            ? {
+                ...b,
+                timeSlot: formattedSlot,
+                barberName: ownerReschedBarber,
+                chairLabel: barberChairs[ownerReschedBarber] || b.chairLabel,
+              }
+            : b
+        )
+      );
+      setMaintToast(
+        `✓ Rescheduled ${reschedBookingTarget.clientName} to ${formattedSlot} (${ownerReschedBarber}).`
+      );
+      setTimeout(() => setMaintToast(null), 5000);
+      setReschedBookingTarget(null);
+    } catch {
+      setOwnerReschedError('Unable to reach server while rescheduling.');
+    } finally {
+      setSubmittingOwnerResched(false);
     }
   };
 
@@ -6358,7 +6518,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                         )}
 
                         {booking.status !== 'COMPLETED' ? (
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {booking.status === 'CONFIRMED' && (
+                              <button
+                                type="button"
+                                onClick={() => openOwnerRescheduleModal(booking)}
+                                className="min-h-[48px] rounded-xl border border-[#06B6D4] bg-[#0D2138] hover:bg-[#06B6D4]/20 px-3 py-2 text-xs font-mono font-bold text-[#06B6D4] inline-flex items-center gap-1.5 transition"
+                              >
+                                <RefreshCw className="size-3.5" />
+                                <span>Reschedule</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleUpdateStatus(booking.id, 'COMPLETED')}
@@ -6369,11 +6539,12 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                             <button
                               type="button"
                               onClick={() => handleUpdateStatus(booking.id, 'CANCELED')}
-                              className="min-h-[48px] rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#5e2223] px-2.5 py-2 text-xs font-mono font-bold text-[#F85149] transition"
+                              className="min-h-[48px] rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#5e2223] px-3 py-2 text-xs font-mono font-bold text-[#F85149] inline-flex items-center gap-1 transition"
                               title="Cancel booking"
                               aria-label="Cancel booking"
                             >
                               <X className="size-4" />
+                              <span>Cancel</span>
                             </button>
                           </div>
                         ) : (
@@ -8778,6 +8949,142 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           </div>
         </div>
       )}
+      {reschedBookingTarget && (
+        <div
+          className="fixed inset-0 z-[99] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <form
+            onSubmit={handleConfirmOwnerReschedule}
+            className="w-full max-w-lg rounded-2xl border border-[#30363D] bg-[#161B22] p-5 space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-[#21262D] pb-3">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-wide text-[#06B6D4]">
+                  Reschedule Appointment
+                </h3>
+                <p className="text-xs text-[#8B949E] mt-0.5">
+                  {reschedBookingTarget.clientName} · {reschedBookingTarget.service}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReschedBookingTarget(null)}
+                className="size-8 rounded-lg border border-[#30363D] bg-[#0D1117] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC]"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            {ownerReschedError && (
+              <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] px-3 py-2 text-xs text-[#FCA5A5]">
+                {ownerReschedError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block space-y-1">
+                <span className="text-xs font-mono text-[#8B949E]">New Date</span>
+                <input
+                  type="date"
+                  dir="ltr"
+                  required
+                  min={new Date().toISOString().slice(0, 10)}
+                  value={ownerReschedDate}
+                  onChange={(e) => setOwnerReschedDate(e.target.value)}
+                  className="w-full min-h-[42px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-xs font-mono text-[#F0F6FC]"
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-xs font-mono text-[#8B949E]">Available Barber</span>
+                <select
+                  value={ownerReschedBarber}
+                  onChange={(e) => setOwnerReschedBarber(e.target.value)}
+                  className="w-full min-h-[42px] rounded-xl border border-[#30363D] bg-[#0D1117] px-3 text-xs text-[#F0F6FC]"
+                >
+                  {(() => {
+                    const slotObj = ownerReschedAvailability?.slots.find(
+                      (s) => s.timeSlot === ownerReschedSlot
+                    );
+                    const free = slotObj ? slotObj.barbers.filter((b) => b.available) : [];
+                    if (free.length === 0) {
+                      return <option value="">No free barber at this time</option>;
+                    }
+                    return free.map((b) => (
+                      <option key={b.name} value={b.name}>
+                        {b.name} (Available)
+                      </option>
+                    ));
+                  })()}
+                </select>
+              </label>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-xs font-mono text-[#8B949E] block">
+                Live Open Arrival Slots
+              </span>
+              {loadingOwnerReschedSlots ? (
+                <p className="text-xs font-mono text-[#8B949E]">Checking salon availability...</p>
+              ) : ownerReschedAvailability && !ownerReschedAvailability.isOpen ? (
+                <p className="text-xs text-[#F87171]">Salon is closed on this date.</p>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
+                  {(ownerReschedAvailability?.slots || []).map((slot) => {
+                    const active = slot.timeSlot === ownerReschedSlot;
+                    const full = slot.availableBarberCount === 0;
+                    return (
+                      <button
+                        key={slot.timeSlot}
+                        type="button"
+                        disabled={full}
+                        onClick={() => {
+                          setOwnerReschedSlot(slot.timeSlot);
+                          const free = slot.barbers.filter((b) => b.available);
+                          const keep = free.find((b) => b.name === ownerReschedBarber);
+                          setOwnerReschedBarber(keep?.name || free[0]?.name || '');
+                        }}
+                        className={`min-h-[42px] rounded-xl border px-2 py-1 text-[11px] font-mono font-bold transition ${
+                          active
+                            ? 'border-[#06B6D4] bg-[#06B6D4]/20 text-[#F0F6FC]'
+                            : full
+                            ? 'border-[#21262D] bg-[#0D1117] text-[#484F58] cursor-not-allowed'
+                            : 'border-[#30363D] bg-[#0D1117] text-[#F0F6FC] hover:border-[#06B6D4]'
+                        }`}
+                      >
+                        <span className="block">{slot.timeSlot}</span>
+                        <span className="text-[9px] text-[#06B6D4]">
+                          {slot.availableBarberCount} free
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#21262D]">
+              <button
+                type="button"
+                onClick={() => setReschedBookingTarget(null)}
+                className="min-h-[42px] rounded-xl border border-[#30363D] bg-[#0D1117] px-4 text-xs font-mono text-[#8B949E]"
+              >
+                Close
+              </button>
+              <button
+                type="submit"
+                disabled={submittingOwnerResched || !ownerReschedSlot || !ownerReschedBarber}
+                className="min-h-[42px] rounded-xl bg-[#06B6D4] hover:bg-[#0891B2] disabled:opacity-50 px-5 text-xs font-mono font-bold text-[#0D1117] uppercase transition"
+              >
+                {submittingOwnerResched ? 'Saving...' : 'Confirm Reschedule'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <CustomerWhatsAppDemoModal
         salonId={currentSalon.id}
         salonPublicCode={resolvedSalonPublicCode}
