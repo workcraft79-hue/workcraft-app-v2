@@ -4,7 +4,16 @@ export type SalonPackageTier = 'STARTER' | 'PRO' | 'PRO++' | 'CUSTOM';
 
 export type SalonBillingStatus = 'PENDING_ACTIVATION' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED';
 
-export type ClientPreferredLang = 'en' | 'roman_ur' | 'ur' | 'ar';
+export type ClientPreferredLang =
+  | 'en'
+  | 'roman_ur'
+  | 'ur'
+  | 'ar'
+  | 'it'
+  | 'ru'
+  | 'fr'
+  | 'de'
+  | 'es';
 
 export type SalonCategory = 'MENS' | 'LADIES';
 
@@ -82,6 +91,8 @@ export interface MonthlyUsageMeter {
   remainingInPlan: number;
   pctUsed: number;
   status: 'OK' | 'WARN_80' | 'WARN_90' | 'GRACE' | 'BLOCKED';
+  metaMessagesUsed?: number;
+  metaMonthlyLimit?: number;
 }
 
 export interface RetentionSettings {
@@ -268,11 +279,14 @@ export interface WhatsAppMessageLog {
   eventMetadata?: {
     eventType:
       | 'APPOINTMENT_CONFIRMED'
+      | 'APPOINTMENT_CANCELED'
       | 'BARBER_BUSY_REROUTED'
       | 'URGENT_BRIDAL_GROOM'
       | 'REMINDER_REPLY_CONFIRMED'
       | 'REMINDER_REPLY_LATE'
       | 'REMINDER_REPLY_RESCHEDULE'
+      | 'RESCHEDULE_CONFIRMED'
+      | 'PRICE_MENU_SENT'
       | 'CHAIR_LOCKED_BUSY';
     barberName?: string;
     services?: string;
