@@ -423,7 +423,7 @@ export const MyBookingPage: React.FC<MyBookingPageProps> = ({ token, onNavigate 
               href={booking.googleReviewUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="min-h-[46px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-5 text-xs font-bold inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
+              className="min-h-[46px] rounded-xl bg-[#06B6D4] hover:bg-[#0891B2] text-[#0D1117] px-5 text-xs font-bold inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 transition"
             >
               <span>Leave a Review on Google</span>
               <ExternalLink className="size-3.5" />
