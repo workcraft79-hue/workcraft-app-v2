@@ -67,16 +67,18 @@ interface ChatBubbleItem {
   bookCtaLabel?: string;
 }
 
-const DEMO_UI_LABELS: Record<
-  ClientPreferredLang,
-  {
-    mapsDirections: string;
-    copyBtn: string;
-    copiedBtn: string;
-    bookAppointment: string;
-    watchVideo: string;
-    bookDeal: string;
-  }
+const DEMO_UI_LABELS: Partial<
+  Record<
+    ClientPreferredLang,
+    {
+      mapsDirections: string;
+      copyBtn: string;
+      copiedBtn: string;
+      bookAppointment: string;
+      watchVideo: string;
+      bookDeal: string;
+    }
+  >
 > = {
   en: {
     mapsDirections: 'Google Maps Directions',
@@ -660,7 +662,7 @@ export const CustomerWhatsAppDemoModal: React.FC<CustomerWhatsAppDemoModalProps>
                     </div>
                   ) : (
                     messages.map((m) => {
-                      const labels = DEMO_UI_LABELS[m.lang] || DEMO_UI_LABELS.en;
+                      const labels = DEMO_UI_LABELS[m.lang] || DEMO_UI_LABELS.en!;
                       const shouldShowBookCta =
                         m.showBookCta ||
                         m.action === 'SERVICES_PRICES' ||
