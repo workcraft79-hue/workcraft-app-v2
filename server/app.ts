@@ -31,6 +31,7 @@ import {
   rescheduleBookingByAccessToken,
   resolveOwnerAlert,
   resolveSalonIdByPublicCode,
+  resolveSalonIdByPublicCodeAsync,
   runBirthdayCron,
   runDealExpiryAndVideoRetentionCron,
   runPostServiceReviewCron,
@@ -1530,7 +1531,7 @@ export function createApiApp(port = 3000): express.Express {
       }
 
       const salonCode = sanitizePlainText(req.params.salonCode, 60);
-      const salonId = resolveSalonIdByPublicCode(salonCode);
+      const salonId = await resolveSalonIdByPublicCodeAsync(salonCode);
       if (!salonId) {
         return res.status(404).json({ error: 'Salon booking link not found.' });
       }
@@ -1571,6 +1572,7 @@ export function createApiApp(port = 3000): express.Express {
       }
 
       const salonCode = sanitizePlainText(req.params.salonCode, 60);
+      await resolveSalonIdByPublicCodeAsync(salonCode);
       const body = req.body || {};
       const preferredLanguage =
         body.preferredLanguage === 'en' ||
@@ -1611,7 +1613,7 @@ export function createApiApp(port = 3000): express.Express {
       }
 
       const salonCode = sanitizePlainText(req.params.salonCode, 60);
-      const salonId = resolveSalonIdByPublicCode(salonCode);
+      const salonId = await resolveSalonIdByPublicCodeAsync(salonCode);
       if (!salonId) {
         return res.status(404).json({ error: 'Salon booking link not found.' });
       }
@@ -1658,7 +1660,7 @@ export function createApiApp(port = 3000): express.Express {
       }
 
       const salonCode = sanitizePlainText(req.params.salonCode, 60);
-      const salonId = resolveSalonIdByPublicCode(salonCode);
+      const salonId = await resolveSalonIdByPublicCodeAsync(salonCode);
       if (!salonId) {
         return res.status(404).json({ error: 'Salon booking link not found.' });
       }
@@ -1706,7 +1708,7 @@ export function createApiApp(port = 3000): express.Express {
       }
 
       const salonCode = sanitizePlainText(req.params.salonCode, 60);
-      const salonId = resolveSalonIdByPublicCode(salonCode);
+      const salonId = await resolveSalonIdByPublicCodeAsync(salonCode);
       if (!salonId) {
         return res.status(404).json({ ok: false, error: 'Salon booking link not found.' });
       }
@@ -1740,6 +1742,7 @@ export function createApiApp(port = 3000): express.Express {
 
       const salonCode = sanitizePlainText(req.params.salonCode, 60);
       const dealId = sanitizePlainText(req.params.dealId, 80);
+      await resolveSalonIdByPublicCodeAsync(salonCode);
       const payload = getPublicDealPayload(salonCode, dealId);
       if (!payload) {
         return res.status(404).json({ error: 'Deal or salon not found.' });
