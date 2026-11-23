@@ -81,57 +81,186 @@ export async function withPgTransaction<T>(
   }
 }
 
-export async function persistPostgresSnapshotMirror(params: {
-  salonId: string;
+export interface PostgresSalonLookupRow {
+  id: string;
   publicCode: string;
   salonName: string;
+  salonCategory: 'MENS' | 'LADIES';
   ownerAuthPhone: string;
   publicContactPhone: string;
   publicWhatsappPhone?: string;
   timezoneIana: string;
+  timezoneOffsetHours: number;
   currencyCode: string;
   currencySymbol: string;
+  defaultLang: 'en' | 'roman_ur' | 'ur' | 'ar';
+  enabledLangs: Array<'en' | 'roman_ur' | 'ur' | 'ar'>;
   planTier: string;
   monthlyLimit: number;
   billingStatus: string;
+  whatsappAddonEnabled: boolean;
+  address: string;
+  googleMapsUrl: string;
+  googleReviewUrl: string;
+}
+
+export async function persistPostgresSnapshotMirror(params: {
+  salonId: string;
+  publicCode: string;
+  salonName: string;
+  salonCategory?: string;
+  ownerAuthPhone: string;
+  publicContactPhone: string;
+  publicWhatsappPhone?: string;
+  timezoneIana: string;
+  timezoneOffsetHours?: number;
+  currencyCode: string;
+  currencySymbol: string;
+  defaultLang?: string;
+  enabledLangs?: string[];
+  planTier: string;
+  monthlyLimit: number;
+  billingStatus: string;
+  address?: string;
+  googleMapsUrl?: string;
+  googleReviewUrl?: string;
 }): Promise<void> {
   const pool = getPgPool();
   if (!pool) return;
   try {
     await pool.query(
       `INSERT INTO salons (
-         id, public_code, salon_name, owner_auth_phone, public_contact_phone,
-         public_whatsapp_phone, timezone_iana, currency_code, currency_symbol,
-         plan_tier, monthly_booking_limit, billing_status, whatsapp_addon_enabled
+         id, public_code, salon_name, salon_category, owner_auth_phone, public_contact_phone,
+         public_whatsapp_phone, timezone_iana, timezone_offset_hours, currency_code, currency_symbol,
+         default_lang, enabled_langs, plan_tier, monthly_booking_limit, billing_status,
+         whatsapp_addon_enabled, address, google_maps_url, google_review_url
        )
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, FALSE)
+       VALUES (
+         gen_random_uuid(), $1, $2, $3, $4, $5,
+         $6, $7, $8, $9, $10,
+         $11, $12::text[], $13, $14, $15,
+         FALSE, $16, $17, $18
+       )
        ON CONFLICT (public_code) DO UPDATE SET
          salon_name = EXCLUDED.salon_name,
+         salon_category = EXCLUDED.salon_category,
          public_contact_phone = EXCLUDED.public_contact_phone,
          public_whatsapp_phone = EXCLUDED.public_whatsapp_phone,
          timezone_iana = EXCLUDED.timezone_iana,
+         timezone_offset_hours = EXCLUDED.timezone_offset_hours,
          currency_code = EXCLUDED.currency_code,
          currency_symbol = EXCLUDED.currency_symbol,
+         default_lang = EXCLUDED.default_lang,
+         enabled_langs = EXCLUDED.enabled_langs,
          plan_tier = EXCLUDED.plan_tier,
          monthly_booking_limit = EXCLUDED.monthly_booking_limit,
          billing_status = EXCLUDED.billing_status,
+         address = EXCLUDED.address,
+         google_maps_url = EXCLUDED.google_maps_url,
+         google_review_url = EXCLUDED.google_review_url,
          updated_at = NOW()`,
       [
         params.publicCode,
         params.salonName,
+        params.salonCategory === 'LADIES' ? 'LADIES' : 'MENS',
         params.ownerAuthPhone,
         params.publicContactPhone,
         params.publicWhatsappPhone || null,
         params.timezoneIana,
+        Number.isFinite(params.timezoneOffsetHours) ? params.timezoneOffsetHours : 5,
         params.currencyCode,
         params.currencySymbol,
+        params.defaultLang || 'en',
+        Array.isArray(params.enabledLangs) && params.enabledLangs.length > 0
+          ? params.enabledLangs
+          : ['en', 'roman_ur', 'ur'],
         params.planTier,
         params.monthlyLimit,
         params.billingStatus,
+        params.address || '',
+        params.googleMapsUrl || '',
+        params.googleReviewUrl || '',
       ]
     );
   } catch (err) {
     console.warn('Postgres salon sync skipped (run migration 002_web_first_production.sql if tables missing):', err);
+  }
+}
+
+export async function findSalonByPublicCodeInPostgres(
+  publicCode: string
+): Promise<PostgresSalonLookupRow | null> {
+  const pool = getPgPool();
+  if (!pool) return null;
+  try {
+    const res = await pool.query<{
+      id: string;
+      public_code: string;
+      salon_name: string;
+      salon_category: string | null;
+      owner_auth_phone: string;
+      public_contact_phone: string;
+      public_whatsapp_phone: string | null;
+      timezone_iana: string | null;
+      timezone_offset_hours: string | number | null;
+      currency_code: string | null;
+      currency_symbol: string | null;
+      default_lang: string | null;
+      enabled_langs: string[] | null;
+      plan_tier: string | null;
+      monthly_booking_limit: number | null;
+      billing_status: string | null;
+      whatsapp_addon_enabled: boolean | null;
+      address: string | null;
+      google_maps_url: string | null;
+      google_review_url: string | null;
+    }>(
+      `SELECT id, public_code, salon_name, salon_category, owner_auth_phone, public_contact_phone,
+              public_whatsapp_phone, timezone_iana, timezone_offset_hours, currency_code, currency_symbol,
+              default_lang, enabled_langs, plan_tier, monthly_booking_limit, billing_status,
+              whatsapp_addon_enabled, address, google_maps_url, google_review_url
+       FROM salons
+       WHERE public_code = $1
+       LIMIT 1`,
+      [publicCode]
+    );
+    if (res.rows.length === 0) return null;
+    const row = res.rows[0];
+    const defaultLang =
+      row.default_lang === 'roman_ur' || row.default_lang === 'ur' || row.default_lang === 'ar'
+        ? row.default_lang
+        : 'en';
+    const enabledLangs = Array.isArray(row.enabled_langs)
+      ? row.enabled_langs.filter(
+          (l): l is 'en' | 'roman_ur' | 'ur' | 'ar' =>
+            l === 'en' || l === 'roman_ur' || l === 'ur' || l === 'ar'
+        )
+      : (['en', 'roman_ur', 'ur'] as Array<'en' | 'roman_ur' | 'ur' | 'ar'>);
+    return {
+      id: row.id,
+      publicCode: row.public_code,
+      salonName: row.salon_name,
+      salonCategory: row.salon_category === 'LADIES' ? 'LADIES' : 'MENS',
+      ownerAuthPhone: row.owner_auth_phone,
+      publicContactPhone: row.public_contact_phone,
+      publicWhatsappPhone: row.public_whatsapp_phone || undefined,
+      timezoneIana: row.timezone_iana || 'Asia/Karachi',
+      timezoneOffsetHours: Number(row.timezone_offset_hours ?? 5),
+      currencyCode: row.currency_code || 'PKR',
+      currencySymbol: row.currency_symbol || 'PKR ',
+      defaultLang,
+      enabledLangs,
+      planTier: row.plan_tier || 'PRO++',
+      monthlyLimit: Number(row.monthly_booking_limit ?? 3000),
+      billingStatus: row.billing_status || 'ACTIVE',
+      whatsappAddonEnabled: Boolean(row.whatsapp_addon_enabled),
+      address: row.address || '',
+      googleMapsUrl: row.google_maps_url || '',
+      googleReviewUrl: row.google_review_url || '',
+    };
+  } catch (err) {
+    console.warn('Postgres public_code lookup skipped:', err);
+    return null;
   }
 }
 
