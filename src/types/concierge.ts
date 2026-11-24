@@ -515,7 +515,8 @@ export interface CustomerFlowBookingResponse {
     | 'INVALID_DEAL'
     | 'SALON_CLOSED'
     | 'QUOTA_EXCEEDED'
-    | 'VALIDATION_ERROR';
+    | 'VALIDATION_ERROR'
+    | 'DB_UNAVAILABLE';
   error?: string;
   publicContactPhone?: string;
   appointment?: ConciergeAppointment;
