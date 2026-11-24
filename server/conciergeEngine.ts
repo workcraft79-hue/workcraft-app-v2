@@ -1324,6 +1324,7 @@ function syncSalonSettingsToPostgres(settings: RetentionSettings) {
     salonId: settings.salonId,
     publicCode: settings.publicCode,
     salonName: settings.salonName,
+    ownerName: settings.ownerName,
     salonCategory: settings.salonCategory,
     ownerAuthPhone: settings.ownerAuthPhone || settings.whatsappPhone,
     publicContactPhone: settings.publicContactPhone || settings.whatsappPhone,
@@ -5535,12 +5536,22 @@ export async function createCustomerFlowBooking(
       accessTokenHash: tokenHash,
       accessTokenExpiresAtIso: new Date(accessTokenExpiresAtMs).toISOString(),
     });
-    if (!pgCheck.ok && pgCheck.code === 'OVERLAP') {
+    if (!pgCheck.ok) {
+      if (pgCheck.code === 'OVERLAP') {
+        return {
+          statusCode: 409,
+          payload: {
+            ok: false,
+            code: 'SLOT_UNAVAILABLE',
+            error: pgCheck.error,
+          },
+        };
+      }
       return {
-        statusCode: 409,
+        statusCode: 503,
         payload: {
           ok: false,
-          code: 'SLOT_UNAVAILABLE',
+          code: 'DB_UNAVAILABLE',
           error: pgCheck.error,
         },
       };
