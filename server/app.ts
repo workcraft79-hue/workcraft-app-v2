@@ -87,7 +87,7 @@ import {
   verifyFounderPin,
   verifyOwnerLoginChallenge,
 } from './security.js';
-import { enforceRateLimit, extractClientIpKey } from './rateLimiter.js';
+import { enforceRateLimit, extractClientIpKey, isRateLimiterConfigured } from './rateLimiter.js';
 import { assertProductionDatabaseReady } from './postgresRepo.js';
 import {
   resolveTargetLocale,
@@ -332,8 +332,6 @@ function ensureKvHydrated(): Promise<void> {
   return kvHydrationPromise;
 }
 
-const telemetryRateBuckets = new Map<string, { count: number; resetAt: number }>();
-
 export function createApiApp(port = 3000): express.Express {
   const app = express();
   app.disable('x-powered-by');
@@ -398,6 +396,7 @@ export function createApiApp(port = 3000): express.Express {
       port,
       runtime: process.env.VERCEL ? 'vercel-node' : 'node',
       kvConfigured: isKvConfigured(),
+      rateLimiterConfigured: isRateLimiterConfigured(),
       postgresReady: dbReady.ok,
     });
   });
@@ -431,7 +430,14 @@ export function createApiApp(port = 3000): express.Express {
   // Initial Founder PIN setup (strictly non-production preview when no PIN is configured yet)
   app.post('/api/auth/founder-setup', async (req, res) => {
     const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
-    const rl = await enforceRateLimit(`auth:founder-setup:${ipKey}`, 5, 300);
+    const rl = await enforceRateLimit(`auth:founder-setup:${ipKey}`, 5, 300, {
+      failClosedInProd: true,
+    });
+    if (rl.unavailable) {
+      return res.status(503).json({
+        error: 'Rate limiter unavailable. Configure Upstash Redis in production.',
+      });
+    }
     if (!rl.allowed) {
       return res.status(429).json({
         error: `Too many attempts. Retry in ${rl.retryAfterSec}s.`,
@@ -463,14 +469,21 @@ export function createApiApp(port = 3000): express.Express {
     }
 
     const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
-    const rl = await enforceRateLimit(`auth:founder:${ipKey}`, 10, 60);
+    const rl = await enforceRateLimit(`auth:founder:${ipKey}`, 10, 60, {
+      failClosedInProd: true,
+    });
+    if (rl.unavailable) {
+      return res.status(503).json({
+        error: 'Distributed security rate limiter unavailable.',
+      });
+    }
     if (!rl.allowed) {
       return res.status(429).json({
         error: `Too many authentication attempts. Wait ${rl.retryAfterSec}s before retrying.`,
       });
     }
 
-    const attemptGate = checkFounderPinAttemptAllowed(ipKey);
+    const attemptGate = await checkFounderPinAttemptAllowed(ipKey);
     if (!attemptGate.allowed) {
       return res.status(429).json({
         error: `Too many incorrect Founder PIN attempts. Wait ${attemptGate.retryAfterSec}s before trying again.`,
@@ -479,13 +492,13 @@ export function createApiApp(port = 3000): express.Express {
 
     const pin = typeof req.body?.pin === 'string' ? req.body.pin : '';
     if (!verifyFounderPin(pin)) {
-      recordFounderPinFailure(ipKey);
+      await recordFounderPinFailure(ipKey);
       return res.status(401).json({
         error: 'Invalid Founder PIN.',
       });
     }
 
-    clearFounderPinFailures(ipKey);
+    await clearFounderPinFailures(ipKey);
     const founder = getFounderSessionUser();
     const token = signSessionToken(founder);
     setSessionCookie(res, token, req);
@@ -503,7 +516,12 @@ export function createApiApp(port = 3000): express.Express {
   // Standalone Salon Owner / Field Agent OTP Challenge Login (works directly on /salon or /agent URL)
   app.post('/api/auth/owner-challenge', async (req, res) => {
     const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
-    const rl = await enforceRateLimit(`auth:owner-challenge:${ipKey}`, 8, 300);
+    const rl = await enforceRateLimit(`auth:owner-challenge:${ipKey}`, 8, 300, {
+      failClosedInProd: true,
+    });
+    if (rl.unavailable) {
+      return res.status(503).json({ error: 'Distributed security rate limiter unavailable.' });
+    }
     if (!rl.allowed) {
       return res.status(429).json({
         error: `Too many verification code requests. Try again in ${rl.retryAfterSec}s.`,
@@ -522,7 +540,12 @@ export function createApiApp(port = 3000): express.Express {
 
   app.post('/api/auth/owner-verify', async (req, res) => {
     const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
-    const rl = await enforceRateLimit(`auth:owner-verify:${ipKey}`, 15, 300);
+    const rl = await enforceRateLimit(`auth:owner-verify:${ipKey}`, 15, 300, {
+      failClosedInProd: true,
+    });
+    if (rl.unavailable) {
+      return res.status(503).json({ error: 'Distributed security rate limiter unavailable.' });
+    }
     if (!rl.allowed) {
       return res.status(429).json({
         error: `Too many verification attempts. Try again in ${rl.retryAfterSec}s.`,
@@ -649,7 +672,19 @@ export function createApiApp(port = 3000): express.Express {
   });
 
   // Complete Agent Enrollment -> Locks invite token permanently & issues AGENT session
-  app.post('/api/agent/enroll/complete', (req, res) => {
+  app.post('/api/agent/enroll/complete', async (req, res) => {
+    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+    const rl = await enforceRateLimit(`auth:agent-enroll:${ipKey}`, 10, 300, {
+      failClosedInProd: true,
+    });
+    if (rl.unavailable) {
+      return res.status(503).json({ error: 'Distributed security rate limiter unavailable.' });
+    }
+    if (!rl.allowed) {
+      return res.status(429).json({
+        error: `Too many enrollment attempts. Retry after ${rl.retryAfterSec}s.`,
+      });
+    }
     // Invisible CSS Honeypot check
     const honeypot =
       (typeof req.body?.websiteUrl === 'string' && req.body.websiteUrl.trim()) ||
@@ -715,7 +750,12 @@ export function createApiApp(port = 3000): express.Express {
   app.post('/api/onboarding/complete', async (req, res) => {
     try {
       const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
-      const rl = await enforceRateLimit(`onboarding:${ipKey}`, 10, 3600);
+      const rl = await enforceRateLimit(`onboarding:${ipKey}`, 10, 3600, {
+        failClosedInProd: true,
+      });
+      if (rl.unavailable) {
+        return res.status(503).json({ error: 'Distributed security rate limiter unavailable.' });
+      }
       if (!rl.allowed) {
         return res.status(429).json({
           error: `Too many onboarding submissions. Retry after ${rl.retryAfterSec}s.`,
@@ -1315,18 +1355,35 @@ export function createApiApp(port = 3000): express.Express {
     }
   });
 
-  // Scheduled Daily Autonomous Cron Handler (Vercel Cron Authorization or Webhook Secret)
+  // Scheduled Daily Autonomous Cron Handler (Fail-Closed Timing-Safe Authorization)
   app.get('/api/cron/daily-maintenance', (req, res) => {
     const cronSecret = (process.env.CRON_SECRET || '').trim();
-    const authHeader = req.header('authorization') || '';
-    const webhookHeader = req.header('x-workcraft-webhook-secret') || '';
+    const webhookSecret = (process.env.WORKCRAFT_WEBHOOK_SECRET || '').trim();
+    if (!cronSecret && !webhookSecret) {
+      return res.status(503).json({
+        error: 'CRON_SECRET is not configured on server.',
+      });
+    }
+
+    const timingSafeMatch = (candidate: string, expected: string): boolean => {
+      if (!candidate || !expected) return false;
+      const a = crypto.createHash('sha256').update(candidate).digest();
+      const b = crypto.createHash('sha256').update(expected).digest();
+      return crypto.timingSafeEqual(a, b);
+    };
+
+    const authHeader = (req.header('authorization') || '').trim();
+    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const webhookHeader = (req.header('x-workcraft-webhook-secret') || '').trim();
+
     const validCron =
-      (cronSecret && authHeader === `Bearer ${cronSecret}`) ||
-      (process.env.WORKCRAFT_WEBHOOK_SECRET &&
-        webhookHeader === process.env.WORKCRAFT_WEBHOOK_SECRET);
-    if (process.env.VERCEL && !validCron && (cronSecret || process.env.WORKCRAFT_WEBHOOK_SECRET)) {
+      (cronSecret && timingSafeMatch(bearerToken, cronSecret)) ||
+      (webhookSecret && timingSafeMatch(webhookHeader, webhookSecret));
+
+    if (!validCron) {
       return res.status(401).json({ error: 'Unauthorized cron trigger.' });
     }
+
     const usage = sweepExpiredVoiceBlobs();
     const dealsSweep = runDealExpiryAndVideoRetentionCron();
     return res.json({
@@ -2217,71 +2274,134 @@ export function createApiApp(port = 3000): express.Express {
     }
   );
 
-  // Authoritative 4-Layer Onboarding Payment Verification (Founder / Agent / Self-Serve Salon)
-  app.post('/api/onboarding/verify-payment', (req, res) => {
-    try {
-      const body = req.body || {};
-      const packageId = sanitizePlainText(body.packageId, 24) || 'STARTER';
-      const currency = sanitizePlainText(body.currency, 8) || 'PKR';
-      const amount = Number(body.amount || 0);
-      const method = sanitizePlainText(body.method, 80) || 'EasyPaisa';
-      const tid = sanitizePlainText(body.tid, 80);
-      const salonName = sanitizePlainText(body.salonName, 100) || 'New Partner Salon';
+  // Authenticated Payment Receipt Submission (Founder Approval Required for Activation)
+  app.post(
+    '/api/onboarding/verify-payment',
+    requireAuth,
+    requireRole('FOUNDER', 'AGENT', 'SALON_OWNER'),
+    async (req: AuthenticatedRequest, res) => {
+      try {
+        const user = req.authUser!;
+        const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+        const rl = await enforceRateLimit(`pay:verify:${user.userId}:${ipKey}`, 15, 300, {
+          failClosedInProd: true,
+        });
+        if (rl.unavailable) {
+          return res.status(503).json({
+            verified: false,
+            error: 'Payment verification rate limiter unavailable.',
+          });
+        }
+        if (!rl.allowed) {
+          return res.status(429).json({
+            verified: false,
+            error: `Too many payment submissions. Retry after ${rl.retryAfterSec}s.`,
+          });
+        }
 
-      const verification = verifyAuthoritativeWorkcraftPayment({
-        kind: 'SETUP',
-        tier: packageId,
-        currency,
-        submittedAmount: amount,
-        method,
-        tid,
-      });
+        const body = req.body || {};
+        const packageId = sanitizePlainText(body.packageId, 24) || 'STARTER';
+        const currency = sanitizePlainText(body.currency, 8) || 'PKR';
+        const amount = Number(body.amount || 0);
+        const method = sanitizePlainText(body.method, 80) || 'EasyPaisa';
+        const tid = sanitizePlainText(body.tid, 80);
+        const salonName = sanitizePlainText(body.salonName, 100) || 'New Partner Salon';
+        const requestedSalonId =
+          typeof body.salonId === 'string' && body.salonId.trim()
+            ? sanitizePlainText(body.salonId, 80)
+            : 'onboarding';
 
-      if (!verification.ok) {
-        return res.status(400).json({ verified: false, error: verification.error });
+        if (user.userRole === 'SALON_OWNER' && requestedSalonId !== 'onboarding') {
+          const allowed = new Set<string>([
+            ...(user.salonId ? [user.salonId] : []),
+            ...(Array.isArray(user.allowedSalonIds) ? user.allowedSalonIds : []),
+          ]);
+          if (!allowed.has(requestedSalonId)) {
+            return res.status(403).json({
+              verified: false,
+              error: 'Forbidden: cannot submit payment for an unowned salon.',
+            });
+          }
+        }
+
+        const verification = verifyAuthoritativeWorkcraftPayment({
+          kind: 'SETUP',
+          tier: packageId,
+          currency,
+          submittedAmount: amount,
+          method,
+          tid,
+          salonId: requestedSalonId,
+        });
+
+        if (!verification.ok) {
+          return res.status(400).json({ verified: false, error: verification.error });
+        }
+
+        const isFounder = user.userRole === 'FOUNDER';
+        const submissionStatus = isFounder ? 'APPROVED' : 'PENDING_REVIEW';
+        const entry = recordSalonFinancialPayment({
+          type: 'ONBOARDING_SETUP',
+          salonId: requestedSalonId,
+          salonName,
+          agentId: user.userRole === 'AGENT' ? user.agentId || undefined : undefined,
+          amount: verification.verifiedAmount,
+          currency: verification.currency,
+          method,
+          referenceTid: verification.normalizedTid,
+          note: `${submissionStatus}: Setup payment (${packageId}) by ${user.userRole} ➔ ${verification.officialDestination}`,
+        });
+
+        return res.status(201).json({
+          verified: true,
+          status: submissionStatus,
+          activationStatus: isFounder ? 'ACTIVE' : 'PENDING_FOUNDER_APPROVAL',
+          requiresFounderApproval: !isFounder,
+          tid: verification.normalizedTid,
+          amount: verification.verifiedAmount,
+          currency: verification.currency,
+          officialDestination: verification.officialDestination,
+          sha256Proof: verification.sha256Proof,
+          entry,
+        });
+      } catch (err) {
+        console.error('Onboarding payment verify route error:', err);
+        return res
+          .status(500)
+          .json({ verified: false, error: 'Failed to record onboarding payment submission.' });
       }
-
-      const entry = recordSalonFinancialPayment({
-        type: 'ONBOARDING_SETUP',
-        salonId: 'onboarding',
-        salonName,
-        amount: verification.verifiedAmount,
-        currency: verification.currency,
-        method,
-        referenceTid: verification.normalizedTid,
-        note: `Verified setup settlement (${packageId}) ➔ ${verification.officialDestination}`,
-      });
-
-      return res.status(201).json({
-        verified: true,
-        status: 'paid',
-        tid: verification.normalizedTid,
-        amount: verification.verifiedAmount,
-        currency: verification.currency,
-        officialDestination: verification.officialDestination,
-        sha256Proof: verification.sha256Proof,
-        entry,
-      });
-    } catch (err) {
-      console.error('Onboarding payment verify route error:', err);
-      return res.status(500).json({ verified: false, error: 'Failed to verify onboarding payment.' });
     }
-  });
+  );
 
-  // Persistent Salon Owner Maintenance Settlement & Zero-Loss Package Upgrade
+  // Maintenance Payment Submission (Only FOUNDER activates billingStatus = ACTIVE)
   app.post(
     '/api/salons/:salonId/payments/maintenance',
     requireAuth,
     requireSalonTenantAccess(false),
-    (req, res) => {
+    async (req: AuthenticatedRequest, res) => {
       try {
+        const user = req.authUser!;
         const { salonId } = req.params;
+        const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+        const rl = await enforceRateLimit(`pay:maint:${user.userId}:${ipKey}`, 15, 300, {
+          failClosedInProd: true,
+        });
+        if (rl.unavailable) {
+          return res.status(503).json({ error: 'Payment rate limiter unavailable.' });
+        }
+        if (!rl.allowed) {
+          return res
+            .status(429)
+            .json({ error: `Too many payment submissions. Retry after ${rl.retryAfterSec}s.` });
+        }
+
         const body = req.body || {};
         const amount = Number(body.amount || 0);
         const currency = sanitizePlainText(body.currency, 8) || 'PKR';
-        const method = sanitizePlainText(body.method, 80) || 'EasyPaisa Webhook';
+        const method = sanitizePlainText(body.method, 80) || 'EasyPaisa';
         const referenceTid = sanitizePlainText(body.tid, 80);
-        const packageId = typeof body.packageId === 'string' ? sanitizePlainText(body.packageId, 24) : undefined;
+        const packageId =
+          typeof body.packageId === 'string' ? sanitizePlainText(body.packageId, 24) : undefined;
 
         const verification = verifyAuthoritativeWorkcraftPayment({
           kind: 'MAINTENANCE',
@@ -2296,6 +2416,8 @@ export function createApiApp(port = 3000): express.Express {
           return res.status(400).json({ error: verification.error });
         }
 
+        const isFounder = user.userRole === 'FOUNDER';
+        const approvalStatus = isFounder ? 'APPROVED' : 'PENDING_REVIEW';
         const current = getSalonConciergeState(salonId);
         const entry = recordSalonFinancialPayment({
           type: 'MAINT_PAYMENT',
@@ -2305,10 +2427,12 @@ export function createApiApp(port = 3000): express.Express {
           currency: verification.currency,
           method,
           referenceTid: verification.normalizedTid,
-          note: `Monthly maintenance settled (${verification.normalizedTid}) ➔ ${verification.officialDestination}`,
+          note: `${approvalStatus}: Maintenance payment (${verification.normalizedTid}) ➔ ${verification.officialDestination}`,
         });
-        const state = setSalonBillingStatus(salonId, 'ACTIVE');
+        const state = isFounder ? setSalonBillingStatus(salonId, 'ACTIVE') : current;
         return res.status(201).json({
+          status: approvalStatus,
+          requiresFounderApproval: !isFounder,
           entry,
           state,
           officialDestination: verification.officialDestination,
@@ -2321,19 +2445,37 @@ export function createApiApp(port = 3000): express.Express {
     }
   );
 
+  // Package Upgrade Payment Submission (Only FOUNDER executes immediate tier change)
   app.post(
     '/api/salons/:salonId/payments/upgrade',
     requireAuth,
     requireSalonTenantAccess(false),
-    (req, res) => {
+    async (req: AuthenticatedRequest, res) => {
       try {
+        const user = req.authUser!;
         const { salonId } = req.params;
+        const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+        const rl = await enforceRateLimit(`pay:upgrade:${user.userId}:${ipKey}`, 15, 300, {
+          failClosedInProd: true,
+        });
+        if (rl.unavailable) {
+          return res.status(503).json({ error: 'Payment rate limiter unavailable.' });
+        }
+        if (!rl.allowed) {
+          return res
+            .status(429)
+            .json({ error: `Too many upgrade submissions. Retry after ${rl.retryAfterSec}s.` });
+        }
+
         const body = req.body || {};
         const rawTier = sanitizePlainText(body.packageTier, 20).toUpperCase();
         const packageTier: 'STARTER' | 'PRO' | 'PRO++' =
           rawTier === 'STARTER' ? 'STARTER' : rawTier === 'PRO' || rawTier === 'GROWTH' ? 'PRO' : 'PRO++';
         const targetCatalogTier = sanitizePlainText(body.targetPlanId || rawTier, 24);
-        const previousCatalogTier = typeof body.previousPlanId === 'string' ? sanitizePlainText(body.previousPlanId, 24) : undefined;
+        const previousCatalogTier =
+          typeof body.previousPlanId === 'string'
+            ? sanitizePlainText(body.previousPlanId, 24)
+            : undefined;
         const differenceAmount = Number(body.differenceAmount || 0);
         const currency = sanitizePlainText(body.currency, 8) || 'PKR';
         const method = sanitizePlainText(body.method, 80) || 'Digital Settlement';
@@ -2353,18 +2495,25 @@ export function createApiApp(port = 3000): express.Express {
           return res.status(400).json({ error: verification.error });
         }
 
-        const updatedSettings = updateRetentionSettings(salonId, { packageTier });
+        const isFounder = user.userRole === 'FOUNDER';
+        const approvalStatus = isFounder ? 'APPROVED' : 'PENDING_REVIEW';
+        const currentState = getSalonConciergeState(salonId);
+        const updatedSettings = isFounder
+          ? updateRetentionSettings(salonId, { packageTier })
+          : currentState;
         const entry = recordSalonFinancialPayment({
           type: 'PACKAGE_UPGRADE',
           salonId,
-          salonName: sanitizePlainText(body.salonName, 100) || updatedSettings.settings.salonName,
+          salonName: sanitizePlainText(body.salonName, 100) || currentState.settings.salonName,
           amount: verification.verifiedAmount,
           currency: verification.currency,
           method,
           referenceTid: verification.normalizedTid,
-          note: `Zero-loss upgrade to ${targetCatalogTier} (paid: ${verification.currency} ${verification.verifiedAmount}) ➔ ${verification.officialDestination}`,
+          note: `${approvalStatus}: Upgrade request to ${targetCatalogTier} (submitted: ${verification.currency} ${verification.verifiedAmount}) ➔ ${verification.officialDestination}`,
         });
         return res.status(201).json({
+          status: approvalStatus,
+          requiresFounderApproval: !isFounder,
           entry,
           state: updatedSettings,
           officialDestination: verification.officialDestination,
@@ -2372,19 +2521,34 @@ export function createApiApp(port = 3000): express.Express {
         });
       } catch (err) {
         console.error('Package upgrade route error:', err);
-        return res.status(500).json({ error: 'Failed to persist package upgrade.' });
+        return res.status(500).json({ error: 'Failed to persist package upgrade submission.' });
       }
     }
   );
 
-  // Authoritative Server TID Verification for Video Deal Campaigns (1 Video vs 4 Videos/mo)
+  // Authoritative Server TID Submission for Video Deal Campaigns (Founder Approval Required)
   app.post(
     '/api/salons/:salonId/payments/video-deal',
     requireAuth,
     requireSalonTenantAccess(false),
-    (req, res) => {
+    async (req: AuthenticatedRequest, res) => {
       try {
+        const user = req.authUser!;
         const { salonId } = req.params;
+        const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+        const rl = await enforceRateLimit(`pay:video:${user.userId}:${ipKey}`, 15, 300, {
+          failClosedInProd: true,
+        });
+        if (rl.unavailable) {
+          return res.status(503).json({ verified: false, error: 'Payment rate limiter unavailable.' });
+        }
+        if (!rl.allowed) {
+          return res.status(429).json({
+            verified: false,
+            error: `Too many payment submissions. Retry after ${rl.retryAfterSec}s.`,
+          });
+        }
+
         const body = req.body || {};
         const planId =
           String(body.planId || '').toUpperCase() === 'MONTHLY_4' ? 'MONTHLY_4' : 'SINGLE_1';
@@ -2407,6 +2571,8 @@ export function createApiApp(port = 3000): express.Express {
           return res.status(400).json({ verified: false, error: verification.error });
         }
 
+        const isFounder = user.userRole === 'FOUNDER';
+        const approvalStatus = isFounder ? 'APPROVED' : 'PENDING_REVIEW';
         const current = getSalonConciergeState(salonId);
         const entry = recordSalonFinancialPayment({
           type: 'VIDEO_CAMPAIGN',
@@ -2416,11 +2582,13 @@ export function createApiApp(port = 3000): express.Express {
           currency: verification.currency,
           method,
           referenceTid: verification.normalizedTid,
-          note: `Video Campaign (${planId}) unlocked (${verification.normalizedTid}) ➔ ${verification.officialDestination}`,
+          note: `${approvalStatus}: Video Campaign (${planId}) TID (${verification.normalizedTid}) ➔ ${verification.officialDestination}`,
         });
 
         return res.status(201).json({
           verified: true,
+          status: approvalStatus,
+          requiresFounderApproval: !isFounder,
           tid: verification.normalizedTid,
           amount: verification.verifiedAmount,
           currency: verification.currency,
@@ -2430,7 +2598,9 @@ export function createApiApp(port = 3000): express.Express {
         });
       } catch (err) {
         console.error('Video campaign payment verify route error:', err);
-        return res.status(500).json({ verified: false, error: 'Failed to verify video campaign TID.' });
+        return res
+          .status(500)
+          .json({ verified: false, error: 'Failed to submit video campaign TID.' });
       }
     }
   );
@@ -2548,21 +2718,12 @@ export function createApiApp(port = 3000): express.Express {
   // ===========================================================================
   // $0.00 REAL-TIME ERROR TELEMETRY & FOUNDER INCIDENT FEED (ALL 4 ROLES)
   // ===========================================================================
-  app.post('/api/telemetry/incident', (req, res) => {
+  app.post('/api/telemetry/incident', async (req, res) => {
     try {
-      const clientKey = sanitizePlainText(
-        String(req.header('x-forwarded-for') || req.ip || 'anon').split(',')[0],
-        64
-      );
-      const now = Date.now();
-      const bucket = telemetryRateBuckets.get(clientKey);
-      if (!bucket || bucket.resetAt < now) {
-        telemetryRateBuckets.set(clientKey, { count: 1, resetAt: now + 60_000 });
-      } else {
-        bucket.count += 1;
-        if (bucket.count > 25) {
-          return res.status(429).json({ ok: false, error: 'Telemetry throttle limit reached.' });
-        }
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`telemetry:${ipKey}`, 25, 60);
+      if (!rl.allowed) {
+        return res.status(429).json({ ok: false, error: 'Telemetry throttle limit reached.' });
       }
 
       const body = req.body || {};
