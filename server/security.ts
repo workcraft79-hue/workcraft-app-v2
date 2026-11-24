@@ -4,13 +4,20 @@ import path from 'path';
 import type { NextFunction, Request, Response } from 'express';
 import type { AuthRole, AuthUser } from '../src/types/auth.js';
 import { kvGetJson, kvSetJson } from './kvBridge.js';
+import {
+  deleteDistributedCounter,
+  getDistributedCounter,
+  incrementDistributedCounter,
+} from './rateLimiter.js';
 
 export const SESSION_COOKIE_NAME = 'wc_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days persistent session
 const CUSTOMER_COOKIE_TTL_SECONDS = 60 * 60 * 24 * 180; // 180 days for weeks-later QR returning recognition
 const AGENT_INVITE_TTL_MS = 1000 * 60 * 60 * 72; // 72 hours single-use invite expiry
 
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+function isProdRuntime(): boolean {
+  return process.env.NODE_ENV === 'production';
+}
 
 const AUTH_DATA_DIR = process.env.VERCEL
   ? path.join('/tmp', 'workcraft-data')
@@ -19,47 +26,62 @@ const AUTH_USERS_FILE = path.join(AUTH_DATA_DIR, 'auth-users.json');
 const FOUNDER_CRED_FILE = path.join(AUTH_DATA_DIR, 'founder-cred.json');
 const DEV_JWT_KEY_FILE = path.join(AUTH_DATA_DIR, 'dev-jwt.key');
 
+let cachedDevJwtSecret = '';
+
 // In production, JWT_SECRET (>= 32 chars) MUST be explicitly configured (fail closed if missing).
 export function isJwtSecretConfigured(): boolean {
   const configured = (process.env.JWT_SECRET || '').trim();
-  if (IS_PRODUCTION) {
+  if (isProdRuntime()) {
     return configured.length >= 32;
   }
   return true;
 }
 
-const RUNTIME_JWT_SECRET: string = (() => {
+function getRuntimeJwtSecret(): string {
   const configured = (process.env.JWT_SECRET || '').trim();
   if (configured.length >= 32) return configured;
-  if (IS_PRODUCTION) {
+  if (isProdRuntime()) {
     console.error(
       'CRITICAL SECURITY CONFIG: JWT_SECRET (>= 32 chars) is missing in production. Auth endpoints will fail closed.'
     );
     return '';
   }
+  if (cachedDevJwtSecret.length >= 32) return cachedDevJwtSecret;
   // Dev/preview local convenience: persist random dev secret in .data/ so restarts keep dev cookies valid
   try {
     if (fs.existsSync(DEV_JWT_KEY_FILE)) {
       const saved = fs.readFileSync(DEV_JWT_KEY_FILE, 'utf8').trim();
-      if (saved.length >= 32) return saved;
+      if (saved.length >= 32) {
+        cachedDevJwtSecret = saved;
+        return saved;
+      }
     }
     if (!fs.existsSync(AUTH_DATA_DIR)) {
       fs.mkdirSync(AUTH_DATA_DIR, { recursive: true });
     }
     const generated = crypto.randomBytes(32).toString('hex');
     fs.writeFileSync(DEV_JWT_KEY_FILE, generated, { mode: 0o600 });
+    cachedDevJwtSecret = generated;
     return generated;
   } catch {
-    return configured || crypto.randomBytes(32).toString('hex');
+    cachedDevJwtSecret = configured || crypto.randomBytes(32).toString('hex');
+    return cachedDevJwtSecret;
   }
-})();
+}
 
-const RUNTIME_WEBHOOK_SECRET: string = (() => {
+function getRuntimeCookieSigningSecret(): string {
+  const dedicated = (process.env.COOKIE_SIGNING_SECRET || '').trim();
+  if (dedicated.length >= 32) return dedicated;
+  return getRuntimeJwtSecret();
+}
+
+const DEV_EPHEMERAL_WEBHOOK_SECRET = crypto.randomBytes(24).toString('hex');
+function getRuntimeWebhookSecret(): string {
   const configured = (process.env.WORKCRAFT_WEBHOOK_SECRET || '').trim();
   if (configured) return configured;
-  if (IS_PRODUCTION) return '';
-  return crypto.randomBytes(24).toString('hex');
-})();
+  if (isProdRuntime()) return '';
+  return DEV_EPHEMERAL_WEBHOOK_SECRET;
+}
 
 // -----------------------------------------------------------------------------
 // Founder PIN / Salted Scrypt Credential & Fail-Closed Status
@@ -100,7 +122,7 @@ export function getFounderAuthStatus(): {
   const envPin = (process.env.FOUNDER_PIN || process.env.FOUNDER_ACCESS_KEY || '').trim();
   const hasEnvPin = envPin.length >= 4;
   const hasJwt = isJwtSecretConfigured();
-  if (IS_PRODUCTION) {
+  if (isProdRuntime()) {
     const missingEnvVars: string[] = [];
     if (!hasJwt) missingEnvVars.push('JWT_SECRET');
     if (!hasEnvPin) missingEnvVars.push('FOUNDER_PIN');
@@ -146,7 +168,7 @@ export function getFounderAuthStatus(): {
 }
 
 export function claimInitialFounderPin(rawPin: string): { ok: true } | { ok: false; error: string } {
-  if (IS_PRODUCTION) {
+  if (isProdRuntime()) {
     return {
       ok: false,
       error: 'Initial PIN setup via UI is disabled in production. Configure FOUNDER_PIN in server environment.',
@@ -180,8 +202,6 @@ export function claimInitialFounderPin(rawPin: string): { ok: true } | { ok: fal
   }
 }
 
-const founderFailureTracker = new Map<string, { count: number; lockedUntil: number }>();
-
 export function verifyFounderPin(candidate: string): boolean {
   const clean = (candidate || '').trim().toUpperCase();
   if (!clean) return false;
@@ -193,7 +213,7 @@ export function verifyFounderPin(candidate: string): boolean {
     return crypto.timingSafeEqual(a, b);
   }
 
-  if (IS_PRODUCTION) {
+  if (isProdRuntime()) {
     return false;
   }
 
@@ -209,29 +229,25 @@ export function verifyFounderPin(candidate: string): boolean {
   }
 }
 
-export function checkFounderPinAttemptAllowed(
+export async function checkFounderPinAttemptAllowed(
   clientKey: string
-): { allowed: true } | { allowed: false; retryAfterSec: number } {
-  const rec = founderFailureTracker.get(clientKey);
-  if (!rec) return { allowed: true };
-  if (rec.lockedUntil > Date.now()) {
+): Promise<{ allowed: true } | { allowed: false; retryAfterSec: number }> {
+  const rec = await getDistributedCounter(`founder-fail:${clientKey}`);
+  if (rec && rec.count >= 5) {
     return {
       allowed: false,
-      retryAfterSec: Math.max(1, Math.ceil((rec.lockedUntil - Date.now()) / 1000)),
+      retryAfterSec: Math.max(1, rec.ttlSec || 60),
     };
   }
   return { allowed: true };
 }
 
-export function recordFounderPinFailure(clientKey: string): void {
-  const existing = founderFailureTracker.get(clientKey);
-  const nextCount = (existing?.count || 0) + 1;
-  const lockedUntil = nextCount >= 5 ? Date.now() + 60_000 : 0;
-  founderFailureTracker.set(clientKey, { count: nextCount, lockedUntil });
+export async function recordFounderPinFailure(clientKey: string): Promise<void> {
+  await incrementDistributedCounter(`founder-fail:${clientKey}`, 60);
 }
 
-export function clearFounderPinFailures(clientKey: string): void {
-  founderFailureTracker.delete(clientKey);
+export async function clearFounderPinFailures(clientKey: string): Promise<void> {
+  await deleteDistributedCounter(`founder-fail:${clientKey}`);
 }
 
 // -----------------------------------------------------------------------------
@@ -676,7 +692,8 @@ function base64UrlDecode(input: string): Buffer {
 }
 
 export function signSessionToken(user: AuthUser): string {
-  if (!RUNTIME_JWT_SECRET) {
+  const secret = getRuntimeJwtSecret();
+  if (!secret) {
     throw new Error('JWT_SECRET is not configured in production.');
   }
   const nowSec = Math.floor(Date.now() / 1000);
@@ -698,20 +715,21 @@ export function signSessionToken(user: AuthUser): string {
   const payload = base64UrlEncode(JSON.stringify(payloadObj));
   const data = `${header}.${payload}`;
   const sig = base64UrlEncode(
-    crypto.createHmac('sha256', RUNTIME_JWT_SECRET).update(data).digest()
+    crypto.createHmac('sha256', secret).update(data).digest()
   );
   return `${data}.${sig}`;
 }
 
 export function verifySessionToken(token: string): AuthUser | null {
   try {
-    if (!RUNTIME_JWT_SECRET) return null;
+    const secret = getRuntimeJwtSecret();
+    if (!secret) return null;
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const [headerB64, payloadB64, sigB64] = parts;
     const data = `${headerB64}.${payloadB64}`;
     const expectedSig = base64UrlEncode(
-      crypto.createHmac('sha256', RUNTIME_JWT_SECRET).update(data).digest()
+      crypto.createHmac('sha256', secret).update(data).digest()
     );
     const sigBuf = Buffer.from(sigB64);
     const expectedBuf = Buffer.from(expectedSig);
@@ -746,24 +764,26 @@ export function verifySessionToken(token: string): AuthUser | null {
 }
 
 export function signServerBlob<T extends Record<string, unknown>>(payload: T): string {
-  if (!RUNTIME_JWT_SECRET) {
-    throw new Error('JWT_SECRET is not configured in production.');
+  const secret = getRuntimeCookieSigningSecret();
+  if (!secret) {
+    throw new Error('COOKIE_SIGNING_SECRET / JWT_SECRET is not configured in production.');
   }
   const data = base64UrlEncode(JSON.stringify(payload));
   const sig = base64UrlEncode(
-    crypto.createHmac('sha256', RUNTIME_JWT_SECRET).update(`wc-blob:${data}`).digest()
+    crypto.createHmac('sha256', secret).update(`wc-blob:${data}`).digest()
   );
   return `${data}.${sig}`;
 }
 
 export function verifyServerBlob<T extends Record<string, unknown>>(blob: string): T | null {
   try {
-    if (!RUNTIME_JWT_SECRET) return null;
+    const secret = getRuntimeCookieSigningSecret();
+    if (!secret) return null;
     const parts = (blob || '').split('.');
     if (parts.length !== 2) return null;
     const [data, sig] = parts;
     const expectedSig = base64UrlEncode(
-      crypto.createHmac('sha256', RUNTIME_JWT_SECRET).update(`wc-blob:${data}`).digest()
+      crypto.createHmac('sha256', secret).update(`wc-blob:${data}`).digest()
     );
     const a = Buffer.from(sig);
     const b = Buffer.from(expectedSig);
@@ -849,7 +869,7 @@ function appendSetCookie(res: Response, cookieStr: string) {
 
 function buildCookieAttributes(req?: Request, maxAge = SESSION_TTL_SECONDS): string[] {
   const isHttps =
-    Boolean(req?.secure) || req?.header('x-forwarded-proto') === 'https' || IS_PRODUCTION;
+    Boolean(req?.secure) || req?.header('x-forwarded-proto') === 'https' || isProdRuntime();
   if (isHttps) {
     return ['Path=/', 'HttpOnly', 'SameSite=None', 'Secure', 'Partitioned', `Max-Age=${maxAge}`];
   }
@@ -953,7 +973,7 @@ export function issueOwnerLoginChallenge(rawIdentifier: string):
     maskedPhone: maskPhoneNumber(user.phone),
     role: user.userRole,
     displayName: user.displayName,
-    devPreviewCode: IS_PRODUCTION ? undefined : code,
+    devPreviewCode: isProdRuntime() ? undefined : code,
   };
 }
 
@@ -1351,7 +1371,8 @@ export function requireSalonTenantAccess(allowAgentReadOnly = false) {
 }
 
 export function requireWebhookSecret(req: Request, res: Response, next: NextFunction) {
-  if (!RUNTIME_WEBHOOK_SECRET) {
+  const expectedSecret = getRuntimeWebhookSecret();
+  if (!expectedSecret) {
     return res.status(503).json({
       error: 'Webhook secret not configured on server (WORKCRAFT_WEBHOOK_SECRET).',
     });
@@ -1365,7 +1386,7 @@ export function requireWebhookSecret(req: Request, res: Response, next: NextFunc
   }
 
   const providedHash = crypto.createHash('sha256').update(provided).digest();
-  const expectedHash = crypto.createHash('sha256').update(RUNTIME_WEBHOOK_SECRET).digest();
+  const expectedHash = crypto.createHash('sha256').update(expectedSecret).digest();
   if (!crypto.timingSafeEqual(providedHash, expectedHash)) {
     return res.status(401).json({
       error: 'Unauthorized: invalid x-workcraft-webhook-secret header.',
