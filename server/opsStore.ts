@@ -765,6 +765,7 @@ export function recordSalonFinancialPayment(params: {
   type: 'MAINT_PAYMENT' | 'PACKAGE_UPGRADE' | 'ONBOARDING_SETUP' | 'VIDEO_CAMPAIGN';
   salonId: string;
   salonName: string;
+  agentId?: string;
   amount: number;
   currency: string;
   method: string;
@@ -776,6 +777,7 @@ export function recordSalonFinancialPayment(params: {
     type: params.type,
     salonId: params.salonId,
     salonName: sanitizePlainText(params.salonName, 100) || 'Partner Salon',
+    ...(params.agentId ? { agentId: sanitizePlainText(params.agentId, 60) } : {}),
     amount: Math.max(0, Math.round(Number(params.amount || 0))),
     currency: sanitizePlainText(params.currency, 8) || 'PKR',
     method: sanitizePlainText(params.method, 80) || 'Digital Gateway',
