@@ -88,7 +88,11 @@ import {
   verifyOwnerLoginChallenge,
 } from './security.js';
 import { enforceRateLimit, extractClientIpKey, isRateLimiterConfigured } from './rateLimiter.js';
-import { assertProductionDatabaseReady } from './postgresRepo.js';
+import {
+  PgContextError,
+  assertProductionDatabaseReady,
+  derivePgActorFromAuthUser,
+} from './postgresRepo.js';
 import {
   resolveTargetLocale,
   synthesizeEdgeTtsInMemory,
@@ -821,17 +825,21 @@ export function createApiApp(port = 3000): express.Express {
         salonCategory,
         enabledServices,
       });
-      updateRetentionSettings(newSalonId, {
-        salonName,
-        ownerName,
-        ownerAuthPhone: whatsappPhone,
-        publicContactPhone,
-        publicWhatsappPhone: publicContactPhone,
-        whatsappPhone,
-        packageTier,
-        salonCategory,
-        enabledServices,
-      });
+      await updateRetentionSettings(
+        newSalonId,
+        {
+          salonName,
+          ownerName,
+          ownerAuthPhone: whatsappPhone,
+          publicContactPhone,
+          publicWhatsappPhone: publicContactPhone,
+          whatsappPhone,
+          packageTier,
+          salonCategory,
+          enabledServices,
+        },
+        derivePgActorFromAuthUser(reg.user, { targetSalonId: newSalonId })
+      );
       if (barbers.length > 0) {
         syncSalonBarbers(newSalonId, barbers);
       }
@@ -862,17 +870,26 @@ export function createApiApp(port = 3000): express.Express {
     '/api/salons/:salonId/activate-billing',
     requireAuth,
     requireRole('FOUNDER'),
-    (req, res) => {
-      const { salonId } = req.params;
-      const statusRaw = sanitizePlainText(req.body?.billingStatus, 30).toUpperCase();
-      const billingStatus =
-        statusRaw === 'PENDING_ACTIVATION' ||
-        statusRaw === 'PAST_DUE' ||
-        statusRaw === 'SUSPENDED'
-          ? statusRaw
-          : 'ACTIVE';
-      const state = setSalonBillingStatus(salonId, billingStatus);
-      return res.json({ billingStatus, state });
+    async (req: AuthenticatedRequest, res) => {
+      try {
+        const { salonId } = req.params;
+        const statusRaw = sanitizePlainText(req.body?.billingStatus, 30).toUpperCase();
+        const billingStatus =
+          statusRaw === 'PENDING_ACTIVATION' ||
+          statusRaw === 'PAST_DUE' ||
+          statusRaw === 'SUSPENDED'
+            ? statusRaw
+            : 'ACTIVE';
+        const actor = derivePgActorFromAuthUser(req.authUser!, { targetSalonId: salonId });
+        const state = await setSalonBillingStatus(salonId, billingStatus, actor);
+        return res.json({ billingStatus, state });
+      } catch (err) {
+        if (err instanceof PgContextError) {
+          return res.status(403).json({ error: err.message });
+        }
+        console.error('Activate billing error:', err);
+        return res.status(500).json({ error: 'Failed to update billing status.' });
+      }
     }
   );
 
@@ -1424,12 +1441,16 @@ export function createApiApp(port = 3000): express.Express {
     '/api/salons/:salonId/retention-settings',
     requireAuth,
     requireSalonTenantAccess(false),
-    (req, res) => {
+    async (req: AuthenticatedRequest, res) => {
       try {
         const { salonId } = req.params;
-        const updated = updateRetentionSettings(salonId, req.body || {});
+        const actor = derivePgActorFromAuthUser(req.authUser!, { targetSalonId: salonId });
+        const updated = await updateRetentionSettings(salonId, req.body || {}, actor);
         return res.json(updated);
       } catch (err) {
+        if (err instanceof PgContextError) {
+          return res.status(403).json({ error: err.message });
+        }
         console.error('Failed to save retention settings:', err);
         return res.status(500).json({ error: 'Failed to save retention settings.' });
       }
@@ -2429,7 +2450,13 @@ export function createApiApp(port = 3000): express.Express {
           referenceTid: verification.normalizedTid,
           note: `${approvalStatus}: Maintenance payment (${verification.normalizedTid}) ➔ ${verification.officialDestination}`,
         });
-        const state = isFounder ? setSalonBillingStatus(salonId, 'ACTIVE') : current;
+        const state = isFounder
+          ? await setSalonBillingStatus(
+              salonId,
+              'ACTIVE',
+              derivePgActorFromAuthUser(user, { targetSalonId: salonId })
+            )
+          : current;
         return res.status(201).json({
           status: approvalStatus,
           requiresFounderApproval: !isFounder,
@@ -2499,7 +2526,11 @@ export function createApiApp(port = 3000): express.Express {
         const approvalStatus = isFounder ? 'APPROVED' : 'PENDING_REVIEW';
         const currentState = getSalonConciergeState(salonId);
         const updatedSettings = isFounder
-          ? updateRetentionSettings(salonId, { packageTier })
+          ? await updateRetentionSettings(
+              salonId,
+              { packageTier },
+              derivePgActorFromAuthUser(user, { targetSalonId: salonId })
+            )
           : currentState;
         const entry = recordSalonFinancialPayment({
           type: 'PACKAGE_UPGRADE',
