@@ -3,7 +3,8 @@
  *
  * Uses `pg` Pool when DATABASE_URL / POSTGRES_URL is configured.
  * Provides:
- *  - Mandatory transaction-local RLS GUC context (`SET LOCAL` via parameterized `set_config`)
+ *  - Mandatory fail-closed transaction-local RLS GUC context (`set_config(..., true)` immediately after `BEGIN`)
+ *  - Server-derived actor validation (`FOUNDER`, `SALON_OWNER`, `AGENT`, `PUBLIC_FLOW`)
  *  - Transactional booking inserts with Postgres exclusion constraint handling (`23P01`)
  *  - Idempotency key deduplication
  *  - Atomic monthly booking quota updates (`salon_usage_monthly`)
@@ -12,10 +13,12 @@
  */
 
 import { Pool, type PoolClient } from 'pg';
+import type { AuthUser } from '../src/types/auth.js';
 
 declare global {
   var _workcraftPgPool: Pool | undefined;
   var _workcraftPgPoolUrl: string | undefined;
+  var _workcraftPgTestPoolOverride: Pool | null | undefined;
 }
 
 export type PgActorRole = 'FOUNDER' | 'AGENT' | 'SALON_OWNER' | 'PUBLIC_FLOW';
@@ -26,6 +29,32 @@ export interface PgActorContext {
   agentId?: string | null;
   userId?: string | null;
 }
+
+export type PgContextErrorCode =
+  | 'MISSING_IDENTITY'
+  | 'INVALID_CONTEXT'
+  | 'FORBIDDEN_TENANT'
+  | 'PRIVILEGE_ESCALATION';
+
+export class PgContextError extends Error {
+  public readonly code: PgContextErrorCode;
+
+  constructor(code: PgContextErrorCode, message: string) {
+    super(message);
+    this.name = 'PgContextError';
+    this.code = code;
+  }
+}
+
+export interface NormalizedPgActorContext {
+  role: PgActorRole;
+  salonId: string;
+  agentId: string;
+  userId: string;
+}
+
+const PUBLIC_LOOKUP_CONTEXTS = new WeakSet<PgActorContext>();
+const ACTIVE_TX_ROLES = new WeakMap<PoolClient, PgActorRole>();
 
 function isProductionEnv(): boolean {
   return process.env.NODE_ENV === 'production';
@@ -41,6 +70,9 @@ export function getDatabaseUrl(): string {
 }
 
 export function isPostgresConfigured(): boolean {
+  if (!isProductionEnv() && global._workcraftPgTestPoolOverride) {
+    return true;
+  }
   return Boolean(getDatabaseUrl());
 }
 
@@ -55,7 +87,24 @@ export function assertProductionDatabaseReady(): { ok: true } | { ok: false; err
   return { ok: true };
 }
 
-export function getPgPool(): Pool | null {
+/**
+ * Non-production test helper for injecting a mock Pool without connecting to Neon.
+ * Fails closed if invoked when NODE_ENV === 'production'.
+ */
+export function setPgPoolOverrideForTests(pool: Pool | null): void {
+  if (isProductionEnv()) {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      'Test pool override cannot be used in production.'
+    );
+  }
+  global._workcraftPgTestPoolOverride = pool;
+}
+
+function getPgPool(): Pool | null {
+  if (!isProductionEnv() && global._workcraftPgTestPoolOverride) {
+    return global._workcraftPgTestPoolOverride;
+  }
   const connectionString = getDatabaseUrl();
   if (!connectionString) return null;
   if (!global._workcraftPgPool || global._workcraftPgPoolUrl !== connectionString) {
@@ -77,9 +126,247 @@ export function getPgPool(): Pool | null {
   return global._workcraftPgPool;
 }
 
-export async function applyPgActorContext(
+function cleanActorId(value: unknown, fieldName: string): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value !== 'string') {
+    throw new PgContextError(
+      'INVALID_CONTEXT',
+      `PostgreSQL actor ${fieldName} must be a string.`
+    );
+  }
+  if (/[\x00-\x1f\x7f]/.test(value)) {
+    throw new PgContextError(
+      'INVALID_CONTEXT',
+      `PostgreSQL actor ${fieldName} contains disallowed control characters.`
+    );
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > 128) {
+    throw new PgContextError(
+      'INVALID_CONTEXT',
+      `PostgreSQL actor ${fieldName} exceeds maximum allowed length.`
+    );
+  }
+  return trimmed;
+}
+
+export function validatePgActorContext(ctx: unknown): NormalizedPgActorContext {
+  if (!ctx || typeof ctx !== 'object') {
+    throw new PgContextError(
+      'MISSING_IDENTITY',
+      'PostgreSQL transaction rejected: verified actor context is required.'
+    );
+  }
+
+  const candidate = ctx as PgActorContext;
+  const role = candidate.role;
+  if (
+    role !== 'FOUNDER' &&
+    role !== 'AGENT' &&
+    role !== 'SALON_OWNER' &&
+    role !== 'PUBLIC_FLOW'
+  ) {
+    throw new PgContextError(
+      'INVALID_CONTEXT',
+      `PostgreSQL transaction rejected: unsupported actor role "${String(role)}".`
+    );
+  }
+
+  const salonId = cleanActorId(candidate.salonId, 'salonId');
+  const agentId = cleanActorId(candidate.agentId, 'agentId');
+  const userId = cleanActorId(candidate.userId, 'userId');
+
+  if (role === 'FOUNDER') {
+    if (!userId) {
+      throw new PgContextError(
+        'MISSING_IDENTITY',
+        'FOUNDER transaction rejected: verified userId is required.'
+      );
+    }
+    if (agentId) {
+      throw new PgContextError(
+        'INVALID_CONTEXT',
+        'FOUNDER transaction cannot carry an agentId.'
+      );
+    }
+    return { role: 'FOUNDER', salonId: '', agentId: '', userId };
+  }
+
+  if (role === 'SALON_OWNER') {
+    if (!userId || !salonId) {
+      throw new PgContextError(
+        'MISSING_IDENTITY',
+        'SALON_OWNER transaction rejected: verified userId and salonId are required.'
+      );
+    }
+    if (agentId) {
+      throw new PgContextError(
+        'INVALID_CONTEXT',
+        'SALON_OWNER transaction cannot carry an agentId.'
+      );
+    }
+    return { role: 'SALON_OWNER', salonId, agentId: '', userId };
+  }
+
+  if (role === 'AGENT') {
+    if (!userId || !agentId) {
+      throw new PgContextError(
+        'MISSING_IDENTITY',
+        'AGENT transaction rejected: verified userId and agentId are required.'
+      );
+    }
+    if (salonId) {
+      throw new PgContextError(
+        'INVALID_CONTEXT',
+        'AGENT transaction cannot carry a salonId.'
+      );
+    }
+    return { role: 'AGENT', salonId: '', agentId, userId };
+  }
+
+  // PUBLIC_FLOW
+  if (userId || agentId) {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      'PUBLIC_FLOW transaction cannot carry userId or agentId.'
+    );
+  }
+  if (!salonId && !PUBLIC_LOOKUP_CONTEXTS.has(candidate)) {
+    throw new PgContextError(
+      'MISSING_IDENTITY',
+      'PUBLIC_FLOW transaction requires a resolved salonId or createPublicFlowLookupActor().'
+    );
+  }
+  return { role: 'PUBLIC_FLOW', salonId, agentId: '', userId: '' };
+}
+
+/**
+ * Trusted server-side derivation of PostgreSQL RLS actor context from a verified AuthUser.
+ * Never reads client-supplied role/tenant/agent/user fields.
+ */
+export function derivePgActorFromAuthUser(
+  authUser: AuthUser | null | undefined,
+  options?: { targetSalonId?: string | null }
+): PgActorContext {
+  if (!authUser || typeof authUser !== 'object') {
+    throw new PgContextError(
+      'MISSING_IDENTITY',
+      'Authenticated user session is required for PostgreSQL transaction.'
+    );
+  }
+
+  const userId = cleanActorId(authUser.userId, 'userId');
+  if (!userId) {
+    throw new PgContextError(
+      'MISSING_IDENTITY',
+      'Authenticated session missing verified userId.'
+    );
+  }
+
+  const role = authUser.userRole;
+  const targetSalonId = cleanActorId(options?.targetSalonId, 'targetSalonId');
+
+  if (role === 'FOUNDER') {
+    return Object.freeze({
+      role: 'FOUNDER',
+      salonId: null,
+      agentId: null,
+      userId,
+    });
+  }
+
+  if (role === 'SALON_OWNER') {
+    const allowedSalons = new Set<string>();
+    const primarySalon = cleanActorId(authUser.salonId, 'salonId');
+    if (primarySalon) allowedSalons.add(primarySalon);
+    if (Array.isArray(authUser.allowedSalonIds)) {
+      for (const s of authUser.allowedSalonIds) {
+        const cleaned = cleanActorId(s, 'allowedSalonIds[]');
+        if (cleaned) allowedSalons.add(cleaned);
+      }
+    }
+    if (allowedSalons.size === 0) {
+      throw new PgContextError(
+        'MISSING_IDENTITY',
+        'SALON_OWNER session has no assigned salonId.'
+      );
+    }
+
+    const resolvedSalonId = targetSalonId || primarySalon || Array.from(allowedSalons)[0];
+    if (!allowedSalons.has(resolvedSalonId)) {
+      throw new PgContextError(
+        'FORBIDDEN_TENANT',
+        `SALON_OWNER (${userId}) is not authorized for salon ${resolvedSalonId}.`
+      );
+    }
+
+    return Object.freeze({
+      role: 'SALON_OWNER',
+      salonId: resolvedSalonId,
+      agentId: null,
+      userId,
+    });
+  }
+
+  if (role === 'AGENT') {
+    const agentId = cleanActorId(authUser.agentId, 'agentId');
+    if (!agentId) {
+      throw new PgContextError(
+        'MISSING_IDENTITY',
+        'AGENT session missing verified agentId.'
+      );
+    }
+    return Object.freeze({
+      role: 'AGENT',
+      salonId: null,
+      agentId,
+      userId,
+    });
+  }
+
+  throw new PgContextError(
+    'INVALID_CONTEXT',
+    `Unsupported authenticated role "${String(role)}".`
+  );
+}
+
+/**
+ * Trusted server-side constructor for initial unauthenticated public_code -> salons.id lookup.
+ * Sets role = 'PUBLIC_FLOW' with empty salon/agent/user GUCs.
+ */
+export function createPublicFlowLookupActor(): PgActorContext {
+  const ctx: PgActorContext = Object.freeze({
+    role: 'PUBLIC_FLOW',
+    salonId: null,
+    agentId: null,
+    userId: null,
+  });
+  PUBLIC_LOOKUP_CONTEXTS.add(ctx);
+  return ctx;
+}
+
+/**
+ * Trusted server-side constructor for tenant-scoped PUBLIC_FLOW operations after resolving salons.id.
+ */
+export function createPublicFlowSalonActor(salonId: string): PgActorContext {
+  const cleanSalonId = cleanActorId(salonId, 'salonId');
+  if (!cleanSalonId) {
+    throw new PgContextError(
+      'MISSING_IDENTITY',
+      'PUBLIC_FLOW salon context requires a non-empty resolved salonId.'
+    );
+  }
+  return Object.freeze({
+    role: 'PUBLIC_FLOW',
+    salonId: cleanSalonId,
+    agentId: null,
+    userId: null,
+  });
+}
+
+async function writePgLocalGucs(
   client: PoolClient,
-  ctx: PgActorContext
+  normalized: NormalizedPgActorContext
 ): Promise<void> {
   await client.query(
     `SELECT
@@ -87,40 +374,81 @@ export async function applyPgActorContext(
        set_config('app.current_salon_id', $2, true),
        set_config('app.current_agent_id', $3, true),
        set_config('app.current_user_id', $4, true)`,
-    [ctx.role, ctx.salonId || '', ctx.agentId || '', ctx.userId || '']
+    [normalized.role, normalized.salonId, normalized.agentId, normalized.userId]
   );
 }
 
-export async function withPgTransaction<T>(
-  ctxOrFn: PgActorContext | ((client: PoolClient) => Promise<T>),
-  maybeFn?: (client: PoolClient) => Promise<T>
-): Promise<T> {
-  const ctx: PgActorContext =
-    typeof ctxOrFn === 'function' ? { role: 'PUBLIC_FLOW' } : ctxOrFn;
-  const fn = typeof ctxOrFn === 'function' ? ctxOrFn : maybeFn;
-  if (!fn) {
-    throw new Error('withPgTransaction requires a transaction callback.');
+export async function applyPgActorContext(
+  client: PoolClient,
+  ctx: PgActorContext
+): Promise<void> {
+  const normalized = validatePgActorContext(ctx);
+  const activeRole = ACTIVE_TX_ROLES.get(client);
+  if (activeRole && activeRole !== normalized.role) {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      `Cannot switch PostgreSQL transaction role from ${activeRole} to ${normalized.role}.`
+    );
   }
+  await writePgLocalGucs(client, normalized);
+}
 
+/**
+ * Narrows an active PUBLIC_FLOW transaction after resolving salons.id from public_code.
+ * Rejects any attempt to invoke from a non-PUBLIC_FLOW transaction or with an empty salonId.
+ */
+export async function narrowPublicFlowSalonContext(
+  client: PoolClient,
+  salonId: string
+): Promise<void> {
+  const activeRole = ACTIVE_TX_ROLES.get(client);
+  if (activeRole && activeRole !== 'PUBLIC_FLOW') {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      `narrowPublicFlowSalonContext cannot be called inside a ${activeRole} transaction.`
+    );
+  }
+  const scoped = createPublicFlowSalonActor(salonId);
+  const normalized = validatePgActorContext(scoped);
+  await writePgLocalGucs(client, normalized);
+}
+
+export async function withPgTransaction<T>(
+  ctx: PgActorContext,
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  if (typeof fn !== 'function') {
+    throw new PgContextError('INVALID_CONTEXT', 'withPgTransaction requires a transaction callback.');
+  }
+  const normalized = validatePgActorContext(ctx);
   const pool = getPgPool();
   if (!pool) {
     throw new Error('PostgreSQL pool unavailable: DATABASE_URL is not configured.');
   }
+
   const client = await pool.connect();
+  let inTx = false;
   try {
     await client.query('BEGIN');
-    await applyPgActorContext(client, ctx);
+    inTx = true;
+    ACTIVE_TX_ROLES.set(client, normalized.role);
+    await writePgLocalGucs(client, normalized);
     const result = await fn(client);
     await client.query('COMMIT');
+    inTx = false;
     return result;
   } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      // ignore rollback errors
+    if (inTx) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // ignore rollback errors
+      }
+      inTx = false;
     }
     throw err;
   } finally {
+    ACTIVE_TX_ROLES.delete(client);
     client.release();
   }
 }
@@ -148,30 +476,48 @@ export interface PostgresSalonLookupRow {
   googleReviewUrl: string;
 }
 
-export async function persistPostgresSnapshotMirror(params: {
-  salonId: string;
-  publicCode: string;
-  salonName: string;
-  ownerName?: string;
-  salonCategory?: string;
-  ownerAuthPhone: string;
-  publicContactPhone: string;
-  publicWhatsappPhone?: string;
-  timezoneIana: string;
-  timezoneOffsetHours?: number;
-  currencyCode: string;
-  currencySymbol: string;
-  defaultLang?: string;
-  enabledLangs?: string[];
-  planTier: string;
-  monthlyLimit: number;
-  billingStatus: string;
-  address?: string;
-  googleMapsUrl?: string;
-  googleReviewUrl?: string;
-}): Promise<void> {
+export async function persistPostgresSnapshotMirror(
+  params: {
+    salonId: string;
+    publicCode: string;
+    salonName: string;
+    ownerName?: string;
+    salonCategory?: string;
+    ownerAuthPhone: string;
+    publicContactPhone: string;
+    publicWhatsappPhone?: string;
+    timezoneIana: string;
+    timezoneOffsetHours?: number;
+    currencyCode: string;
+    currencySymbol: string;
+    defaultLang?: string;
+    enabledLangs?: string[];
+    planTier: string;
+    monthlyLimit: number;
+    billingStatus: string;
+    address?: string;
+    googleMapsUrl?: string;
+    googleReviewUrl?: string;
+  },
+  actor: PgActorContext
+): Promise<void> {
+  const normalizedActor = validatePgActorContext(actor);
+  if (normalizedActor.role === 'PUBLIC_FLOW') {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      'PUBLIC_FLOW cannot mutate salon settings.'
+    );
+  }
+  if (normalizedActor.role === 'SALON_OWNER' && normalizedActor.salonId !== params.salonId) {
+    throw new PgContextError(
+      'FORBIDDEN_TENANT',
+      `SALON_OWNER (${normalizedActor.salonId}) cannot modify salon ${params.salonId}.`
+    );
+  }
+
   const pool = getPgPool();
   if (!pool) return;
+
   const packageTier =
     params.planTier === 'STARTER' ||
     params.planTier === 'PRO' ||
@@ -182,14 +528,132 @@ export async function persistPostgresSnapshotMirror(params: {
       ? params.planTier
       : 'PRO++';
   const billingStatus =
-    params.billingStatus === 'ACTIVE' ||
-    params.billingStatus === 'PAST_DUE' ||
-    params.billingStatus === 'SUSPENDED'
-      ? params.billingStatus
+    normalizedActor.role === 'FOUNDER'
+      ? params.billingStatus === 'ACTIVE' ||
+        params.billingStatus === 'PAST_DUE' ||
+        params.billingStatus === 'SUSPENDED'
+        ? params.billingStatus
+        : 'PENDING_ACTIVATION'
       : 'PENDING_ACTIVATION';
 
+  const enabledLangs =
+    Array.isArray(params.enabledLangs) && params.enabledLangs.length > 0
+      ? params.enabledLangs
+      : ['en', 'roman_ur', 'ur'];
+
   try {
-    await withPgTransaction({ role: 'FOUNDER', salonId: params.salonId }, async (client) => {
+    await withPgTransaction(actor, async (client) => {
+      if (normalizedActor.role === 'FOUNDER') {
+        await client.query(
+          `INSERT INTO salons (
+             id, public_code, salon_name, owner_name, whatsapp_phone,
+             salon_category, owner_auth_phone, public_contact_phone, public_whatsapp_phone,
+             timezone_iana, timezone_offset_hours, currency, currency_code, currency_symbol,
+             default_lang, enabled_langs, package_tier, plan_tier, monthly_booking_limit,
+             billing_status, whatsapp_addon_enabled, address, google_maps_url, google_review_url
+           )
+           VALUES (
+             $1, $2, $3, $4, $5,
+             $6, $7, $8, $9,
+             $10, $11, $12, $12, $13,
+             $14, $15::text[], $16, $16, $17,
+             $18, FALSE, $19, $20, $21
+           )
+           ON CONFLICT (id) DO UPDATE SET
+             public_code = COALESCE(salons.public_code, EXCLUDED.public_code),
+             salon_name = EXCLUDED.salon_name,
+             salon_category = EXCLUDED.salon_category,
+             public_contact_phone = EXCLUDED.public_contact_phone,
+             public_whatsapp_phone = EXCLUDED.public_whatsapp_phone,
+             timezone_iana = EXCLUDED.timezone_iana,
+             timezone_offset_hours = EXCLUDED.timezone_offset_hours,
+             currency = EXCLUDED.currency,
+             currency_code = EXCLUDED.currency_code,
+             currency_symbol = EXCLUDED.currency_symbol,
+             default_lang = EXCLUDED.default_lang,
+             enabled_langs = EXCLUDED.enabled_langs,
+             package_tier = EXCLUDED.package_tier,
+             plan_tier = EXCLUDED.plan_tier,
+             monthly_booking_limit = EXCLUDED.monthly_booking_limit,
+             billing_status = EXCLUDED.billing_status,
+             address = EXCLUDED.address,
+             google_maps_url = EXCLUDED.google_maps_url,
+             google_review_url = EXCLUDED.google_review_url,
+             updated_at = NOW()`,
+          [
+            params.salonId,
+            params.publicCode,
+            params.salonName,
+            params.ownerName || 'Salon Owner',
+            params.publicContactPhone || params.ownerAuthPhone,
+            params.salonCategory === 'LADIES' ? 'LADIES' : 'MENS',
+            params.ownerAuthPhone,
+            params.publicContactPhone,
+            params.publicWhatsappPhone || null,
+            params.timezoneIana,
+            Number.isFinite(params.timezoneOffsetHours) ? params.timezoneOffsetHours : 5,
+            params.currencyCode,
+            params.currencySymbol,
+            params.defaultLang || 'en',
+            enabledLangs,
+            packageTier,
+            params.monthlyLimit,
+            billingStatus,
+            params.address || '',
+            params.googleMapsUrl || '',
+            params.googleReviewUrl || '',
+          ]
+        );
+        return;
+      }
+
+      if (normalizedActor.role === 'AGENT') {
+        await client.query(
+          `INSERT INTO salons (
+             id, public_code, salon_name, owner_name, whatsapp_phone,
+             salon_category, owner_auth_phone, public_contact_phone, public_whatsapp_phone,
+             timezone_iana, timezone_offset_hours, currency, currency_code, currency_symbol,
+             default_lang, enabled_langs, package_tier, plan_tier, monthly_booking_limit,
+             billing_status, whatsapp_addon_enabled, address, google_maps_url, google_review_url,
+             assigned_agent_id
+           )
+           VALUES (
+             $1, $2, $3, $4, $5,
+             $6, $7, $8, $9,
+             $10, $11, $12, $12, $13,
+             $14, $15::text[], $16, $16, $17,
+             'PENDING_ACTIVATION', FALSE, $18, $19, $20,
+             $21
+           )
+           ON CONFLICT (id) DO NOTHING`,
+          [
+            params.salonId,
+            params.publicCode,
+            params.salonName,
+            params.ownerName || 'Salon Owner',
+            params.publicContactPhone || params.ownerAuthPhone,
+            params.salonCategory === 'LADIES' ? 'LADIES' : 'MENS',
+            params.ownerAuthPhone,
+            params.publicContactPhone,
+            params.publicWhatsappPhone || null,
+            params.timezoneIana,
+            Number.isFinite(params.timezoneOffsetHours) ? params.timezoneOffsetHours : 5,
+            params.currencyCode,
+            params.currencySymbol,
+            params.defaultLang || 'en',
+            enabledLangs,
+            packageTier,
+            params.monthlyLimit,
+            params.address || '',
+            params.googleMapsUrl || '',
+            params.googleReviewUrl || '',
+            normalizedActor.agentId,
+          ]
+        );
+        return;
+      }
+
+      // SALON_OWNER: Never overwrites billing_status, package_tier, plan_tier, or monthly_booking_limit on UPDATE.
       await client.query(
         `INSERT INTO salons (
            id, public_code, salon_name, owner_name, whatsapp_phone,
@@ -203,7 +667,7 @@ export async function persistPostgresSnapshotMirror(params: {
            $6, $7, $8, $9,
            $10, $11, $12, $12, $13,
            $14, $15::text[], $16, $16, $17,
-           $18, FALSE, $19, $20, $21
+           'PENDING_ACTIVATION', FALSE, $18, $19, $20
          )
          ON CONFLICT (id) DO UPDATE SET
            public_code = COALESCE(salons.public_code, EXCLUDED.public_code),
@@ -218,10 +682,6 @@ export async function persistPostgresSnapshotMirror(params: {
            currency_symbol = EXCLUDED.currency_symbol,
            default_lang = EXCLUDED.default_lang,
            enabled_langs = EXCLUDED.enabled_langs,
-           package_tier = EXCLUDED.package_tier,
-           plan_tier = EXCLUDED.plan_tier,
-           monthly_booking_limit = EXCLUDED.monthly_booking_limit,
-           billing_status = EXCLUDED.billing_status,
            address = EXCLUDED.address,
            google_maps_url = EXCLUDED.google_maps_url,
            google_review_url = EXCLUDED.google_review_url,
@@ -241,12 +701,9 @@ export async function persistPostgresSnapshotMirror(params: {
           params.currencyCode,
           params.currencySymbol,
           params.defaultLang || 'en',
-          Array.isArray(params.enabledLangs) && params.enabledLangs.length > 0
-            ? params.enabledLangs
-            : ['en', 'roman_ur', 'ur'],
+          enabledLangs,
           packageTier,
           params.monthlyLimit,
-          billingStatus,
           params.address || '',
           params.googleMapsUrl || '',
           params.googleReviewUrl || '',
@@ -254,6 +711,9 @@ export async function persistPostgresSnapshotMirror(params: {
       );
     });
   } catch (err) {
+    if (err instanceof PgContextError) {
+      throw err;
+    }
     console.warn(
       'Postgres salon sync failed (verify migration 003_reconcile_authoritative_schema.sql is applied):',
       err
@@ -267,10 +727,13 @@ export async function persistPostgresSnapshotMirror(params: {
 export async function findSalonByPublicCodeInPostgres(
   publicCode: string
 ): Promise<PostgresSalonLookupRow | null> {
+  const cleanCode = typeof publicCode === 'string' ? publicCode.trim() : '';
+  if (!cleanCode || !cleanCode.startsWith('wc_')) return null;
+
   const pool = getPgPool();
   if (!pool) return null;
   try {
-    return await withPgTransaction({ role: 'PUBLIC_FLOW' }, async (client) => {
+    return await withPgTransaction(createPublicFlowLookupActor(), async (client) => {
       const res = await client.query<{
         id: string;
         public_code: string;
@@ -300,7 +763,7 @@ export async function findSalonByPublicCodeInPostgres(
          FROM salons
          WHERE public_code = $1
          LIMIT 1`,
-        [publicCode]
+        [cleanCode]
       );
       if (res.rows.length === 0) return null;
       const row = res.rows[0];
@@ -338,6 +801,9 @@ export async function findSalonByPublicCodeInPostgres(
       };
     });
   } catch (err) {
+    if (err instanceof PgContextError) {
+      throw err;
+    }
     console.warn('Postgres public_code lookup failed:', err);
     if (isProductionEnv()) {
       throw err;
@@ -366,6 +832,15 @@ export async function recordBookingInPostgres(params: {
   accessTokenHash: string;
   accessTokenExpiresAtIso: string;
 }): Promise<{ ok: true } | { ok: false; code: 'OVERLAP' | 'DB_UNAVAILABLE'; error: string }> {
+  const cleanCode = typeof params.salonPublicCode === 'string' ? params.salonPublicCode.trim() : '';
+  if (!cleanCode || !cleanCode.startsWith('wc_')) {
+    return {
+      ok: false,
+      code: 'DB_UNAVAILABLE',
+      error: 'Valid salon public booking code is required.',
+    };
+  }
+
   const pool = getPgPool();
   if (!pool) {
     if (isProductionEnv()) {
@@ -379,10 +854,10 @@ export async function recordBookingInPostgres(params: {
   }
 
   try {
-    return await withPgTransaction({ role: 'PUBLIC_FLOW' }, async (client) => {
+    return await withPgTransaction(createPublicFlowLookupActor(), async (client) => {
       const salonRes = await client.query<{ id: string }>(
         'SELECT id FROM salons WHERE public_code = $1 LIMIT 1',
-        [params.salonPublicCode]
+        [cleanCode]
       );
       if (salonRes.rows.length === 0) {
         return {
@@ -394,7 +869,7 @@ export async function recordBookingInPostgres(params: {
       const salonId = salonRes.rows[0].id;
 
       // Narrow transaction RLS context to the resolved salon_id (salons.id TEXT)
-      await applyPgActorContext(client, { role: 'PUBLIC_FLOW', salonId });
+      await narrowPublicFlowSalonContext(client, salonId);
 
       const generatedClientId = `cli-${Date.now().toString(36)}-${Math.random()
         .toString(36)
