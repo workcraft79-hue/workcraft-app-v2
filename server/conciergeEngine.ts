@@ -45,11 +45,35 @@ import { kvGetJson, kvSetJson } from './kvBridge.js';
 import {
   PgContextError,
   type PgActorContext,
+  type PgAvailabilitySnapshot,
+  type PgBookingRecord,
+  type PgClientVisitRecord,
+  type SlotResolverFn,
+  cancelBookingByAccessTokenInPostgres,
+  completeAppointmentAndRecordVisitInPostgres,
+  createPublicFlowSalonActor,
+  fetchAvailabilitySnapshotFromPostgres,
   findSalonByPublicCodeInPostgres,
+  getBookingByAccessTokenFromPostgres,
+  isPostgresConfigured,
+  listSalonBookingsFromPostgres,
   persistPostgresSnapshotMirror,
   recordBookingInPostgres,
+  rescheduleBookingByAccessTokenInPostgres,
+  rescheduleBookingByOwnerInPostgres,
+  updateBookingStatusInPostgres,
   validatePgActorContext,
 } from './postgresRepo.js';
+
+export class BookingLifecycleError extends Error {
+  public readonly statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = 'BookingLifecycleError';
+    this.statusCode = statusCode;
+  }
+}
 import {
   clampInteger,
   getSalonsAssignedToAgent,
@@ -1779,7 +1803,7 @@ export function runAutoCompleteAppointmentsCron(salonId?: string): { completedCo
   return { completedCount };
 }
 
-export function getSalonConciergeState(
+function buildSalonBaseStateSnapshot(
   salonId: string,
   meta?: {
     salonName?: string;
@@ -1789,7 +1813,8 @@ export function getSalonConciergeState(
     packageTier?: SalonPackageTier;
     salonCategory?: SalonCategory;
     enabledServices?: SalonServiceRate[];
-  }
+  },
+  options?: { runAutoComplete?: boolean }
 ): SalonConciergeStateResponse {
   const store = ensureStoreLoaded();
   const settings = ensureSalonExists(salonId, meta);
@@ -1802,8 +1827,10 @@ export function getSalonConciergeState(
   if (!Array.isArray(settings.enabledServices) || settings.enabledServices.length === 0) {
     settings.enabledServices = getDefaultServicesForCategory(settings.salonCategory, settings.currency);
   }
-  runAutoCompleteAppointmentsCron(salonId);
-  runDealExpiryAndVideoRetentionCron(salonId);
+  if (options?.runAutoComplete !== false) {
+    runAutoCompleteAppointmentsCron(salonId);
+    runDealExpiryAndVideoRetentionCron(salonId);
+  }
   const regionMeta = detectRegionFromPhone(settings.whatsappPhone);
   const languageOptions = getLanguageMenuForRegion(regionMeta.region, settings.whatsappPhone);
   const greetingPromptPreview = buildGreetingMenuText(settings.salonName, regionMeta.region);
@@ -1831,6 +1858,21 @@ export function getSalonConciergeState(
     opportunities: getRetentionOpportunities(salonId),
     bookingAuditLog: (store.bookingAuditLog || []).filter((e) => e.salonId === salonId).slice(0, 80),
   };
+}
+
+export function getSalonConciergeState(
+  salonId: string,
+  meta?: {
+    salonName?: string;
+    ownerName?: string;
+    whatsappPhone?: string;
+    billingStatus?: SalonBillingStatus;
+    packageTier?: SalonPackageTier;
+    salonCategory?: SalonCategory;
+    enabledServices?: SalonServiceRate[];
+  }
+): SalonConciergeStateResponse {
+  return buildSalonBaseStateSnapshot(salonId, meta, { runAutoComplete: true });
 }
 
 export async function updateRetentionSettings(
@@ -2441,16 +2483,250 @@ export function saveFirstTimeClientProfile(
   };
 }
 
-export function updateAppointmentStatus(
+function assertOwnerOrFounderConciergeActor(
+  actor: PgActorContext,
+  salonId: string,
+  operation: string
+) {
+  const normalized = validatePgActorContext(actor);
+  if (normalized.role !== 'FOUNDER' && normalized.role !== 'SALON_OWNER') {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      `${normalized.role} is not authorized to perform ${operation}.`
+    );
+  }
+  if (normalized.role === 'SALON_OWNER' && normalized.salonId !== salonId) {
+    throw new PgContextError(
+      'FORBIDDEN_TENANT',
+      `SALON_OWNER (${normalized.salonId}) cannot access salon ${salonId} during ${operation}.`
+    );
+  }
+  return normalized;
+}
+
+function generateBookingManagementToken(publicCode: string): string {
+  const encodedCode = Buffer.from(publicCode, 'utf8').toString('base64url');
+  return `wcbt_${encodedCode}.${crypto.randomBytes(24).toString('base64url')}`;
+}
+
+function getWideUtcDayWindow(dateStr: string): { windowStartIso: string; windowEndIso: string } {
+  const parts = dateStr.split('-').map((n) => parseInt(n, 10));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) {
+    const now = Date.now();
+    return {
+      windowStartIso: new Date(now - 86400000).toISOString(),
+      windowEndIso: new Date(now + 2 * 86400000).toISOString(),
+    };
+  }
+  const [y, m, d] = parts;
+  const startUtcMs = Date.UTC(y, m - 1, d, 0, 0, 0) - 14 * 3600000;
+  const endUtcMs = Date.UTC(y, m - 1, d, 23, 59, 59, 999) + 14 * 3600000;
+  return {
+    windowStartIso: new Date(startUtcMs).toISOString(),
+    windowEndIso: new Date(endUtcMs).toISOString(),
+  };
+}
+
+function mapPgBookingToConciergeAppointment(
+  rec: PgBookingRecord,
+  tzOffsetHours?: number
+): ConciergeAppointment {
+  const tz = Number.isFinite(tzOffsetHours) ? (tzOffsetHours as number) : rec.timezoneOffsetHours;
+  const appointmentDate =
+    getIsoLocalDateStr(rec.startsAtIso, tz) || getSalonLocalDateParts(tz).dateStr;
+  const startMs = new Date(rec.startsAtIso).getTime();
+  const localDate = new Date(startMs + tz * 3600000);
+  const timeSlot = Number.isNaN(localDate.getTime())
+    ? '12:00 PM'
+    : formatMinutesToTimeSlot(localDate.getUTCHours() * 60 + localDate.getUTCMinutes());
+  const endMs = new Date(rec.endsAtIso).getTime();
+  const serviceNames = rec.servicesSnapshot
+    .map((s) => s.name)
+    .filter(Boolean)
+    .join(' + ');
+  const serviceIds = rec.servicesSnapshot
+    .map((s) => s.id || s.name)
+    .filter((x): x is string => Boolean(x));
+
+  return {
+    id: rec.bookingRef || rec.id,
+    salonId: rec.salonId,
+    clientId: rec.clientId,
+    clientName: rec.clientName,
+    clientPhone: rec.clientPhone,
+    barberName: rec.stylistName,
+    service: serviceNames || 'Salon Service',
+    serviceIds,
+    price: rec.totalPrice,
+    appointmentDate,
+    timeSlot,
+    durationMins: rec.totalDurationMins,
+    scheduledEndMs: Number.isNaN(endMs) ? undefined : endMs,
+    dealId: rec.dealId,
+    idempotencyKey: rec.idempotencyKey,
+    proofHash: rec.proofHash,
+    sourceType: (rec.source as ConciergeAppointment['sourceType']) || 'WEB_LINK',
+    status: rec.status === 'NO_SHOW' ? 'CANCELED' : rec.status,
+    canceled: rec.status === 'CANCELED',
+    scheduledForIso: rec.startsAtIso,
+    completedAt: rec.completedAtIso,
+    reviewPromptSentAt: null,
+    rating: null,
+    ratingComment: null,
+    reviewRoutedStatus: 'PENDING',
+  };
+}
+
+function mapPgClientVisitToProfile(c: PgClientVisitRecord, defaultLang: ClientPreferredLang): ConciergeClientProfile {
+  return {
+    id: c.id,
+    salonId: c.salonId,
+    name: c.name,
+    phone: c.phone,
+    preferredLanguage: sanitizeClientLang(c.preferredLanguage || defaultLang, defaultLang),
+    awaitingLanguageSelection: false,
+    birthDate: c.birthDate || '',
+    lastCompletedVisitAt: c.lastCompletedVisitAt,
+    lastBirthdaySentYear: null,
+    lastWinbackSentAt: null,
+    awaitingWinbackRebook: false,
+    awaitingReviewAppointmentId: null,
+    totalVisits: c.totalVisits,
+  };
+}
+
+function mapPgBookingToManagementPayload(rec: PgBookingRecord): BookingManagementPayload {
+  const settings = ensureSalonExists(rec.salonId);
+  const tz = Number.isFinite(rec.timezoneOffsetHours)
+    ? rec.timezoneOffsetHours
+    : settings.timezoneOffsetHours;
+  const startMs = new Date(rec.startsAtIso).getTime();
+  const localDate = new Date(startMs + tz * 3600000);
+  const timeSlot = Number.isNaN(localDate.getTime())
+    ? '12:00 PM'
+    : formatMinutesToTimeSlot(localDate.getUTCHours() * 60 + localDate.getUTCMinutes());
+  const appointmentDate =
+    getIsoLocalDateStr(rec.startsAtIso, tz) || getSalonLocalDateParts(tz).dateStr;
+  const service =
+    rec.servicesSnapshot
+      .map((s) => s.name)
+      .filter(Boolean)
+      .join(' + ') || 'Salon Service';
+  const serviceIds = rec.servicesSnapshot
+    .map((s) => s.id || s.name)
+    .filter((x): x is string => Boolean(x));
+  const address = rec.address || settings.address || SEEDED_SALON_ADDRESSES[rec.salonId] || 'Salon Location';
+  const googleMapsUrl =
+    rec.googleMapsUrl || settings.googleMapsUrl || buildGoogleMapsSearchUrl(rec.salonName || settings.salonName, address);
+
+  return {
+    ok: true,
+    bookingId: rec.bookingRef || rec.id,
+    bookingRef: rec.bookingRef || rec.id,
+    salonPublicCode: rec.salonPublicCode || settings.publicCode,
+    salonName: rec.salonName || settings.salonName,
+    publicContactPhone: rec.publicContactPhone || settings.publicContactPhone || settings.whatsappPhone,
+    publicWhatsappPhone:
+      rec.publicWhatsappPhone ||
+      rec.publicContactPhone ||
+      settings.publicWhatsappPhone ||
+      settings.publicContactPhone ||
+      settings.whatsappPhone,
+    clientName: rec.clientName,
+    maskedPhone: maskPhoneNumber(rec.clientPhone),
+    service,
+    serviceIds,
+    barberName: rec.stylistName,
+    appointmentDate,
+    timeSlot,
+    durationMins: rec.totalDurationMins || 35,
+    totalPrice: rec.totalPrice,
+    currencySymbol: rec.currencySymbol || settings.currencySymbol,
+    status: rec.status === 'NO_SHOW' ? 'CANCELED' : rec.status,
+    address,
+    googleMapsUrl,
+    // Neutral review URL revealed STRICTLY when appointment is COMPLETED (no star-rating gating!)
+    googleReviewUrl: rec.status === 'COMPLETED' ? rec.googleReviewUrl || settings.googleReviewUrl || null : null,
+    preferredLanguage: sanitizeClientLang(rec.preferredLanguage || rec.defaultLang || settings.defaultLang, 'en'),
+    icsContent: buildIcsCalendarContent({
+      bookingId: rec.bookingRef || rec.id,
+      salonName: rec.salonName || settings.salonName,
+      service,
+      barberName: rec.stylistName,
+      address,
+      startsAtIso: rec.startsAtIso,
+      durationMins: rec.totalDurationMins || 35,
+    }),
+  };
+}
+
+async function buildOwnerStateFromPostgres(
+  salonId: string,
+  actor: PgActorContext,
+  updatedClient?: ConciergeClientProfile
+): Promise<SalonConciergeStateResponse> {
+  const baseState = buildSalonBaseStateSnapshot(salonId, undefined, { runAutoComplete: false });
+  const pgData = await listSalonBookingsFromPostgres(salonId, actor);
+  if (pgData) {
+    baseState.appointments = pgData.bookings.map((b) =>
+      mapPgBookingToConciergeAppointment(b, baseState.settings.timezoneOffsetHours)
+    );
+    baseState.bookingAuditLog = pgData.auditLog;
+  }
+  if (updatedClient) {
+    const idx = baseState.clients.findIndex((c) => c.id === updatedClient.id || c.phone === updatedClient.phone);
+    if (idx >= 0) {
+      baseState.clients[idx] = { ...baseState.clients[idx], ...updatedClient };
+    } else {
+      baseState.clients = [updatedClient, ...baseState.clients];
+    }
+  }
+  return baseState;
+}
+
+export async function updateAppointmentStatus(
   salonId: string,
   bookingId: string,
-  nextStatus: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED'
-): { ok: true; appointment: ConciergeAppointment; state: SalonConciergeStateResponse } | { ok: false; error: string } {
+  nextStatus: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED',
+  actor: PgActorContext
+): Promise<
+  | { ok: true; appointment: ConciergeAppointment; state: SalonConciergeStateResponse }
+  | { ok: false; statusCode?: number; error: string }
+> {
+  assertOwnerOrFounderConciergeActor(actor, salonId, 'updateAppointmentStatus');
+
+  if (isPostgresConfigured()) {
+    const pgOutcome = await updateBookingStatusInPostgres({ salonId, bookingId, nextStatus }, actor);
+    if (!pgOutcome.ok) {
+      return { ok: false, statusCode: pgOutcome.statusCode, error: pgOutcome.error };
+    }
+    const state = await buildOwnerStateFromPostgres(salonId, actor);
+    const appointment = mapPgBookingToConciergeAppointment(
+      pgOutcome.booking,
+      state.settings.timezoneOffsetHours
+    );
+    return { ok: true, appointment, state };
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    return {
+      ok: false,
+      statusCode: 503,
+      error: 'Database is not configured. Status update cannot be committed without persistent storage.',
+    };
+  }
+
   const store = ensureStoreLoaded();
   ensureSalonExists(salonId);
   const appt = store.appointments.find((a) => a.salonId === salonId && a.id === bookingId);
   if (!appt) {
-    return { ok: false, error: 'Appointment not found for this salon.' };
+    return { ok: false, statusCode: 404, error: 'Appointment not found for this salon.' };
+  }
+  if (appt.status === 'COMPLETED' && nextStatus !== 'COMPLETED') {
+    return { ok: false, statusCode: 409, error: `Completed appointments cannot transition to ${nextStatus}.` };
+  }
+  if (appt.status === 'CANCELED' && nextStatus !== 'CANCELED') {
+    return { ok: false, statusCode: 409, error: 'Canceled appointments cannot be reopened.' };
   }
   appt.status = nextStatus;
   if (nextStatus === 'CANCELED') {
@@ -2474,17 +2750,111 @@ export function updateAppointmentStatus(
   return { ok: true, appointment: appt, state: getSalonConciergeState(salonId) };
 }
 
-export function rescheduleAppointmentByOwner(
+export async function rescheduleAppointmentByOwner(
   salonId: string,
   bookingId: string,
-  input: { appointmentDate: string; timeSlot: string; barberName?: string }
-): {
+  input: { appointmentDate: string; timeSlot: string; barberName?: string },
+  actor: PgActorContext
+): Promise<{
   statusCode: number;
   ok: boolean;
   error?: string;
   appointment?: ConciergeAppointment;
   state?: SalonConciergeStateResponse;
-} {
+}> {
+  assertOwnerOrFounderConciergeActor(actor, salonId, 'rescheduleAppointmentByOwner');
+
+  const cleanDate = sanitizePlainText(input.appointmentDate || '', 20);
+  const cleanTimeSlot = sanitizePlainText(input.timeSlot || '', 24);
+  const requestedBarber = input.barberName ? sanitizePlainText(input.barberName, 60) : undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) || !cleanTimeSlot) {
+    return { statusCode: 400, ok: false, error: 'Valid date and time slot are required.' };
+  }
+
+  if (isPostgresConfigured()) {
+    const { windowStartIso, windowEndIso } = getWideUtcDayWindow(cleanDate);
+    const resolveSlot: SlotResolverFn = (snapshot, currentBooking) => {
+      const targetBarber = requestedBarber || currentBooking.stylistName;
+      const serviceIds = currentBooking.servicesSnapshot
+        .map((s) => s.id || s.name)
+        .filter((x): x is string => Boolean(x));
+      const avail = evaluateAvailabilityFromSnapshot({
+        salonId,
+        date: cleanDate,
+        exactDurationMins: currentBooking.totalDurationMins || 35,
+        serviceIds,
+        excludeBookingId: currentBooking.id,
+        snapshot,
+      });
+      if (!avail.isOpen) {
+        return {
+          ok: false,
+          statusCode: 409,
+          error: avail.closedReason || 'Salon is closed on that date.',
+        };
+      }
+      const startMinutes = parseTimeSlotToMinutes(cleanTimeSlot);
+      const formattedTime = startMinutes >= 0 ? formatMinutesToTimeSlot(startMinutes) : cleanTimeSlot;
+      const matchedSlot = avail.slots.find(
+        (s) => s.startMinutes === startMinutes || s.timeSlot === formattedTime
+      );
+      const matchedBarber = matchedSlot?.barbers.find(
+        (b) => b.name.toLowerCase() === targetBarber.toLowerCase() && b.available
+      );
+      if (!matchedSlot || !matchedBarber) {
+        return {
+          ok: false,
+          statusCode: 409,
+          error: `${targetBarber} is not available at ${formattedTime} on ${cleanDate}.`,
+        };
+      }
+      const [y, m, d] = cleanDate.split('-').map((n) => parseInt(n, 10));
+      const tz = Number.isFinite(snapshot.timezoneOffsetHours)
+        ? snapshot.timezoneOffsetHours
+        : ensureSalonExists(salonId).timezoneOffsetHours;
+      const startUtcMs =
+        Date.UTC(y, m - 1, d, Math.floor(startMinutes / 60), startMinutes % 60, 0) - tz * 3600000;
+      const dur = currentBooking.totalDurationMins || 35;
+      return {
+        ok: true,
+        startUtcIso: new Date(startUtcMs).toISOString(),
+        endUtcIso: new Date(startUtcMs + dur * 60000).toISOString(),
+        formattedTime,
+        barberName: matchedBarber.name,
+        durationMins: dur,
+      };
+    };
+
+    const pgResult = await rescheduleBookingByOwnerInPostgres(
+      {
+        salonId,
+        bookingId,
+        appointmentDate: cleanDate,
+        windowStartIso,
+        windowEndIso,
+        resolveSlot,
+      },
+      actor
+    );
+    if (!pgResult.ok) {
+      return { statusCode: pgResult.statusCode, ok: false, error: pgResult.error };
+    }
+    const state = await buildOwnerStateFromPostgres(salonId, actor);
+    const appointment = mapPgBookingToConciergeAppointment(
+      pgResult.booking,
+      state.settings.timezoneOffsetHours
+    );
+    return { statusCode: 200, ok: true, appointment, state };
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    return {
+      statusCode: 503,
+      ok: false,
+      error: 'Database is not configured. Reschedule cannot be committed without persistent storage.',
+    };
+  }
+
   const store = ensureStoreLoaded();
   const settings = ensureSalonExists(salonId);
   const appt = store.appointments.find((a) => a.salonId === salonId && a.id === bookingId);
@@ -2499,20 +2869,15 @@ export function rescheduleAppointmentByOwner(
     };
   }
 
-  const cleanDate = sanitizePlainText(input.appointmentDate || '', 20);
-  const cleanTimeSlot = sanitizePlainText(input.timeSlot || '', 24);
-  const targetBarber = sanitizePlainText(input.barberName || appt.barberName, 60);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) || !cleanTimeSlot) {
-    return { statusCode: 400, ok: false, error: 'Valid date and time slot are required.' };
-  }
-
+  const targetBarber = requestedBarber || appt.barberName;
   const prevStatus = appt.status;
   appt.status = 'CANCELED';
-  const avail = getAvailableSlotsAndBarbers({
+  const avail = evaluateAvailabilityFromSnapshot({
     salonId,
     date: cleanDate,
-    durationMins: appt.durationMins || 35,
+    exactDurationMins: appt.durationMins || 35,
     serviceIds: appt.serviceIds,
+    snapshot: null,
   });
   appt.status = prevStatus;
 
@@ -2569,7 +2934,7 @@ export function rescheduleAppointmentByOwner(
   };
 }
 
-export function completeAppointmentAndRecordVisit(
+export async function completeAppointmentAndRecordVisit(
   salonId: string,
   payload: {
     appointmentId: string;
@@ -2581,13 +2946,15 @@ export function completeAppointmentAndRecordVisit(
     timeSlot: string;
     birthDate?: string;
     preferredLanguage?: ClientPreferredLang;
-  }
-): {
+  },
+  actor: PgActorContext
+): Promise<{
   appointment: ConciergeAppointment;
   client: ConciergeClientProfile;
   state: SalonConciergeStateResponse;
-} {
-  const store = ensureStoreLoaded();
+}> {
+  assertOwnerOrFounderConciergeActor(actor, salonId, 'completeAppointmentAndRecordVisit');
+
   const settings = ensureSalonExists(salonId);
   const regionMeta = detectRegionFromPhone(settings.whatsappPhone);
   const defaultLang: ClientPreferredLang =
@@ -2600,7 +2967,59 @@ export function completeAppointmentAndRecordVisit(
   const cleanService = sanitizePlainText(payload.service, 160) || 'Salon Service';
   const cleanTimeSlot = sanitizePlainText(payload.timeSlot, 40) || 'Completed';
   const cleanPrice = clampInteger(payload.price, 0, 1000000, 0);
+  const cleanBirthDate = payload.birthDate ? sanitizeBirthDate(payload.birthDate) : '';
 
+  if (isPostgresConfigured()) {
+    const nowMs = Date.now();
+    const startsAtIso = new Date(nowMs).toISOString();
+    const endsAtIso = new Date(nowMs + 35 * 60000).toISOString();
+    const proofHash = crypto
+      .createHash('sha256')
+      .update(`${salonId}:${cleanApptId}:${cleanClientPhone}:${cleanBarber}:COMPLETED`)
+      .digest('hex');
+
+    const pgResult = await completeAppointmentAndRecordVisitInPostgres(
+      {
+        salonId,
+        appointmentId: cleanApptId,
+        clientName: cleanClientName,
+        clientPhone: cleanClientPhone,
+        barberName: cleanBarber,
+        service: cleanService,
+        price: cleanPrice,
+        birthDate: cleanBirthDate,
+        preferredLanguage: defaultLang,
+        startsAtIso,
+        endsAtIso,
+        proofHash,
+      },
+      actor
+    );
+    if (!pgResult.ok) {
+      throw new BookingLifecycleError(pgResult.statusCode, pgResult.error);
+    }
+
+    const mappedClient = mapPgClientVisitToProfile(pgResult.client, defaultLang);
+    const state = await buildOwnerStateFromPostgres(salonId, actor, mappedClient);
+    const appointment = mapPgBookingToConciergeAppointment(
+      pgResult.booking,
+      state.settings.timezoneOffsetHours
+    );
+    return {
+      appointment,
+      client: mappedClient,
+      state,
+    };
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new BookingLifecycleError(
+      503,
+      'Database is not configured. Completion cannot be recorded without persistent storage.'
+    );
+  }
+
+  const store = ensureStoreLoaded();
   const client = upsertClientProfile(salonId, {
     phone: cleanClientPhone,
     name: cleanClientName,
@@ -2618,6 +3037,7 @@ export function completeAppointmentAndRecordVisit(
     (a) => a.salonId === salonId && a.id === cleanApptId
   );
   if (!appt) {
+    client.totalVisits = (client.totalVisits || 0) + 1;
     appt = {
       id: cleanApptId,
       salonId,
@@ -2628,7 +3048,7 @@ export function completeAppointmentAndRecordVisit(
       service: cleanService,
       price: cleanPrice,
       timeSlot: cleanTimeSlot,
-      sourceType: 'WHATSAPP_BOT',
+      sourceType: 'OWNER_WALKIN',
       status: 'COMPLETED',
       scheduledForIso: nowIso,
       completedAt: nowIso,
@@ -2639,8 +3059,14 @@ export function completeAppointmentAndRecordVisit(
     };
     store.appointments.unshift(appt);
   } else {
+    if (appt.status === 'CANCELED') {
+      throw new BookingLifecycleError(409, 'Canceled appointments cannot be completed.');
+    }
+    if (appt.status !== 'COMPLETED') {
+      client.totalVisits = (client.totalVisits || 0) + 1;
+    }
     appt.status = 'COMPLETED';
-    appt.completedAt = nowIso;
+    appt.completedAt = appt.completedAt || nowIso;
     appt.clientId = client.id;
   }
 
@@ -5083,19 +5509,49 @@ export function handleCustomerWhatsAppAction(input: {
   };
 }
 
-export function getAvailableSlotsAndBarbers(input: {
+function doesBarberNameMatch(candidateName: string, targetName: string): boolean {
+  const normCandidate = candidateName.trim().toLowerCase();
+  const normTarget = targetName.trim().toLowerCase();
+  if (!normCandidate || !normTarget) return false;
+  return (
+    normCandidate === normTarget ||
+    normCandidate.includes(normTarget) ||
+    normTarget.includes(normCandidate.split(' ')[0])
+  );
+}
+
+function evaluateAvailabilityFromSnapshot(input: {
   salonId: string;
   date: string;
   durationMins?: number;
+  exactDurationMins?: number;
   serviceIds?: string[];
   demoBusyBarber?: string;
   demoBusyTimeSlot?: string;
+  excludeBookingId?: string;
+  snapshot: PgAvailabilitySnapshot | null;
 }): CustomerAvailabilityResponse {
+  const store = ensureStoreLoaded();
   const settings = ensureSalonExists(input.salonId);
-  const hours = settings.operatingHours || { ...DEFAULT_SALON_OPERATING_HOURS };
-  const barbers = getSalonBarbers(input.salonId);
+  const snapshot = input.snapshot;
+  const tz = snapshot && Number.isFinite(snapshot.timezoneOffsetHours)
+    ? snapshot.timezoneOffsetHours
+    : settings.timezoneOffsetHours;
+  const hours: SalonOperatingHours =
+    snapshot?.operatingHours && Object.keys(snapshot.operatingHours).length > 0
+      ? ({ ...DEFAULT_SALON_OPERATING_HOURS, ...snapshot.operatingHours } as SalonOperatingHours)
+      : settings.operatingHours || { ...DEFAULT_SALON_OPERATING_HOURS };
 
-  const configuredServices = (settings.enabledServices || []).filter((s) => s.active !== false);
+  const barbers =
+    snapshot && snapshot.stylists.length > 0
+      ? snapshot.stylists.filter((s) => s.active).map((s) => s.name)
+      : getSalonBarbers(input.salonId);
+
+  const configuredServices =
+    snapshot && snapshot.services.length > 0
+      ? snapshot.services.filter((s) => s.active)
+      : (settings.enabledServices || []).filter((s) => s.active !== false);
+
   const requestedIds = Array.isArray(input.serviceIds) ? input.serviceIds : [];
   const selectedServices =
     requestedIds.length > 0
@@ -5109,7 +5565,11 @@ export function getAvailableSlotsAndBarbers(input: {
   );
   const eligibleBarbersSet: Set<string> | null = (() => {
     const sets = selectedServices
-      .map((s) => (Array.isArray(s.eligibleStylists) && s.eligibleStylists.length > 0 ? s.eligibleStylists : null))
+      .map((s) =>
+        Array.isArray(s.eligibleStylists) && s.eligibleStylists.length > 0
+          ? s.eligibleStylists
+          : null
+      )
       .filter((x): x is string[] => Boolean(x));
     if (sets.length === 0) return null;
     let common = new Set(sets[0].map((n) => n.toLowerCase()));
@@ -5120,16 +5580,20 @@ export function getAvailableSlotsAndBarbers(input: {
     return common;
   })();
 
-  const durationMins = clampInteger(input.durationMins ?? 40, 10, 300, 40) + maxBufferMins;
+  const durationMins =
+    input.exactDurationMins !== undefined
+      ? clampInteger(input.exactDurationMins, 10, 480, 40)
+      : clampInteger(input.durationMins ?? 40, 10, 300, 40) + maxBufferMins;
+
   const cleanDate = /^\d{4}-\d{2}-\d{2}$/.test(input.date)
     ? input.date
-    : getSalonLocalDateParts(settings.timezoneOffsetHours).dateStr;
+    : getSalonLocalDateParts(tz).dateStr;
 
   const schedule = getScheduleForDate(hours, cleanDate);
   if (!schedule.isOpen) {
     return {
       salonId: input.salonId,
-      publicCode: settings.publicCode,
+      publicCode: snapshot?.publicCode || settings.publicCode,
       date: cleanDate,
       dayName: schedule.dayName,
       isOpen: false,
@@ -5140,7 +5604,9 @@ export function getAvailableSlotsAndBarbers(input: {
     };
   }
 
-  const localNow = getSalonLocalDateParts(settings.timezoneOffsetHours);
+  const [y, m, d] = cleanDate.split('-').map((n) => parseInt(n, 10));
+  const localDayStartUtcMs = Date.UTC(y, m - 1, d, 0, 0, 0) - tz * 3600000;
+  const localNow = getSalonLocalDateParts(tz);
   const isToday = cleanDate === localNow.dateStr;
   const slots: CustomerSlotAvailability[] = [];
 
@@ -5167,20 +5633,108 @@ export function getAvailableSlotsAndBarbers(input: {
           reason: 'Not assigned to selected service',
         };
       }
-      const check = isBarberBusyAtWindow(
-        input.salonId,
-        barberName,
-        start,
-        durationMins,
-        cleanDate,
-        input.demoBusyBarber,
-        input.demoBusyTimeSlot
-      );
-      return {
-        name: barberName,
-        available: !check.busy,
-        reason: check.reason,
-      };
+
+      if (!snapshot) {
+        const check = isBarberBusyAtWindow(
+          input.salonId,
+          barberName,
+          start,
+          durationMins,
+          cleanDate,
+          input.demoBusyBarber,
+          input.demoBusyTimeSlot
+        );
+        return {
+          name: barberName,
+          available: !check.busy,
+          reason: check.reason,
+        };
+      }
+
+      if (input.demoBusyBarber && doesBarberNameMatch(input.demoBusyBarber, barberName)) {
+        if (!input.demoBusyTimeSlot) {
+          return { name: barberName, available: false, reason: 'Barber Busy (Demo Test)' };
+        }
+        const demoStart = parseTimeSlotToMinutes(input.demoBusyTimeSlot);
+        if (demoStart >= 0 && start < demoStart + 45 && end > demoStart) {
+          return {
+            name: barberName,
+            available: false,
+            reason: `Booked at ${input.demoBusyTimeSlot} (Demo Test)`,
+          };
+        }
+      }
+
+      for (const lock of store.chairLocks) {
+        if (lock.salonId !== input.salonId) continue;
+        const lockDateStr = getIsoLocalDateStr(lock.createdAt, tz) || localNow.dateStr;
+        if (lockDateStr !== cleanDate) continue;
+        if (doesBarberNameMatch(lock.barberName, barberName)) {
+          if (start < lock.endMinutes && end > lock.startMinutes) {
+            return {
+              name: barberName,
+              available: false,
+              reason: `Chair Locked (${lock.startTimeSlot}–${lock.endTimeSlot})`,
+            };
+          }
+        }
+      }
+
+      for (const lv of snapshot.leaves) {
+        if (!doesBarberNameMatch(lv.stylistName, barberName)) continue;
+        const lvStartMins = (new Date(lv.startsAtIso).getTime() - localDayStartUtcMs) / 60000;
+        const lvEndMins = (new Date(lv.endsAtIso).getTime() - localDayStartUtcMs) / 60000;
+        if (start < lvEndMins && end > lvStartMins) {
+          return {
+            name: barberName,
+            available: false,
+            reason: lv.reason || 'Stylist on Leave',
+          };
+        }
+      }
+
+      for (const lv of store.stylistLeaves || []) {
+        if (lv.salonId !== input.salonId || lv.date !== cleanDate) continue;
+        if (!doesBarberNameMatch(lv.stylistName, barberName)) continue;
+        if (lv.fullDay !== false && !lv.startTime && !lv.endTime) {
+          return {
+            name: barberName,
+            available: false,
+            reason: lv.reason || 'Stylist on Leave',
+          };
+        }
+        const lvStart = lv.startTime ? parseTimeSlotToMinutes(lv.startTime) : 0;
+        const lvEnd = lv.endTime ? parseTimeSlotToMinutes(lv.endTime) : 1440;
+        if (lvStart >= 0 && lvEnd > lvStart && start < lvEnd && end > lvStart) {
+          return {
+            name: barberName,
+            available: false,
+            reason: lv.reason || `On Leave (${lv.startTime}–${lv.endTime})`,
+          };
+        }
+      }
+
+      for (const bk of snapshot.bookings) {
+        if (bk.status !== 'CONFIRMED' && bk.status !== 'IN_CHAIR') continue;
+        if (
+          input.excludeBookingId &&
+          (bk.id === input.excludeBookingId || bk.bookingRef === input.excludeBookingId)
+        ) {
+          continue;
+        }
+        if (!doesBarberNameMatch(bk.stylistName, barberName)) continue;
+        const bkStartMins = (new Date(bk.startsAtIso).getTime() - localDayStartUtcMs) / 60000;
+        const bkEndMins = (new Date(bk.endsAtIso).getTime() - localDayStartUtcMs) / 60000;
+        if (start < bkEndMins && end > bkStartMins) {
+          return {
+            name: barberName,
+            available: false,
+            reason: `Booked (${formatMinutesToTimeSlot(Math.round(bkStartMins))})`,
+          };
+        }
+      }
+
+      return { name: barberName, available: true };
     });
 
     const availableBarberCount = barberStatuses.filter((b) => b.available).length;
@@ -5196,7 +5750,7 @@ export function getAvailableSlotsAndBarbers(input: {
 
   return {
     salonId: input.salonId,
-    publicCode: settings.publicCode,
+    publicCode: snapshot?.publicCode || settings.publicCode,
     date: cleanDate,
     dayName: schedule.dayName,
     isOpen: true,
@@ -5205,6 +5759,70 @@ export function getAvailableSlotsAndBarbers(input: {
     slots,
     barbers,
   };
+}
+
+export async function getAvailableSlotsAndBarbers(input: {
+  salonId: string;
+  date: string;
+  durationMins?: number;
+  serviceIds?: string[];
+  demoBusyBarber?: string;
+  demoBusyTimeSlot?: string;
+  actor?: PgActorContext;
+}): Promise<CustomerAvailabilityResponse> {
+  const actor =
+    'actor' in input
+      ? (input.actor as PgActorContext)
+      : createPublicFlowSalonActor(input.salonId);
+  const normalizedActor = validatePgActorContext(actor);
+  if (normalizedActor.role === 'AGENT') {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      'AGENT cannot query public booking availability directly.'
+    );
+  }
+  if (
+    (normalizedActor.role === 'SALON_OWNER' || normalizedActor.role === 'PUBLIC_FLOW') &&
+    normalizedActor.salonId !== input.salonId
+  ) {
+    throw new PgContextError(
+      'FORBIDDEN_TENANT',
+      `${normalizedActor.role} (${normalizedActor.salonId}) cannot read availability for salon ${input.salonId}.`
+    );
+  }
+
+  const settings = ensureSalonExists(input.salonId);
+  const cleanDate = /^\d{4}-\d{2}-\d{2}$/.test(input.date)
+    ? input.date
+    : getSalonLocalDateParts(settings.timezoneOffsetHours).dateStr;
+
+  let snapshot: PgAvailabilitySnapshot | null = null;
+  if (isPostgresConfigured()) {
+    const { windowStartIso, windowEndIso } = getWideUtcDayWindow(cleanDate);
+    snapshot = await fetchAvailabilitySnapshotFromPostgres(
+      {
+        salonId: input.salonId,
+        windowStartIso,
+        windowEndIso,
+      },
+      actor
+    );
+  } else if (process.env.NODE_ENV === 'production') {
+    throw new BookingLifecycleError(
+      503,
+      'Database is not configured. Availability cannot be verified without persistent storage.'
+    );
+  }
+
+  return evaluateAvailabilityFromSnapshot({
+    salonId: input.salonId,
+    date: cleanDate,
+    durationMins: input.durationMins,
+    serviceIds: input.serviceIds,
+    demoBusyBarber: input.demoBusyBarber,
+    demoBusyTimeSlot: input.demoBusyTimeSlot,
+    snapshot,
+  });
 }
 
 function buildIcsCalendarContent(params: {
@@ -5239,7 +5857,8 @@ function buildIcsCalendarContent(params: {
 
 function findRawAccessTokenForBooking(bookingId: string, salonId: string, expiresAtMs: number): string {
   const store = ensureStoreLoaded();
-  const rawAccessToken = crypto.randomBytes(24).toString('base64url');
+  const settings = ensureSalonExists(salonId);
+  const rawAccessToken = generateBookingManagementToken(settings.publicCode);
   const tokenHash = crypto.createHash('sha256').update(rawAccessToken).digest('hex');
   store.bookingAccessTokens[tokenHash] = {
     bookingId,
@@ -5426,13 +6045,14 @@ export async function createCustomerFlowBooking(
     };
   }
 
-  const availability = getAvailableSlotsAndBarbers({
+  const availability = await getAvailableSlotsAndBarbers({
     salonId,
     date: cleanDate,
     durationMins: totalDurationMins - maxBufferMins,
     serviceIds: selectedServices.map((s) => s.id || s.name),
     demoBusyBarber: isDemo ? input.demoBusyBarber : undefined,
     demoBusyTimeSlot: isDemo ? input.demoBusyTimeSlot : undefined,
+    actor: createPublicFlowSalonActor(salonId),
   });
 
   if (!availability.isOpen) {
@@ -5516,7 +6136,7 @@ export async function createCustomerFlowBooking(
     DIRECT: 'WEB_LINK',
   };
 
-  const rawAccessToken = crypto.randomBytes(24).toString('base64url');
+  const rawAccessToken = generateBookingManagementToken(settings.publicCode);
   const tokenHash = crypto.createHash('sha256').update(rawAccessToken).digest('hex');
   const accessTokenExpiresAtMs = scheduledEndMs + 7 * 86400000;
   const proofHash = crypto
@@ -5665,9 +6285,24 @@ export async function createCustomerFlowBooking(
   };
 }
 
-export function getBookingByAccessToken(rawToken: string): BookingManagementPayload | null {
+export async function getBookingByAccessToken(
+  rawToken: string
+): Promise<BookingManagementPayload | null> {
   const clean = (rawToken || '').trim();
   if (!clean || clean.length < 12) return null;
+
+  if (isPostgresConfigured()) {
+    const pgBooking = await getBookingByAccessTokenFromPostgres(clean);
+    return pgBooking ? mapPgBookingToManagementPayload(pgBooking) : null;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new BookingLifecycleError(
+      503,
+      'Database is not configured. Booking lookup requires persistent storage.'
+    );
+  }
+
   const store = ensureStoreLoaded();
   const tokenHash = crypto.createHash('sha256').update(clean).digest('hex');
   const tokenRec = store.bookingAccessTokens?.[tokenHash];
@@ -5723,12 +6358,99 @@ export function getBookingByAccessToken(rawToken: string): BookingManagementPayl
   };
 }
 
-export function rescheduleBookingByAccessToken(
+export async function rescheduleBookingByAccessToken(
   rawToken: string,
   input: { appointmentDate: string; timeSlot: string; barberName?: string }
-): { statusCode: number; ok: boolean; error?: string; booking?: BookingManagementPayload } {
+): Promise<{ statusCode: number; ok: boolean; error?: string; booking?: BookingManagementPayload }> {
   const clean = (rawToken || '').trim();
   if (!clean) return { statusCode: 404, ok: false, error: 'Booking link not found.' };
+
+  const cleanDate = sanitizePlainText(input.appointmentDate || '', 20);
+  const cleanTimeSlot = sanitizePlainText(input.timeSlot || '', 24);
+  const requestedBarber = input.barberName ? sanitizePlainText(input.barberName, 60) : undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) || !cleanTimeSlot) {
+    return { statusCode: 400, ok: false, error: 'Valid date and time slot are required.' };
+  }
+
+  if (isPostgresConfigured()) {
+    const { windowStartIso, windowEndIso } = getWideUtcDayWindow(cleanDate);
+    const resolveSlot: SlotResolverFn = (snapshot, currentBooking) => {
+      const targetBarber = requestedBarber || currentBooking.stylistName;
+      const serviceIds = currentBooking.servicesSnapshot
+        .map((s) => s.id || s.name)
+        .filter((x): x is string => Boolean(x));
+      const avail = evaluateAvailabilityFromSnapshot({
+        salonId: snapshot.salonId,
+        date: cleanDate,
+        exactDurationMins: currentBooking.totalDurationMins || 35,
+        serviceIds,
+        excludeBookingId: currentBooking.id,
+        snapshot,
+      });
+      if (!avail.isOpen) {
+        return {
+          ok: false,
+          statusCode: 409,
+          error: avail.closedReason || 'Salon is closed on that date.',
+        };
+      }
+      const startMinutes = parseTimeSlotToMinutes(cleanTimeSlot);
+      const formattedTime = startMinutes >= 0 ? formatMinutesToTimeSlot(startMinutes) : cleanTimeSlot;
+      const matchedSlot = avail.slots.find(
+        (s) => s.startMinutes === startMinutes || s.timeSlot === formattedTime
+      );
+      const matchedBarber = matchedSlot?.barbers.find(
+        (b) => b.name.toLowerCase() === targetBarber.toLowerCase() && b.available
+      );
+      if (!matchedSlot || !matchedBarber) {
+        return {
+          ok: false,
+          statusCode: 409,
+          error: `${targetBarber} is not available at ${formattedTime} on ${cleanDate}.`,
+        };
+      }
+      const [y, m, d] = cleanDate.split('-').map((n) => parseInt(n, 10));
+      const tz = Number.isFinite(snapshot.timezoneOffsetHours)
+        ? snapshot.timezoneOffsetHours
+        : ensureSalonExists(snapshot.salonId).timezoneOffsetHours;
+      const startUtcMs =
+        Date.UTC(y, m - 1, d, Math.floor(startMinutes / 60), startMinutes % 60, 0) - tz * 3600000;
+      const dur = currentBooking.totalDurationMins || 35;
+      return {
+        ok: true,
+        startUtcIso: new Date(startUtcMs).toISOString(),
+        endUtcIso: new Date(startUtcMs + dur * 60000).toISOString(),
+        formattedTime,
+        barberName: matchedBarber.name,
+        durationMins: dur,
+      };
+    };
+
+    const pgResult = await rescheduleBookingByAccessTokenInPostgres({
+      rawToken: clean,
+      appointmentDate: cleanDate,
+      windowStartIso,
+      windowEndIso,
+      resolveSlot,
+    });
+    if (!pgResult.ok) {
+      return { statusCode: pgResult.statusCode, ok: false, error: pgResult.error };
+    }
+    return {
+      statusCode: 200,
+      ok: true,
+      booking: mapPgBookingToManagementPayload(pgResult.booking),
+    };
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    return {
+      statusCode: 503,
+      ok: false,
+      error: 'Database is not configured. Reschedule cannot be committed without persistent storage.',
+    };
+  }
+
   const store = ensureStoreLoaded();
   const tokenHash = crypto.createHash('sha256').update(clean).digest('hex');
   const tokenRec = store.bookingAccessTokens?.[tokenHash];
@@ -5744,21 +6466,16 @@ export function rescheduleBookingByAccessToken(
   }
 
   const settings = ensureSalonExists(tokenRec.salonId);
-  const cleanDate = sanitizePlainText(input.appointmentDate || '', 20);
-  const cleanTimeSlot = sanitizePlainText(input.timeSlot || '', 24);
-  const targetBarber = sanitizePlainText(input.barberName || appt.barberName, 60);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) || !cleanTimeSlot) {
-    return { statusCode: 400, ok: false, error: 'Valid date and time slot are required.' };
-  }
+  const targetBarber = requestedBarber || appt.barberName;
 
-  // Temporarily mark current appointment as excluded via status snapshot? Or check availability excluding self:
   const prevStatus = appt.status;
   appt.status = 'CANCELED';
-  const avail = getAvailableSlotsAndBarbers({
+  const avail = evaluateAvailabilityFromSnapshot({
     salonId: tokenRec.salonId,
     date: cleanDate,
-    durationMins: appt.durationMins || 35,
+    exactDurationMins: appt.durationMins || 35,
     serviceIds: appt.serviceIds,
+    snapshot: null,
   });
   appt.status = prevStatus;
 
@@ -5823,15 +6540,40 @@ export function rescheduleBookingByAccessToken(
     },
   });
   persistStore(tokenRec.salonId);
-  return { statusCode: 200, ok: true, booking: getBookingByAccessToken(rawToken) || undefined };
+  return { statusCode: 200, ok: true, booking: (await getBookingByAccessToken(rawToken)) || undefined };
 }
 
-export function cancelBookingByAccessToken(
+export async function cancelBookingByAccessToken(
   rawToken: string,
   reason?: string
-): { statusCode: number; ok: boolean; error?: string; booking?: BookingManagementPayload } {
+): Promise<{ statusCode: number; ok: boolean; error?: string; booking?: BookingManagementPayload }> {
   const clean = (rawToken || '').trim();
   if (!clean) return { statusCode: 404, ok: false, error: 'Booking link not found.' };
+
+  if (isPostgresConfigured()) {
+    const cleanReason = reason ? sanitizePlainText(reason, 120) : undefined;
+    const pgResult = await cancelBookingByAccessTokenInPostgres({
+      rawToken: clean,
+      reason: cleanReason,
+    });
+    if (!pgResult.ok) {
+      return { statusCode: pgResult.statusCode, ok: false, error: pgResult.error };
+    }
+    return {
+      statusCode: 200,
+      ok: true,
+      booking: mapPgBookingToManagementPayload(pgResult.booking),
+    };
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    return {
+      statusCode: 503,
+      ok: false,
+      error: 'Database is not configured. Cancellation cannot be committed without persistent storage.',
+    };
+  }
+
   const store = ensureStoreLoaded();
   const tokenHash = crypto.createHash('sha256').update(clean).digest('hex');
   const tokenRec = store.bookingAccessTokens?.[tokenHash];
@@ -5879,6 +6621,6 @@ export function cancelBookingByAccessToken(
     },
   });
   persistStore(tokenRec.salonId);
-  return { statusCode: 200, ok: true, booking: getBookingByAccessToken(rawToken) || undefined };
+  return { statusCode: 200, ok: true, booking: (await getBookingByAccessToken(rawToken)) || undefined };
 }
 
