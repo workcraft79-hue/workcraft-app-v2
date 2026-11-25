@@ -4,6 +4,7 @@ import express from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import QRCode from 'qrcode';
 import {
+  BookingLifecycleError,
   addChairLock,
   addStylistLeave,
   addWalkInQueueItem,
@@ -91,6 +92,7 @@ import { enforceRateLimit, extractClientIpKey, isRateLimiterConfigured } from '.
 import {
   PgContextError,
   assertProductionDatabaseReady,
+  createPublicFlowSalonActor,
   derivePgActorFromAuthUser,
 } from './postgresRepo.js';
 import {
@@ -1486,7 +1488,7 @@ export function createApiApp(port = 3000): express.Express {
     '/api/salons/:salonId/appointments/complete',
     requireAuth,
     requireSalonTenantAccess(false),
-    (req, res) => {
+    async (req: AuthenticatedRequest, res) => {
       try {
         const { salonId } = req.params;
         const {
@@ -1505,19 +1507,30 @@ export function createApiApp(port = 3000): express.Express {
           return res.status(400).json({ error: 'appointmentId and clientPhone are required.' });
         }
 
-        const result = completeAppointmentAndRecordVisit(salonId, {
-          appointmentId: String(appointmentId),
-          clientName: String(clientName || 'Salon Client'),
-          clientPhone: String(clientPhone),
-          barberName: String(barberName || 'Master Barber'),
-          service: String(service || 'Salon Service'),
-          price: Number(price || 0),
-          timeSlot: String(timeSlot || 'Completed'),
-          birthDate: typeof birthDate === 'string' ? birthDate : undefined,
-          preferredLanguage,
-        });
+        const actor = derivePgActorFromAuthUser(req.authUser!, { targetSalonId: salonId });
+        const result = await completeAppointmentAndRecordVisit(
+          salonId,
+          {
+            appointmentId: String(appointmentId),
+            clientName: String(clientName || 'Salon Client'),
+            clientPhone: String(clientPhone),
+            barberName: String(barberName || 'Master Barber'),
+            service: String(service || 'Salon Service'),
+            price: Number(price || 0),
+            timeSlot: String(timeSlot || 'Completed'),
+            birthDate: typeof birthDate === 'string' ? birthDate : undefined,
+            preferredLanguage,
+          },
+          actor
+        );
         return res.json(result);
       } catch (err) {
+        if (err instanceof PgContextError) {
+          return res.status(403).json({ error: err.message });
+        }
+        if (err instanceof BookingLifecycleError) {
+          return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('Failed to complete appointment:', err);
         return res.status(500).json({ error: 'Failed to mark appointment completed.' });
       }
@@ -1758,16 +1771,23 @@ export function createApiApp(port = 3000): express.Express {
           ? req.query.demoBusyTimeSlot
           : undefined;
 
-      const availability = getAvailableSlotsAndBarbers({
+      const availability = await getAvailableSlotsAndBarbers({
         salonId,
         date,
         durationMins,
         serviceIds,
         demoBusyBarber,
         demoBusyTimeSlot,
+        actor: createPublicFlowSalonActor(salonId),
       });
       return res.json(availability);
     } catch (err) {
+      if (err instanceof PgContextError) {
+        return res.status(403).json({ error: err.message });
+      }
+      if (err instanceof BookingLifecycleError) {
+        return res.status(err.statusCode).json({ error: err.message });
+      }
       console.error('Customer availability error:', err);
       return res.status(500).json({ error: 'Failed to calculate slot availability.' });
     }
@@ -1833,36 +1853,63 @@ export function createApiApp(port = 3000): express.Express {
 
   // Signed Expiring & Revocable "My Booking" Portal (/b/:token)
   app.get('/api/public/bookings/:token', async (req, res) => {
-    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
-    const rl = await enforceRateLimit(`pub:bget:${ipKey}`, 60, 60);
-    if (!rl.allowed) {
-      return res.status(429).json({ ok: false, error: 'Too many requests.' });
+    try {
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`pub:bget:${ipKey}`, 60, 60);
+      if (!rl.allowed) {
+        return res.status(429).json({ ok: false, error: 'Too many requests.' });
+      }
+      const booking = await getBookingByAccessToken(req.params.token);
+      if (!booking) {
+        return res.status(404).json({ ok: false, error: 'Booking link is invalid, expired, or revoked.' });
+      }
+      return res.json(booking);
+    } catch (err) {
+      if (err instanceof PgContextError) {
+        return res.status(403).json({ ok: false, error: err.message });
+      }
+      if (err instanceof BookingLifecycleError) {
+        return res.status(err.statusCode).json({ ok: false, error: err.message });
+      }
+      console.error('Public booking lookup error:', err);
+      return res.status(500).json({ ok: false, error: 'Failed to load booking.' });
     }
-    const booking = getBookingByAccessToken(req.params.token);
-    if (!booking) {
-      return res.status(404).json({ ok: false, error: 'Booking link is invalid, expired, or revoked.' });
-    }
-    return res.json(booking);
   });
 
   app.post('/api/public/bookings/:token/reschedule', async (req, res) => {
-    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
-    const rl = await enforceRateLimit(`pub:bmod:${ipKey}`, 20, 60);
-    if (!rl.allowed) {
-      return res.status(429).json({ ok: false, error: 'Too many requests. Please wait.' });
+    try {
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`pub:bmod:${ipKey}`, 20, 60);
+      if (!rl.allowed) {
+        return res.status(429).json({ ok: false, error: 'Too many requests. Please wait.' });
+      }
+      const result = await rescheduleBookingByAccessToken(req.params.token, req.body || {});
+      return res.status(result.statusCode).json(result);
+    } catch (err) {
+      if (err instanceof PgContextError) {
+        return res.status(403).json({ ok: false, error: err.message });
+      }
+      console.error('Public booking reschedule error:', err);
+      return res.status(500).json({ ok: false, error: 'Failed to reschedule booking.' });
     }
-    const result = rescheduleBookingByAccessToken(req.params.token, req.body || {});
-    return res.status(result.statusCode).json(result);
   });
 
   app.post('/api/public/bookings/:token/cancel', async (req, res) => {
-    const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
-    const rl = await enforceRateLimit(`pub:bcan:${ipKey}`, 20, 60);
-    if (!rl.allowed) {
-      return res.status(429).json({ ok: false, error: 'Too many requests. Please wait.' });
+    try {
+      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+      const rl = await enforceRateLimit(`pub:bcan:${ipKey}`, 20, 60);
+      if (!rl.allowed) {
+        return res.status(429).json({ ok: false, error: 'Too many requests. Please wait.' });
+      }
+      const result = await cancelBookingByAccessToken(req.params.token, req.body?.reason);
+      return res.status(result.statusCode).json(result);
+    } catch (err) {
+      if (err instanceof PgContextError) {
+        return res.status(403).json({ ok: false, error: err.message });
+      }
+      console.error('Public booking cancel error:', err);
+      return res.status(500).json({ ok: false, error: 'Failed to cancel booking.' });
     }
-    const result = cancelBookingByAccessToken(req.params.token, req.body?.reason);
-    return res.status(result.statusCode).json(result);
   });
 
   app.get('/api/public/deal-videos/:fileName', (req, res) => {
@@ -2110,25 +2157,36 @@ export function createApiApp(port = 3000): express.Express {
     '/api/salons/:salonId/appointments/:bookingId/status',
     requireAuth,
     requireSalonTenantAccess(false),
-    (req, res) => {
-      const rawStatus = sanitizePlainText(req.body?.status, 24).toUpperCase();
-      const nextStatus: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED' =
-        rawStatus === 'IN_CHAIR'
-          ? 'IN_CHAIR'
-          : rawStatus === 'COMPLETED'
-          ? 'COMPLETED'
-          : rawStatus === 'CANCELED'
-          ? 'CANCELED'
-          : 'CONFIRMED';
-      const outcome = updateAppointmentStatus(
-        req.params.salonId,
-        sanitizePlainText(req.params.bookingId, 60),
-        nextStatus
-      );
-      if (!outcome.ok) {
-        return res.status(404).json({ error: outcome.error });
+    async (req: AuthenticatedRequest, res) => {
+      try {
+        const { salonId, bookingId } = req.params;
+        const rawStatus = sanitizePlainText(req.body?.status, 24).toUpperCase();
+        const nextStatus: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED' =
+          rawStatus === 'IN_CHAIR'
+            ? 'IN_CHAIR'
+            : rawStatus === 'COMPLETED'
+            ? 'COMPLETED'
+            : rawStatus === 'CANCELED'
+            ? 'CANCELED'
+            : 'CONFIRMED';
+        const actor = derivePgActorFromAuthUser(req.authUser!, { targetSalonId: salonId });
+        const outcome = await updateAppointmentStatus(
+          salonId,
+          sanitizePlainText(bookingId, 60),
+          nextStatus,
+          actor
+        );
+        if (!outcome.ok) {
+          return res.status(outcome.statusCode || 404).json({ error: outcome.error });
+        }
+        return res.json(outcome);
+      } catch (err) {
+        if (err instanceof PgContextError) {
+          return res.status(403).json({ error: err.message });
+        }
+        console.error('Failed to update appointment status:', err);
+        return res.status(500).json({ error: 'Failed to update appointment status.' });
       }
-      return res.json(outcome);
     }
   );
 
@@ -2136,16 +2194,27 @@ export function createApiApp(port = 3000): express.Express {
     '/api/salons/:salonId/appointments/:bookingId/reschedule',
     requireAuth,
     requireSalonTenantAccess(false),
-    (req, res) => {
-      const outcome = rescheduleAppointmentByOwner(
-        req.params.salonId,
-        sanitizePlainText(req.params.bookingId, 60),
-        req.body || {}
-      );
-      if (!outcome.ok) {
-        return res.status(outcome.statusCode).json({ ok: false, error: outcome.error });
+    async (req: AuthenticatedRequest, res) => {
+      try {
+        const { salonId, bookingId } = req.params;
+        const actor = derivePgActorFromAuthUser(req.authUser!, { targetSalonId: salonId });
+        const outcome = await rescheduleAppointmentByOwner(
+          salonId,
+          sanitizePlainText(bookingId, 60),
+          req.body || {},
+          actor
+        );
+        if (!outcome.ok) {
+          return res.status(outcome.statusCode).json({ ok: false, error: outcome.error });
+        }
+        return res.json(outcome);
+      } catch (err) {
+        if (err instanceof PgContextError) {
+          return res.status(403).json({ ok: false, error: err.message });
+        }
+        console.error('Failed to reschedule appointment:', err);
+        return res.status(500).json({ ok: false, error: 'Failed to reschedule appointment.' });
       }
-      return res.json(outcome);
     }
   );
 
