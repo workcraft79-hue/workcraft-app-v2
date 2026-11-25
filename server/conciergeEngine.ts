@@ -43,9 +43,12 @@ import type {
 } from '../src/types/concierge.js';
 import { kvGetJson, kvSetJson } from './kvBridge.js';
 import {
+  PgContextError,
+  type PgActorContext,
   findSalonByPublicCodeInPostgres,
   persistPostgresSnapshotMirror,
   recordBookingInPostgres,
+  validatePgActorContext,
 } from './postgresRepo.js';
 import {
   clampInteger,
@@ -1317,31 +1320,50 @@ function appendBookingAudit(
   store.bookingAuditLog = [entry, ...(store.bookingAuditLog || [])].slice(0, 1200);
 }
 
-function syncSalonSettingsToPostgres(settings: RetentionSettings) {
+async function syncSalonSettingsToPostgres(
+  settings: RetentionSettings,
+  actor: PgActorContext
+): Promise<void> {
+  const normalized = validatePgActorContext(actor);
+  if (normalized.role === 'PUBLIC_FLOW') {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      'PUBLIC_FLOW cannot sync salon configuration to PostgreSQL.'
+    );
+  }
+  if (normalized.role === 'SALON_OWNER' && normalized.salonId !== settings.salonId) {
+    throw new PgContextError(
+      'FORBIDDEN_TENANT',
+      `SALON_OWNER (${normalized.salonId}) cannot sync settings for salon ${settings.salonId}.`
+    );
+  }
   const tier: SalonPackageTier = PLAN_QUOTAS[settings.packageTier] ? settings.packageTier : 'PRO++';
   const quota = PLAN_QUOTAS[tier];
-  void persistPostgresSnapshotMirror({
-    salonId: settings.salonId,
-    publicCode: settings.publicCode,
-    salonName: settings.salonName,
-    ownerName: settings.ownerName,
-    salonCategory: settings.salonCategory,
-    ownerAuthPhone: settings.ownerAuthPhone || settings.whatsappPhone,
-    publicContactPhone: settings.publicContactPhone || settings.whatsappPhone,
-    publicWhatsappPhone: settings.publicWhatsappPhone,
-    timezoneIana: settings.timezoneIana || 'Asia/Karachi',
-    timezoneOffsetHours: settings.timezoneOffsetHours,
-    currencyCode: settings.currency,
-    currencySymbol: settings.currencySymbol,
-    defaultLang: settings.defaultLang,
-    enabledLangs: settings.enabledClientLanguages,
-    planTier: tier,
-    monthlyLimit: quota.limit,
-    billingStatus: settings.billingStatus,
-    address: settings.address,
-    googleMapsUrl: settings.googleMapsUrl,
-    googleReviewUrl: settings.googleReviewUrl,
-  });
+  await persistPostgresSnapshotMirror(
+    {
+      salonId: settings.salonId,
+      publicCode: settings.publicCode,
+      salonName: settings.salonName,
+      ownerName: settings.ownerName,
+      salonCategory: settings.salonCategory,
+      ownerAuthPhone: settings.ownerAuthPhone || settings.whatsappPhone,
+      publicContactPhone: settings.publicContactPhone || settings.whatsappPhone,
+      publicWhatsappPhone: settings.publicWhatsappPhone,
+      timezoneIana: settings.timezoneIana || 'Asia/Karachi',
+      timezoneOffsetHours: settings.timezoneOffsetHours,
+      currencyCode: settings.currency,
+      currencySymbol: settings.currencySymbol,
+      defaultLang: settings.defaultLang,
+      enabledLangs: settings.enabledClientLanguages,
+      planTier: tier,
+      monthlyLimit: quota.limit,
+      billingStatus: settings.billingStatus,
+      address: settings.address,
+      googleMapsUrl: settings.googleMapsUrl,
+      googleReviewUrl: settings.googleReviewUrl,
+    },
+    actor
+  );
 }
 
 function formatOfferSummary(settings: RetentionSettings, kind: 'BIRTHDAY' | 'WINBACK', lang: ClientPreferredLang): string {
@@ -1811,10 +1833,24 @@ export function getSalonConciergeState(
   };
 }
 
-export function updateRetentionSettings(
+export async function updateRetentionSettings(
   salonId: string,
-  patch: Partial<RetentionSettings>
-): SalonConciergeStateResponse {
+  patch: Partial<RetentionSettings>,
+  actor: PgActorContext
+): Promise<SalonConciergeStateResponse> {
+  const normalizedActor = validatePgActorContext(actor);
+  if (normalizedActor.role === 'PUBLIC_FLOW') {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      'PUBLIC_FLOW cannot update salon retention settings.'
+    );
+  }
+  if (normalizedActor.role === 'SALON_OWNER' && normalizedActor.salonId !== salonId) {
+    throw new PgContextError(
+      'FORBIDDEN_TENANT',
+      `SALON_OWNER (${normalizedActor.salonId}) cannot update settings for salon ${salonId}.`
+    );
+  }
   const store = ensureStoreLoaded();
   const current = ensureSalonExists(salonId);
   const regionMeta = detectRegionFromPhone(patch.whatsappPhone || patch.ownerAuthPhone || current.whatsappPhone);
@@ -1999,7 +2035,7 @@ export function updateRetentionSettings(
     updated.currencySymbol = regionMeta.currencySymbol;
   }
   store.settingsBySalon[salonId] = updated;
-  syncSalonSettingsToPostgres(updated);
+  await syncSalonSettingsToPostgres(updated, actor);
   persistStore(salonId);
   return getSalonConciergeState(salonId);
 }
@@ -2145,16 +2181,25 @@ export function consumeServicePackageSession(
   return getSalonConciergeState(salonId);
 }
 
-export function setSalonBillingStatus(
+export async function setSalonBillingStatus(
   salonId: string,
-  billingStatus: SalonBillingStatus
-): SalonConciergeStateResponse {
+  billingStatus: SalonBillingStatus,
+  actor: PgActorContext
+): Promise<SalonConciergeStateResponse> {
+  const normalizedActor = validatePgActorContext(actor);
+  if (normalizedActor.role !== 'FOUNDER') {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      `Only FOUNDER may modify salon billing_status (received role ${normalizedActor.role}).`
+    );
+  }
   const store = ensureStoreLoaded();
   const current = ensureSalonExists(salonId);
   current.billingStatus = billingStatus;
   current.updatedAt = new Date().toISOString();
   store.settingsBySalon[salonId] = current;
-  persistStore();
+  await syncSalonSettingsToPostgres(current, actor);
+  persistStore(salonId);
   return getSalonConciergeState(salonId);
 }
 
