@@ -30,6 +30,7 @@ import {
   type PgBookingStatus,
   createPublicFlowSalonActor,
   derivePgActorFromAuthUser,
+  recordBookingInPostgres,
   setPgPoolOverrideForTests,
 } from '../server/postgresRepo.js';
 import { createApiApp } from '../server/app.js';
@@ -50,6 +51,9 @@ interface DbSalon {
   google_maps_url: string;
   google_review_url: string;
   operating_hours: Record<string, unknown>;
+  billing_status?: string;
+  monthly_booking_limit?: number;
+  grace_overage_limit?: number;
 }
 
 interface DbStylist {
@@ -89,6 +93,7 @@ interface DbBooking {
   deal_id: string | null;
   idempotency_key: string | null;
   proof_hash: string;
+  usage_counted?: boolean;
   completed_at: string | null;
   created_at: string;
 }
@@ -792,7 +797,7 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
         };
       }
 
-      if (sql.startsWith('INSERT INTO bookings (')) {
+      if (sql.startsWith('INSERT INTO bookings ( salon_id,')) {
         const [
           salonId,
           clientId,
@@ -882,6 +887,238 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
           created_at: new Date().toISOString(),
         });
         return { rows: [], rowCount: 1 };
+      }
+
+      if (sql.startsWith('SELECT id FROM bookings WHERE salon_id = $1 AND idempotency_key = $2')) {
+        const [salonId, idempotencyKey] = params as [string, string];
+        if (!canSeeSalonRow(salonId, 'bookings')) throw new Error('RLS denied bookings select');
+        const found = state.bookings.find(
+          (b) => b.salon_id === salonId && b.idempotency_key === idempotencyKey
+        );
+        return found ? { rows: [{ id: found.id }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+
+      if (sql.includes('SELECT upsert_public_booking_client(')) {
+        const [salonId, generatedId, name, phoneE164, preferredLang] = params as [
+          string,
+          string,
+          string,
+          string,
+          string,
+        ];
+        if (!['FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW'].includes(gucs['app.current_user_role'])) {
+          throw new Error('Unauthorized role for booking client upsert');
+        }
+        if (gucs['app.current_user_role'] !== 'FOUNDER' && gucs['app.current_salon_id'] !== salonId) {
+          throw new Error('Tenant mismatch for booking client upsert');
+        }
+        const salon = state.salons.find((s) => s.id === salonId);
+        if (!salon || salon.billing_status === 'SUSPENDED') {
+          throw new Error('Salon is unavailable or suspended');
+        }
+        let cli = state.clients.find((c) => c.salon_id === salonId && c.phone_e164 === phoneE164);
+        if (cli) {
+          cli.name = name;
+          cli.preferred_language = preferredLang;
+          cli.preferred_lang = preferredLang;
+        } else {
+          cli = {
+            id: generatedId,
+            salon_id: salonId,
+            name,
+            phone: phoneE164,
+            phone_e164: phoneE164,
+            preferred_language: preferredLang,
+            preferred_lang: preferredLang,
+            birth_date: '',
+            last_completed_visit_at: null,
+            total_visits: 0,
+          };
+          state.clients.push(cli);
+        }
+        scopedGucs['app.current_client_id'] = cli.id;
+        return { rows: [{ id: cli.id }], rowCount: 1 };
+      }
+
+      if (sql.startsWith('INSERT INTO bookings ( id, salon_id,')) {
+        const [
+          id,
+          salonId,
+          clientId,
+          stylistId,
+          bookingRef,
+          servicesJson,
+          totalPrice,
+          totalDurationMins,
+          startsAt,
+          endsAt,
+          source,
+          idempotencyKey,
+          proofHash,
+        ] = params as [
+          string,
+          string,
+          string,
+          string,
+          string,
+          string,
+          number,
+          number,
+          string,
+          string,
+          string,
+          string | null,
+          string,
+        ];
+        if (!canSeeSalonRow(salonId, 'bookings')) throw new Error('RLS denied bookings insert');
+        if (gucs['app.current_user_role'] === 'PUBLIC_FLOW') {
+          if (
+            scopedGucs['app.current_client_id'] !== clientId ||
+            scopedGucs['app.current_booking_id'] !== id
+          ) {
+            throw new Error('RLS denied bookings insert: scoped booking_id/client_id mismatch');
+          }
+        }
+        const nextStart = new Date(startsAt).getTime();
+        const nextEnd = new Date(endsAt).getTime();
+        const clash = state.bookings.find(
+          (other) =>
+            other.salon_id === salonId &&
+            other.stylist_id === stylistId &&
+            (other.status === 'CONFIRMED' || other.status === 'IN_CHAIR') &&
+            new Date(other.ends_at).getTime() > nextStart &&
+            new Date(other.starts_at).getTime() < nextEnd
+        );
+        if (clash) {
+          const err = new Error('exclusion constraint bookings_no_stylist_overlap') as Error & { code: string };
+          err.code = '23P01';
+          throw err;
+        }
+        const newBk: DbBooking = {
+          id,
+          salon_id: salonId,
+          client_id: clientId,
+          stylist_id: stylistId,
+          booking_ref: bookingRef,
+          services_snapshot: JSON.parse(servicesJson),
+          total_price: totalPrice,
+          total_duration_mins: totalDurationMins,
+          starts_at: startsAt,
+          ends_at: endsAt,
+          status: 'CONFIRMED',
+          source,
+          deal_id: null,
+          idempotency_key: idempotencyKey,
+          proof_hash: proofHash,
+          usage_counted: false,
+          completed_at: null,
+          created_at: new Date().toISOString(),
+        };
+        state.bookings.push(newBk);
+        return { rows: [{ id: newBk.id }], rowCount: 1 };
+      }
+
+      if (sql.startsWith('INSERT INTO booking_access_tokens')) {
+        const [tokenHash, bookingId, salonId, expiresAt] = params as [string, string, string, string];
+        if (!canSeeSalonRow(salonId, 'booking_access_tokens')) {
+          throw new Error('RLS denied booking_access_tokens insert');
+        }
+        if (
+          gucs['app.current_user_role'] === 'PUBLIC_FLOW' &&
+          (scopedGucs['app.current_token_hash'] !== tokenHash ||
+            scopedGucs['app.current_booking_id'] !== bookingId)
+        ) {
+          throw new Error('RLS denied booking_access_tokens insert: scoped GUC mismatch');
+        }
+        const tok: DbAccessToken = {
+          id: `tok-${++seq}`,
+          token_hash: tokenHash,
+          booking_id: bookingId,
+          salon_id: salonId,
+          expires_at: expiresAt,
+          revoked_at: null,
+        };
+        state.bookingAccessTokens.push(tok);
+        return { rows: [], rowCount: 1 };
+      }
+
+      if (sql.includes('UPDATE bookings SET usage_counted')) {
+        if (gucs['app.current_user_role'] === 'PUBLIC_FLOW') {
+          throw new Error('PUBLIC_FLOW may not directly modify bookings.usage_counted');
+        }
+        const [bookingId, salonId] = params as [string, string];
+        const bk = state.bookings.find((b) => b.id === bookingId && b.salon_id === salonId);
+        if (bk) bk.usage_counted = true;
+        return { rows: [], rowCount: bk ? 1 : 0 };
+      }
+
+      if (sql.includes('SELECT increment_salon_monthly_booking_usage(')) {
+        const [salonId, bookingId, billingMonth] = params as [string, string, string];
+        const role = gucs['app.current_user_role'];
+        if (!['FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW'].includes(role)) {
+          throw new Error('Unauthorized role for salon usage increment');
+        }
+        if (role !== 'FOUNDER' && gucs['app.current_salon_id'] !== salonId) {
+          throw new Error('Tenant mismatch for salon usage increment');
+        }
+        if (role === 'PUBLIC_FLOW') {
+          const matchesBookingGuc = scopedGucs['app.current_booking_id'] === bookingId;
+          const matchesToken = Boolean(
+            scopedGucs['app.current_token_hash'] &&
+              state.bookingAccessTokens.some(
+                (t) =>
+                  t.booking_id === bookingId &&
+                  t.salon_id === salonId &&
+                  t.token_hash === scopedGucs['app.current_token_hash'] &&
+                  !t.revoked_at &&
+                  new Date(t.expires_at).getTime() > Date.now()
+              )
+          );
+          if (!matchesBookingGuc && !matchesToken) {
+            throw new Error(`PUBLIC_FLOW caller is not authorized to count usage for booking ${bookingId}`);
+          }
+        }
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(billingMonth)) {
+          throw new Error('Invalid billing_month format (expected YYYY-MM)');
+        }
+        const salon = state.salons.find((s) => s.id === salonId);
+        if (!salon || salon.billing_status === 'SUSPENDED') {
+          throw new Error('Salon not found or suspended');
+        }
+        const bk = state.bookings.find(
+          (b) =>
+            b.id === bookingId &&
+            b.salon_id === salonId &&
+            b.status === 'CONFIRMED' &&
+            !b.usage_counted
+        );
+        if (!bk) {
+          throw new Error('Usage increment requires an uncounted CONFIRMED booking in the scoped salon');
+        }
+        // Exercises guard_bookings_public_update controlled usage_counted path (false -> true)
+        bk.usage_counted = true;
+
+        let usageRow = state.usageMonthly.find(
+          (u) => u.salon_id === salonId && u.billing_month === billingMonth
+        );
+        if (!usageRow) {
+          usageRow = { salon_id: salonId, billing_month: billingMonth, billable_bookings: 1 };
+          state.usageMonthly.push(usageRow);
+        } else {
+          usageRow.billable_bookings += 1;
+        }
+
+        const monthlyLimit = salon.monthly_booking_limit ?? 750;
+        const graceLimit = salon.grace_overage_limit ?? 150;
+        if (usageRow.billable_bookings > monthlyLimit + graceLimit) {
+          const err = new Error(
+            `QUOTA_EXCEEDED: Salon ${salonId} reached monthly online booking capacity (${monthlyLimit} + ${graceLimit})`
+          ) as Error & { code: string };
+          err.code = 'P0002';
+          throw err;
+        }
+
+        return { rows: [{ billable_bookings: usageRow.billable_bookings }], rowCount: 1 };
       }
 
       if (sql.startsWith('INSERT INTO counter_notifications')) {
@@ -1670,3 +1907,138 @@ test('10. Concurrent exclusion violation (23P01) rolls back cleanly and returns 
   assert.equal(mock.getState().bookings[0].stylist_id, 'sty-1');
   assert.equal(mock.getState().bookingAuditLog.length, 0);
 });
+
+test('11. Public booking creation marks usage_counted via increment_salon_monthly_booking_usage while direct PUBLIC_FLOW usage_counted update is rejected', async () => {
+  const mock = createStatefulMockPgPool({
+    salons: [
+      {
+        id: '1',
+        public_code: 'wc_7k9m2p4x8q2a',
+        salon_name: 'WorkCraft Salon 1',
+        public_contact_phone: '+923001112233',
+        public_whatsapp_phone: '+923001112233',
+        whatsapp_phone: '+923001112233',
+        timezone_offset_hours: 5,
+        currency_symbol: 'PKR ',
+        default_lang: 'en',
+        address: 'DHA Phase 5, Lahore',
+        google_maps_url: 'https://maps.google.com/?q=DHA+Lahore',
+        google_review_url: 'https://g.page/r/test-review',
+        operating_hours: {},
+        billing_status: 'ACTIVE',
+        monthly_booking_limit: 5,
+        grace_overage_limit: 0,
+      },
+    ],
+    usageMonthly: [{ salon_id: '1', billing_month: '2026-12', billable_bookings: 1 }],
+  });
+  setPgPoolOverrideForTests(mock.pool);
+
+  const res = await recordBookingInPostgres({
+    salonPublicCode: 'wc_7k9m2p4x8q2a',
+    bookingRef: 'BK-WEB-QUOTA-OK',
+    clientName: 'Usman Tariq',
+    clientPhoneE164: '+923009112233',
+    preferredLang: 'en',
+    stylistName: 'Master Aslam',
+    servicesSnapshot: [{ id: 'svc-1', name: 'Haircut', price: 1200, durationMins: 35 }],
+    totalPrice: 1200,
+    totalDurationMins: 35,
+    startsAtIso: '2026-12-05T07:00:00.000Z',
+    endsAtIso: '2026-12-05T07:35:00.000Z',
+    source: 'WEB_LINK',
+    idempotencyKey: 'idem-quota-ok-1',
+    proofHash: 'proof-quota-ok-1',
+    billingMonth: '2026-12',
+    monthlyLimit: 5,
+    accessTokenHash: hashToken(makeBookingToken('wc_7k9m2p4x8q2a', 'quota-ok-secret')),
+    accessTokenExpiresAtIso: '2026-12-12T07:35:00.000Z',
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(mock.getState().bookings.length, 1);
+  assert.equal(mock.getState().bookings[0].usage_counted, true);
+  assert.equal(mock.getState().usageMonthly[0].billable_bookings, 2);
+  assert.equal(mock.getState().bookingAccessTokens.length, 1);
+  assert.equal(mock.getState().bookingAuditLog.length, 1);
+
+  // Direct PUBLIC_FLOW attempt to mutate bookings.usage_counted must still be rejected
+  const rawClient = await mock.pool.connect();
+  try {
+    await rawClient.query('BEGIN');
+    await rawClient.query(`SELECT set_config('app.current_user_role', $1, true), set_config('app.current_salon_id', $2, true), set_config('app.current_agent_id', $3, true), set_config('app.current_user_id', $4, true)`, ['PUBLIC_FLOW', '1', '', '']);
+    await assert.rejects(
+      () =>
+        rawClient.query(
+          'UPDATE bookings SET usage_counted = TRUE WHERE id = $1 AND salon_id = $2',
+          [mock.getState().bookings[0].id, '1']
+        ),
+      /PUBLIC_FLOW may not directly modify bookings\.usage_counted/
+    );
+    await rawClient.query('ROLLBACK');
+  } finally {
+    rawClient.release();
+  }
+});
+
+test('12. Quota exceeded (SQLSTATE P0002) rolls back entire public booking transaction atomically', async () => {
+  const mock = createStatefulMockPgPool({
+    salons: [
+      {
+        id: '1',
+        public_code: 'wc_7k9m2p4x8q2a',
+        salon_name: 'WorkCraft Salon 1',
+        public_contact_phone: '+923001112233',
+        public_whatsapp_phone: '+923001112233',
+        whatsapp_phone: '+923001112233',
+        timezone_offset_hours: 5,
+        currency_symbol: 'PKR ',
+        default_lang: 'en',
+        address: 'DHA Phase 5, Lahore',
+        google_maps_url: 'https://maps.google.com/?q=DHA+Lahore',
+        google_review_url: 'https://g.page/r/test-review',
+        operating_hours: {},
+        billing_status: 'ACTIVE',
+        monthly_booking_limit: 2,
+        grace_overage_limit: 0,
+      },
+    ],
+    usageMonthly: [{ salon_id: '1', billing_month: '2026-12', billable_bookings: 2 }],
+  });
+  setPgPoolOverrideForTests(mock.pool);
+
+  const clientCountBefore = mock.getState().clients.length;
+  const res = await recordBookingInPostgres({
+    salonPublicCode: 'wc_7k9m2p4x8q2a',
+    bookingRef: 'BK-WEB-OVER-QUOTA',
+    clientName: 'Over Quota Customer',
+    clientPhoneE164: '+923009990001',
+    preferredLang: 'en',
+    stylistName: 'Master Aslam',
+    servicesSnapshot: [{ id: 'svc-1', name: 'Haircut', price: 1200, durationMins: 35 }],
+    totalPrice: 1200,
+    totalDurationMins: 35,
+    startsAtIso: '2026-12-06T07:00:00.000Z',
+    endsAtIso: '2026-12-06T07:35:00.000Z',
+    source: 'WEB_LINK',
+    idempotencyKey: 'idem-quota-exceeded-1',
+    proofHash: 'proof-quota-exceeded-1',
+    billingMonth: '2026-12',
+    monthlyLimit: 2,
+    accessTokenHash: hashToken(makeBookingToken('wc_7k9m2p4x8q2a', 'quota-exceeded-secret')),
+    accessTokenExpiresAtIso: '2026-12-13T07:35:00.000Z',
+  });
+
+  assert.equal(res.ok, false);
+  if (!res.ok) {
+    assert.equal(res.code, 'DB_UNAVAILABLE');
+    assert.match(res.error, /monthly online booking capacity/i);
+  }
+  assert.equal(mock.queries[mock.queries.length - 1].text, 'ROLLBACK');
+  assert.equal(mock.getState().bookings.length, 0);
+  assert.equal(mock.getState().clients.length, clientCountBefore);
+  assert.equal(mock.getState().bookingAccessTokens.length, 0);
+  assert.equal(mock.getState().bookingAuditLog.length, 0);
+  assert.equal(mock.getState().usageMonthly[0].billable_bookings, 2);
+});
+
