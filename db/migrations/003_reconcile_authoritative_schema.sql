@@ -1175,7 +1175,8 @@ BEGIN
 END;
 $$;
 
--- Restrict PUBLIC_FLOW updates on bookings to stylist/time reschedule, CANCELED status, or controlled quota marking
+-- Restrict PUBLIC_FLOW updates on bookings to status-preserving stylist/time reschedule,
+-- CANCELED status (without slot/stylist mutation), or controlled quota marking
 CREATE OR REPLACE FUNCTION guard_bookings_public_update()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -1240,7 +1241,27 @@ BEGIN
     RAISE EXCEPTION 'PUBLIC_FLOW may only reschedule stylist/time or cancel its authorized booking';
   END IF;
 
-  RETURN NEW;
+  IF OLD.status NOT IN ('CONFIRMED', 'IN_CHAIR') THEN
+    RAISE EXCEPTION 'PUBLIC_FLOW cannot modify booking from terminal status %', OLD.status;
+  END IF;
+
+  -- Permitted PUBLIC_FLOW operations only:
+  --   1) Authorized reschedule of stylist/time while preserving current status
+  --   2) Cancellation (transition to CANCELED) without altering stylist or time slot
+  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.status = 'CANCELED' THEN
+    IF (NEW.stylist_id IS DISTINCT FROM OLD.stylist_id
+        OR NEW.starts_at IS DISTINCT FROM OLD.starts_at
+        OR NEW.ends_at IS DISTINCT FROM OLD.ends_at) THEN
+      RAISE EXCEPTION 'PUBLIC_FLOW cancellation may not alter stylist_id or booking time';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  RAISE EXCEPTION 'PUBLIC_FLOW status transition % -> % is not permitted', OLD.status, NEW.status;
 END;
 $$;
 
@@ -1468,7 +1489,7 @@ BEGIN
   END LOOP;
 END $$;
 
--- stylists: PUBLIC_FLOW SELECT / INSERT / UPDATE (for ON CONFLICT DO UPDATE); NO DELETE
+-- stylists: PUBLIC_FLOW SELECT only (no INSERT / UPDATE / DELETE)
 DROP POLICY IF EXISTS stylists_public_flow_select ON stylists;
 CREATE POLICY stylists_public_flow_select ON stylists
   FOR SELECT
@@ -1479,27 +1500,7 @@ CREATE POLICY stylists_public_flow_select ON stylists
   );
 
 DROP POLICY IF EXISTS stylists_public_flow_insert ON stylists;
-CREATE POLICY stylists_public_flow_insert ON stylists
-  FOR INSERT
-  WITH CHECK (
-    current_workcraft_role() = 'PUBLIC_FLOW'
-    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
-    AND salon_id = current_workcraft_salon_id()
-  );
-
 DROP POLICY IF EXISTS stylists_public_flow_update ON stylists;
-CREATE POLICY stylists_public_flow_update ON stylists
-  FOR UPDATE
-  USING (
-    current_workcraft_role() = 'PUBLIC_FLOW'
-    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
-    AND salon_id = current_workcraft_salon_id()
-  )
-  WITH CHECK (
-    current_workcraft_role() = 'PUBLIC_FLOW'
-    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
-    AND salon_id = current_workcraft_salon_id()
-  );
 
 -- stylist_leaves: PUBLIC_FLOW SELECT only
 DROP POLICY IF EXISTS stylist_leaves_public_flow_select ON stylist_leaves;
