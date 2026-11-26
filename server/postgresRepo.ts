@@ -768,6 +768,34 @@ export async function persistPostgresSnapshotMirror(
   }
 }
 
+export async function syncSalonStylistsInPostgres(
+  salonId: string,
+  barbers: string[],
+  actor: PgActorContext
+): Promise<void> {
+  assertOwnerOrFounderActor(actor, salonId, 'syncSalonStylistsInPostgres');
+
+  const pool = getPgPool();
+  if (!pool) return;
+
+  const cleaned = barbers
+    .map((b) => (typeof b === 'string' ? b.trim() : ''))
+    .filter(Boolean)
+    .slice(0, 30);
+  if (cleaned.length === 0) return;
+
+  await withPgTransaction(actor, async (client) => {
+    for (const name of cleaned) {
+      await client.query(
+        `INSERT INTO stylists (salon_id, name, active)
+         VALUES ($1, $2, TRUE)
+         ON CONFLICT (salon_id, name) DO UPDATE SET active = TRUE`,
+        [salonId, name]
+      );
+    }
+  });
+}
+
 export async function findSalonByPublicCodeInPostgres(
   publicCode: string
 ): Promise<PostgresSalonLookupRow | null> {
@@ -948,12 +976,21 @@ export async function recordBookingInPostgres(params: {
       const clientId = cliRes.rows[0].id;
 
       const styRes = await client.query<{ id: string }>(
-        `INSERT INTO stylists (salon_id, name)
-         VALUES ($1, $2)
-         ON CONFLICT (salon_id, name) DO UPDATE SET active = TRUE
-         RETURNING id`,
+        `SELECT id
+         FROM stylists
+         WHERE salon_id = $1
+           AND LOWER(BTRIM(name)) = LOWER(BTRIM($2))
+           AND active = TRUE
+         LIMIT 1`,
         [salonId, params.stylistName]
       );
+      if (styRes.rows.length === 0) {
+        return {
+          ok: false as const,
+          code: 'OVERLAP' as const,
+          error: 'Selected stylist is not available for booking at this salon.',
+        };
+      }
       const stylistUuid = styRes.rows[0].id;
 
       const bkRes = await client.query<{ id: string }>(
@@ -1704,12 +1741,21 @@ export async function rescheduleBookingByAccessTokenInPostgres(params: {
       }
 
       const styRes = await client.query<{ id: string }>(
-        `INSERT INTO stylists (salon_id, name)
-         VALUES ($1, $2)
-         ON CONFLICT (salon_id, name) DO UPDATE SET active = TRUE
-         RETURNING id`,
+        `SELECT id
+         FROM stylists
+         WHERE salon_id = $1
+           AND LOWER(BTRIM(name)) = LOWER(BTRIM($2))
+           AND active = TRUE
+         LIMIT 1`,
         [salonId, slotChoice.barberName]
       );
+      if (styRes.rows.length === 0) {
+        return {
+          ok: false as const,
+          statusCode: 409,
+          error: 'Selected stylist is not available at this salon.',
+        };
+      }
       const nextStylistId = styRes.rows[0].id;
 
       await client.query(
