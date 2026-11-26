@@ -37,11 +37,13 @@ interface RecordedQuery {
   text: string;
   params: unknown[];
   activeGucsAtExecution: Record<string, string>;
+  activeScopedGucsAtExecution: Record<string, string>;
 }
 
 interface MockConnectionState {
   inTransaction: boolean;
   localGucs: Record<string, string>;
+  scopedGucs: Record<string, string>;
 }
 
 function createMockSingleClientPool(options?: {
@@ -59,6 +61,7 @@ function createMockSingleClientPool(options?: {
       'app.current_agent_id': '',
       'app.current_user_id': '',
     },
+    scopedGucs: {},
   };
 
   const resetLocalGucs = () => {
@@ -69,21 +72,33 @@ function createMockSingleClientPool(options?: {
       'app.current_agent_id': '',
       'app.current_user_id': '',
     };
+    connState.scopedGucs = {};
   };
 
   const client = {
     async query(text: string, params: unknown[] = []) {
       const normalizedSql = text.replace(/\s+/g, ' ').trim();
       const snapshotBefore = { ...connState.localGucs };
+      const scopedBefore = { ...connState.scopedGucs };
 
       if (normalizedSql === 'BEGIN') {
         connState.inTransaction = true;
-        queries.push({ text: normalizedSql, params, activeGucsAtExecution: snapshotBefore });
+        queries.push({
+          text: normalizedSql,
+          params,
+          activeGucsAtExecution: snapshotBefore,
+          activeScopedGucsAtExecution: scopedBefore,
+        });
         return { rows: [], rowCount: 0 };
       }
 
       if (normalizedSql === 'COMMIT' || normalizedSql === 'ROLLBACK') {
-        queries.push({ text: normalizedSql, params, activeGucsAtExecution: snapshotBefore });
+        queries.push({
+          text: normalizedSql,
+          params,
+          activeGucsAtExecution: snapshotBefore,
+          activeScopedGucsAtExecution: scopedBefore,
+        });
         resetLocalGucs();
         return { rows: [], rowCount: 0 };
       }
@@ -107,13 +122,45 @@ function createMockSingleClientPool(options?: {
           text: normalizedSql,
           params: [...params],
           activeGucsAtExecution: { ...connState.localGucs },
+          activeScopedGucsAtExecution: { ...connState.scopedGucs },
         });
         return { rows: [], rowCount: 1 };
       }
 
-      queries.push({ text: normalizedSql, params: [...params], activeGucsAtExecution: snapshotBefore });
+      if (normalizedSql.includes("set_config('app.current_")) {
+        assert.equal(
+          connState.inTransaction,
+          true,
+          'scoped set_config(..., true) must execute inside an active transaction'
+        );
+        const matches = [...normalizedSql.matchAll(/set_config\('(app\.current_[a-z_]+)', \$(\d+), true\)/g)];
+        for (const m of matches) {
+          const idx = Number(m[2]) - 1;
+          connState.scopedGucs[m[1]] = String(params[idx] ?? '');
+        }
+        queries.push({
+          text: normalizedSql,
+          params: [...params],
+          activeGucsAtExecution: { ...connState.localGucs },
+          activeScopedGucsAtExecution: { ...connState.scopedGucs },
+        });
+        return { rows: [], rowCount: 1 };
+      }
+
+      queries.push({
+        text: normalizedSql,
+        params: [...params],
+        activeGucsAtExecution: snapshotBefore,
+        activeScopedGucsAtExecution: scopedBefore,
+      });
 
       if (normalizedSql.startsWith('SELECT id FROM salons WHERE public_code = $1')) {
+        if (
+          connState.localGucs['app.current_user_role'] === 'PUBLIC_FLOW' &&
+          connState.scopedGucs['app.current_public_code'] !== String(params[0])
+        ) {
+          return { rows: [], rowCount: 0 };
+        }
         if (!options?.publicLookupSalonId) {
           return { rows: [], rowCount: 0 };
         }
@@ -124,6 +171,12 @@ function createMockSingleClientPool(options?: {
         normalizedSql.includes('FROM salons') &&
         normalizedSql.includes('WHERE public_code = $1')
       ) {
+        if (
+          connState.localGucs['app.current_user_role'] === 'PUBLIC_FLOW' &&
+          connState.scopedGucs['app.current_public_code'] !== String(params[0])
+        ) {
+          return { rows: [], rowCount: 0 };
+        }
         if (!options?.publicLookupSalonId) {
           return { rows: [], rowCount: 0 };
         }
@@ -156,7 +209,8 @@ function createMockSingleClientPool(options?: {
         };
       }
 
-      if (normalizedSql.startsWith('INSERT INTO clients')) {
+      if (normalizedSql.startsWith('SELECT upsert_public_booking_client(')) {
+        connState.scopedGucs['app.current_client_id'] = 'cli-mock-1';
         return { rows: [{ id: 'cli-mock-1' }], rowCount: 1 };
       }
       if (normalizedSql.startsWith('INSERT INTO stylists')) {
@@ -166,7 +220,10 @@ function createMockSingleClientPool(options?: {
         return { rows: [], rowCount: 0 };
       }
       if (normalizedSql.startsWith('INSERT INTO bookings')) {
-        return { rows: [{ id: '00000000-0000-4000-8000-000000000002' }], rowCount: 1 };
+        return { rows: [{ id: String(params[0] || '00000000-0000-4000-8000-000000000002') }], rowCount: 1 };
+      }
+      if (normalizedSql.startsWith('SELECT increment_salon_monthly_booking_usage(')) {
+        return { rows: [{ billable_bookings: 1 }], rowCount: 1 };
       }
 
       return { rows: [], rowCount: 1 };
@@ -309,6 +366,9 @@ test('2. Salon Owner derives scoped GUCs, blocks cross-tenant access, and cannot
   assert.equal(conflictClause.includes('plan_tier'), false);
   assert.equal(conflictClause.includes('monthly_booking_limit'), false);
   assert.equal(insertQuery.text.includes("'PENDING_ACTIVATION'"), true);
+  // Initial INSERT tuple for SALON_OWNER clamps package/plan tier and booking limit to STARTER/750
+  assert.equal(insertQuery.params[15], 'STARTER');
+  assert.equal(insertQuery.params[16], 750);
 
   // Cross-tenant persist attempt with valid owner actor for salon '1' targeting salon '2' fails closed before connect
   const connectsBefore = mock.getConnectCount();
@@ -374,6 +434,8 @@ test('3. Agent transaction derives agent GUCs and enforces assigned_agent_id on 
   });
   assert.equal(insertQuery.text.includes('assigned_agent_id'), true);
   assert.equal(insertQuery.text.includes('ON CONFLICT (id) DO NOTHING'), true);
+  assert.equal(insertQuery.params[15], 'STARTER');
+  assert.equal(insertQuery.params[16], 750);
   assert.equal(insertQuery.params[insertQuery.params.length - 1], 'agent-pk-1');
 });
 
@@ -420,14 +482,21 @@ test('4. Public Flow uses lookup context then narrows app.current_salon_id befor
     'app.current_agent_id': '',
     'app.current_user_id': '',
   });
+  assert.equal(salonLookupQuery?.activeScopedGucsAtExecution['app.current_public_code'], 'wc_studio42');
 
-  const clientInsertQuery = mock.queries.find((q) => q.text.startsWith('INSERT INTO clients'));
-  assert.deepEqual(clientInsertQuery?.activeGucsAtExecution, {
+  const clientUpsertQuery = mock.queries.find((q) =>
+    q.text.startsWith('SELECT upsert_public_booking_client(')
+  );
+  assert.ok(clientUpsertQuery, 'Expected upsert_public_booking_client RPC call');
+  assert.deepEqual(clientUpsertQuery?.activeGucsAtExecution, {
     'app.current_user_role': 'PUBLIC_FLOW',
     'app.current_salon_id': 'salon-public-42',
     'app.current_agent_id': '',
     'app.current_user_id': '',
   });
+  assert.equal(clientUpsertQuery?.activeScopedGucsAtExecution['app.current_token_hash'], 'tokhash-42');
+  assert.equal(clientUpsertQuery?.activeScopedGucsAtExecution['app.current_idempotency_key'], 'idem-42');
+  assert.ok(clientUpsertQuery?.activeScopedGucsAtExecution['app.current_booking_id']);
 
   const bookingInsertQuery = mock.queries.find((q) => q.text.startsWith('INSERT INTO bookings'));
   assert.deepEqual(bookingInsertQuery?.activeGucsAtExecution, {
@@ -436,6 +505,20 @@ test('4. Public Flow uses lookup context then narrows app.current_salon_id befor
     'app.current_agent_id': '',
     'app.current_user_id': '',
   });
+  assert.equal(bookingInsertQuery?.activeScopedGucsAtExecution['app.current_client_id'], 'cli-mock-1');
+  assert.equal(
+    bookingInsertQuery?.activeScopedGucsAtExecution['app.current_booking_id'],
+    bookingInsertQuery?.params[0]
+  );
+
+  const usageRpcQuery = mock.queries.find((q) =>
+    q.text.startsWith('SELECT increment_salon_monthly_booking_usage(')
+  );
+  assert.ok(usageRpcQuery, 'Expected controlled increment_salon_monthly_booking_usage RPC call');
+  assert.equal(
+    mock.queries.some((q) => q.text.includes('INSERT INTO salon_usage_monthly')),
+    false
+  );
 
   // Cannot escalate role mid-transaction or narrow inside non-PUBLIC_FLOW
   await withPgTransaction(derivePgActorFromAuthUser(OWNER_USER), async (client) => {
