@@ -262,8 +262,14 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
     'app.current_agent_id': '',
     'app.current_user_id': '',
   };
+  let scopedGucs: Record<string, string> = {};
 
-  const queries: Array<{ text: string; params: unknown[]; gucs: Record<string, string> }> = [];
+  const queries: Array<{
+    text: string;
+    params: unknown[];
+    gucs: Record<string, string>;
+    scopedGucs: Record<string, string>;
+  }> = [];
   let failOnQuerySubstring: string | null = null;
   let simulateOverlapOnBookingUpdate = false;
 
@@ -322,7 +328,7 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
   const client = {
     async query(text: string, params: unknown[] = []) {
       const sql = text.replace(/\s+/g, ' ').trim();
-      queries.push({ text: sql, params: [...params], gucs: { ...gucs } });
+      queries.push({ text: sql, params: [...params], gucs: { ...gucs }, scopedGucs: { ...scopedGucs } });
 
       if (sql === 'BEGIN') {
         inTx = true;
@@ -338,6 +344,7 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
           'app.current_agent_id': '',
           'app.current_user_id': '',
         };
+        scopedGucs = {};
         return { rows: [], rowCount: 0 };
       }
       if (sql === 'ROLLBACK') {
@@ -350,6 +357,7 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
           'app.current_agent_id': '',
           'app.current_user_id': '',
         };
+        scopedGucs = {};
         return { rows: [], rowCount: 0 };
       }
 
@@ -362,12 +370,28 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
         return { rows: [], rowCount: 1 };
       }
 
+      if (sql.includes("set_config('app.current_")) {
+        assert.equal(inTx, true, 'scoped set_config must run inside transaction');
+        const matches = [...sql.matchAll(/set_config\('(app\.current_[a-z_]+)', \$(\d+), true\)/g)];
+        for (const m of matches) {
+          const idx = Number(m[2]) - 1;
+          scopedGucs[m[1]] = String(params[idx] ?? '');
+        }
+        return { rows: [], rowCount: 1 };
+      }
+
       if (failOnQuerySubstring && sql.includes(failOnQuerySubstring)) {
         throw new Error(`Simulated DB failure on: ${failOnQuerySubstring}`);
       }
 
       if (sql.startsWith('SELECT id FROM salons WHERE public_code = $1')) {
         const code = String(params[0]);
+        if (
+          gucs['app.current_user_role'] === 'PUBLIC_FLOW' &&
+          scopedGucs['app.current_public_code'] !== code
+        ) {
+          return { rows: [], rowCount: 0 };
+        }
         const found = state.salons.find((s) => s.public_code === code);
         return found ? { rows: [{ id: found.id }], rowCount: 1 } : { rows: [], rowCount: 0 };
       }
@@ -380,6 +404,12 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
 
       if (sql.includes('FROM salons WHERE public_code = $1')) {
         const code = String(params[0]);
+        if (
+          gucs['app.current_user_role'] === 'PUBLIC_FLOW' &&
+          scopedGucs['app.current_public_code'] !== code
+        ) {
+          return { rows: [], rowCount: 0 };
+        }
         const found = state.salons.find((s) => s.public_code === code);
         return found ? { rows: [found], rowCount: 1 } : { rows: [], rowCount: 0 };
       }
@@ -396,7 +426,39 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
         return { rows: [], rowCount: 0 };
       }
 
+      if (sql.includes('FROM get_public_stylist_busy_blocks(')) {
+        const salonId = String(params[0]);
+        const winStart = new Date(String(params[1])).getTime();
+        const winEnd = new Date(String(params[2])).getTime();
+        const excludeId = params[3] ? String(params[3]) : null;
+        if (!canSeeSalonRow(salonId, 'bookings')) {
+          throw new Error('Tenant mismatch for stylist busy block lookup');
+        }
+        const rows = state.bookings
+          .filter((b) => {
+            if (b.salon_id !== salonId) return false;
+            if (b.status !== 'CONFIRMED' && b.status !== 'IN_CHAIR') return false;
+            if (excludeId && (b.id === excludeId || b.booking_ref === excludeId)) return false;
+            return new Date(b.ends_at).getTime() > winStart && new Date(b.starts_at).getTime() < winEnd;
+          })
+          .map((b) => {
+            const st = state.stylists.find((x) => x.id === b.stylist_id)!;
+            return {
+              stylist_id: b.stylist_id,
+              stylist_name: st.name,
+              starts_at: b.starts_at,
+              ends_at: b.ends_at,
+              status: b.status,
+              total_duration_mins: b.total_duration_mins,
+            };
+          });
+        return { rows, rowCount: rows.length };
+      }
+
       if (sql.includes('FROM bookings b JOIN stylists st ON st.id = b.stylist_id WHERE b.salon_id = $1')) {
+        if (gucs['app.current_user_role'] === 'PUBLIC_FLOW') {
+          throw new Error('RLS denied direct PUBLIC_FLOW bookings scan in availability');
+        }
         const salonId = String(params[0]);
         const winStart = new Date(String(params[1])).getTime();
         const winEnd = new Date(String(params[2])).getTime();
@@ -453,11 +515,13 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
       if (sql.includes('FROM booking_access_tokens bat JOIN bookings b')) {
         const tokenHash = String(params[0]);
         const salonId = String(params[1]);
+        const isPublic = gucs['app.current_user_role'] === 'PUBLIC_FLOW';
         const tok = state.bookingAccessTokens.find(
           (t) =>
             t.token_hash === tokenHash &&
             t.salon_id === salonId &&
-            canSeeSalonRow(t.salon_id, 'booking_access_tokens')
+            canSeeSalonRow(t.salon_id, 'booking_access_tokens') &&
+            (!isPublic || (scopedGucs['app.current_token_hash'] === t.token_hash && !t.revoked_at && new Date(t.expires_at).getTime() > Date.now()))
         );
         if (!tok) return { rows: [], rowCount: 0 };
         const bk = state.bookings.find(
@@ -492,8 +556,24 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
       if (sql.includes('FROM bookings b JOIN salons s') && sql.includes('WHERE b.id = $1 AND b.salon_id = $2')) {
         const id = String(params[0]);
         const salonId = String(params[1]);
+        const isPublic = gucs['app.current_user_role'] === 'PUBLIC_FLOW';
+        const hasValidPublicTok =
+          isPublic &&
+          Boolean(scopedGucs['app.current_token_hash']) &&
+          state.bookingAccessTokens.some(
+            (t) =>
+              t.booking_id === id &&
+              t.salon_id === salonId &&
+              t.token_hash === scopedGucs['app.current_token_hash'] &&
+              !t.revoked_at &&
+              new Date(t.expires_at).getTime() > Date.now()
+          );
         const bk = state.bookings.find(
-          (b) => b.id === id && b.salon_id === salonId && canSeeSalonRow(b.salon_id, 'bookings')
+          (b) =>
+            b.id === id &&
+            b.salon_id === salonId &&
+            canSeeSalonRow(b.salon_id, 'bookings') &&
+            (!isPublic || hasValidPublicTok)
         );
         return bk ? { rows: [joinBookingRow(bk)], rowCount: 1 } : { rows: [], rowCount: 0 };
       }
@@ -1017,10 +1097,15 @@ test('2. Public access-token lookup & rescheduling narrow PUBLIC_FLOW context an
   assert.equal(mock.getState().bookingAuditLog[0].actor_type, 'CUSTOMER');
   assert.equal(mock.getState().bookingAuditLog[0].action, 'RESCHEDULED');
 
-  // Verify token query executed with narrowed PUBLIC_FLOW salon_id='1'
+  // Verify token query executed with narrowed PUBLIC_FLOW salon_id='1' and scoped token_hash GUC
   const tokQuery = mock.queries.find((q) => q.text.includes('FROM booking_access_tokens bat'));
   assert.equal(tokQuery?.gucs['app.current_user_role'], 'PUBLIC_FLOW');
   assert.equal(tokQuery?.gucs['app.current_salon_id'], '1');
+  assert.equal(tokQuery?.scopedGucs['app.current_token_hash'], hashToken(rawToken));
+  assert.ok(
+    mock.queries.some((q) => q.text.includes('FROM get_public_stylist_busy_blocks(')),
+    'Expected PUBLIC_FLOW availability reschedule check to use get_public_stylist_busy_blocks()'
+  );
 });
 
 test('3. Public access-token cancellation frees slot, preserves quota, leaves canceled view intact, and blocks completed cancel', async () => {
