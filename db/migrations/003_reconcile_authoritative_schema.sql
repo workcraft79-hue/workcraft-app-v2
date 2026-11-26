@@ -28,8 +28,8 @@ LANGUAGE SQL
 STABLE
 AS $$
   SELECT COALESCE(
-    NULLIF(current_setting('app.current_user_role', TRUE), ''),
-    NULLIF((NULLIF(current_setting('request.jwt.claims', TRUE), '')::jsonb ->> 'user_role'), ''),
+    NULLIF(pg_catalog.current_setting('app.current_user_role', TRUE), ''),
+    NULLIF((NULLIF(pg_catalog.current_setting('request.jwt.claims', TRUE), '')::jsonb ->> 'user_role'), ''),
     ''
   );
 $$;
@@ -40,8 +40,8 @@ LANGUAGE SQL
 STABLE
 AS $$
   SELECT COALESCE(
-    NULLIF(current_setting('app.current_salon_id', TRUE), ''),
-    NULLIF((NULLIF(current_setting('request.jwt.claims', TRUE), '')::jsonb ->> 'salon_id'), ''),
+    NULLIF(pg_catalog.current_setting('app.current_salon_id', TRUE), ''),
+    NULLIF((NULLIF(pg_catalog.current_setting('request.jwt.claims', TRUE), '')::jsonb ->> 'salon_id'), ''),
     ''
   );
 $$;
@@ -52,8 +52,8 @@ LANGUAGE SQL
 STABLE
 AS $$
   SELECT COALESCE(
-    NULLIF(current_setting('app.current_agent_id', TRUE), ''),
-    NULLIF((NULLIF(current_setting('request.jwt.claims', TRUE), '')::jsonb ->> 'agent_id'), ''),
+    NULLIF(pg_catalog.current_setting('app.current_agent_id', TRUE), ''),
+    NULLIF((NULLIF(pg_catalog.current_setting('request.jwt.claims', TRUE), '')::jsonb ->> 'agent_id'), ''),
     ''
   );
 $$;
@@ -64,8 +64,8 @@ LANGUAGE SQL
 STABLE
 AS $$
   SELECT COALESCE(
-    NULLIF(current_setting('app.current_user_id', TRUE), ''),
-    NULLIF((NULLIF(current_setting('request.jwt.claims', TRUE), '')::jsonb ->> 'sub'), ''),
+    NULLIF(pg_catalog.current_setting('app.current_user_id', TRUE), ''),
+    NULLIF((NULLIF(pg_catalog.current_setting('request.jwt.claims', TRUE), '')::jsonb ->> 'sub'), ''),
     ''
   );
 $$;
@@ -76,7 +76,7 @@ LANGUAGE SQL
 STABLE
 AS $$
   SELECT COALESCE(
-    NULLIF(current_setting('app.current_public_code', TRUE), ''),
+    NULLIF(pg_catalog.current_setting('app.current_public_code', TRUE), ''),
     ''
   );
 $$;
@@ -87,7 +87,7 @@ LANGUAGE SQL
 STABLE
 AS $$
   SELECT COALESCE(
-    NULLIF(current_setting('app.current_challenge_id', TRUE), ''),
+    NULLIF(pg_catalog.current_setting('app.current_challenge_id', TRUE), ''),
     ''
   );
 $$;
@@ -98,7 +98,7 @@ LANGUAGE SQL
 STABLE
 AS $$
   SELECT COALESCE(
-    NULLIF(current_setting('app.current_token_hash', TRUE), ''),
+    NULLIF(pg_catalog.current_setting('app.current_token_hash', TRUE), ''),
     ''
   );
 $$;
@@ -109,7 +109,7 @@ LANGUAGE SQL
 STABLE
 AS $$
   SELECT COALESCE(
-    NULLIF(current_setting('app.current_booking_id', TRUE), ''),
+    NULLIF(pg_catalog.current_setting('app.current_booking_id', TRUE), ''),
     ''
   );
 $$;
@@ -120,7 +120,7 @@ LANGUAGE SQL
 STABLE
 AS $$
   SELECT COALESCE(
-    NULLIF(current_setting('app.current_client_id', TRUE), ''),
+    NULLIF(pg_catalog.current_setting('app.current_client_id', TRUE), ''),
     ''
   );
 $$;
@@ -131,7 +131,7 @@ LANGUAGE SQL
 STABLE
 AS $$
   SELECT COALESCE(
-    NULLIF(current_setting('app.current_idempotency_key', TRUE), ''),
+    NULLIF(pg_catalog.current_setting('app.current_idempotency_key', TRUE), ''),
     ''
   );
 $$;
@@ -723,9 +723,10 @@ CREATE INDEX IF NOT EXISTS idx_client_browser_tokens_salon_client ON client_brow
 CREATE OR REPLACE FUNCTION guard_salon_billing_status_update()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
-  IF current_workcraft_role() = 'FOUNDER' THEN
+  IF public.current_workcraft_role() = 'FOUNDER' THEN
     RETURN NEW;
   END IF;
 
@@ -739,14 +740,14 @@ BEGIN
        OR NEW.whatsapp_addon_enabled IS TRUE
        OR NEW.meta_phone_number_id IS NOT NULL
        OR (
-         current_workcraft_role() = 'AGENT'
+         public.current_workcraft_role() = 'AGENT'
          AND (
-           NULLIF(current_workcraft_agent_id(), '') IS NULL
-           OR NEW.assigned_agent_id IS DISTINCT FROM current_workcraft_agent_id()
+           NULLIF(public.current_workcraft_agent_id(), '') IS NULL
+           OR NEW.assigned_agent_id IS DISTINCT FROM public.current_workcraft_agent_id()
          )
        )
        OR (
-         current_workcraft_role() <> 'AGENT'
+         public.current_workcraft_role() <> 'AGENT'
          AND NEW.assigned_agent_id IS NOT NULL
        ) THEN
       RAISE EXCEPTION 'Only FOUNDER may provision non-starter salon tier, custom limits, active billing status/cycle, WhatsApp entitlements, Meta phone ID, or arbitrary agent assignment';
@@ -780,13 +781,14 @@ CREATE TRIGGER trg_guard_salon_billing_status
 CREATE OR REPLACE FUNCTION guard_auth_challenges_update()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
-  IF current_workcraft_role() = 'FOUNDER' THEN
+  IF public.current_workcraft_role() = 'FOUNDER' THEN
     RETURN NEW;
   END IF;
 
-  IF OLD.consumed_at IS NOT NULL OR OLD.expires_at <= NOW() THEN
+  IF OLD.consumed_at IS NOT NULL OR OLD.expires_at <= pg_catalog.now() THEN
     RAISE EXCEPTION 'Expired or consumed auth_challenges cannot be modified';
   END IF;
 
@@ -824,50 +826,14 @@ CREATE TRIGGER trg_guard_auth_challenges_update
   FOR EACH ROW
   EXECUTE FUNCTION guard_auth_challenges_update();
 
--- Restrict PUBLIC_FLOW updates on bookings to stylist/time reschedule or CANCELED status only
-CREATE OR REPLACE FUNCTION guard_bookings_public_update()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF current_workcraft_role() <> 'PUBLIC_FLOW' THEN
-    RETURN NEW;
-  END IF;
-
-  IF (NEW.id IS DISTINCT FROM OLD.id
-      OR NEW.salon_id IS DISTINCT FROM OLD.salon_id
-      OR NEW.client_id IS DISTINCT FROM OLD.client_id
-      OR NEW.booking_ref IS DISTINCT FROM OLD.booking_ref
-      OR NEW.services_snapshot IS DISTINCT FROM OLD.services_snapshot
-      OR NEW.total_price IS DISTINCT FROM OLD.total_price
-      OR NEW.total_duration_mins IS DISTINCT FROM OLD.total_duration_mins
-      OR NEW.source IS DISTINCT FROM OLD.source
-      OR NEW.deal_id IS DISTINCT FROM OLD.deal_id
-      OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
-      OR NEW.proof_hash IS DISTINCT FROM OLD.proof_hash
-      OR NEW.usage_counted IS DISTINCT FROM OLD.usage_counted
-      OR NEW.completed_at IS DISTINCT FROM OLD.completed_at
-      OR NEW.created_at IS DISTINCT FROM OLD.created_at) THEN
-    RAISE EXCEPTION 'PUBLIC_FLOW may only reschedule stylist/time or cancel its authorized booking';
-  END IF;
-
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS trg_guard_bookings_public_update ON bookings;
-CREATE TRIGGER trg_guard_bookings_public_update
-  BEFORE UPDATE ON bookings
-  FOR EACH ROW
-  EXECUTE FUNCTION guard_bookings_public_update();
-
 -- Restrict PUBLIC_FLOW updates on booking_access_tokens to bounded expires_at extension only
 CREATE OR REPLACE FUNCTION guard_booking_access_tokens_public_update()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
-  IF current_workcraft_role() <> 'PUBLIC_FLOW' THEN
+  IF public.current_workcraft_role() <> 'PUBLIC_FLOW' THEN
     RETURN NEW;
   END IF;
 
@@ -877,8 +843,8 @@ BEGIN
       OR NEW.salon_id IS DISTINCT FROM OLD.salon_id
       OR NEW.revoked_at IS DISTINCT FROM OLD.revoked_at
       OR NEW.created_at IS DISTINCT FROM OLD.created_at
-      OR NEW.expires_at <= NOW()
-      OR NEW.expires_at > NOW() + INTERVAL '365 days') THEN
+      OR NEW.expires_at <= pg_catalog.now()
+      OR NEW.expires_at > pg_catalog.now() + INTERVAL '365 days') THEN
     RAISE EXCEPTION 'PUBLIC_FLOW may only extend expires_at on its verified active booking access token';
   END IF;
 
@@ -910,15 +876,15 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
-  IF current_workcraft_role() NOT IN ('FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW') THEN
+  IF public.current_workcraft_role() NOT IN ('FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW') THEN
     RAISE EXCEPTION 'Unauthorized role for stylist busy block lookup';
   END IF;
 
-  IF current_workcraft_role() <> 'FOUNDER' THEN
-    IF NULLIF(current_workcraft_salon_id(), '') IS NULL OR p_salon_id IS DISTINCT FROM current_workcraft_salon_id() THEN
+  IF public.current_workcraft_role() <> 'FOUNDER' THEN
+    IF NULLIF(public.current_workcraft_salon_id(), '') IS NULL OR p_salon_id IS DISTINCT FROM public.current_workcraft_salon_id() THEN
       RAISE EXCEPTION 'Tenant mismatch for stylist busy block lookup';
     END IF;
   END IF;
@@ -935,8 +901,8 @@ BEGIN
     b.ends_at,
     b.status,
     b.total_duration_mins
-  FROM bookings b
-  JOIN stylists st ON st.id = b.stylist_id
+  FROM public.bookings b
+  JOIN public.stylists st ON st.id = b.stylist_id
   WHERE b.salon_id = p_salon_id
     AND b.status IN ('CONFIRMED', 'IN_CHAIR')
     AND b.ends_at > p_window_start
@@ -957,31 +923,36 @@ CREATE OR REPLACE FUNCTION upsert_public_booking_client(
 RETURNS TEXT
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_client_id TEXT;
   v_clean_lang TEXT;
+  v_caller_role TEXT;
+  v_prev_role TEXT;
+  v_prev_salon_id TEXT;
+  v_owner_bypasses_rls BOOLEAN := FALSE;
 BEGIN
-  IF current_workcraft_role() NOT IN ('FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW') THEN
+  v_caller_role := public.current_workcraft_role();
+  IF v_caller_role NOT IN ('FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW') THEN
     RAISE EXCEPTION 'Unauthorized role for booking client upsert';
   END IF;
 
-  IF current_workcraft_role() <> 'FOUNDER' THEN
-    IF NULLIF(current_workcraft_salon_id(), '') IS NULL OR p_salon_id IS DISTINCT FROM current_workcraft_salon_id() THEN
+  IF v_caller_role <> 'FOUNDER' THEN
+    IF NULLIF(public.current_workcraft_salon_id(), '') IS NULL OR p_salon_id IS DISTINCT FROM public.current_workcraft_salon_id() THEN
       RAISE EXCEPTION 'Tenant mismatch for booking client upsert';
     END IF;
   END IF;
 
-  IF NULLIF(BTRIM(p_salon_id), '') IS NULL
-     OR NULLIF(BTRIM(p_generated_id), '') IS NULL
-     OR NULLIF(BTRIM(p_name), '') IS NULL
-     OR NULLIF(BTRIM(p_phone_e164), '') IS NULL THEN
+  IF NULLIF(pg_catalog.btrim(p_salon_id), '') IS NULL
+     OR NULLIF(pg_catalog.btrim(p_generated_id), '') IS NULL
+     OR NULLIF(pg_catalog.btrim(p_name), '') IS NULL
+     OR NULLIF(pg_catalog.btrim(p_phone_e164), '') IS NULL THEN
     RAISE EXCEPTION 'Missing required client fields for booking';
   END IF;
 
   IF NOT EXISTS (
-    SELECT 1 FROM salons s
+    SELECT 1 FROM public.salons s
     WHERE s.id = p_salon_id
       AND s.billing_status <> 'SUSPENDED'
   ) THEN
@@ -994,25 +965,62 @@ BEGIN
     ELSE 'en'
   END;
 
-  INSERT INTO clients (
-    id, salon_id, name, phone, phone_e164, preferred_language, preferred_lang, awaiting_language_selection
-  )
-  VALUES (
-    p_generated_id, p_salon_id, BTRIM(p_name), BTRIM(p_phone_e164), BTRIM(p_phone_e164), v_clean_lang, v_clean_lang, FALSE
-  )
-  ON CONFLICT (salon_id, phone_e164) DO UPDATE SET
-    name = EXCLUDED.name,
-    preferred_language = EXCLUDED.preferred_language,
-    preferred_lang = EXCLUDED.preferred_lang,
-    updated_at = NOW()
-  RETURNING id INTO v_client_id;
+  SELECT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles r
+    WHERE r.rolname = CURRENT_USER
+      AND (r.rolsuper OR r.rolbypassrls)
+  ) INTO v_owner_bypasses_rls;
 
-  PERFORM set_config('app.current_client_id', v_client_id, true);
+  v_prev_role := COALESCE(pg_catalog.current_setting('app.current_user_role', TRUE), '');
+  v_prev_salon_id := COALESCE(pg_catalog.current_setting('app.current_salon_id', TRUE), '');
+
+  BEGIN
+    IF NOT v_owner_bypasses_rls AND v_caller_role = 'PUBLIC_FLOW' THEN
+      PERFORM pg_catalog.set_config('app.current_user_role', 'SALON_OWNER', true);
+      PERFORM pg_catalog.set_config('app.current_salon_id', p_salon_id, true);
+    END IF;
+
+    INSERT INTO public.clients (
+      id, salon_id, name, phone, phone_e164, preferred_language, preferred_lang, awaiting_language_selection
+    )
+    VALUES (
+      p_generated_id,
+      p_salon_id,
+      pg_catalog.btrim(p_name),
+      pg_catalog.btrim(p_phone_e164),
+      pg_catalog.btrim(p_phone_e164),
+      v_clean_lang,
+      v_clean_lang,
+      FALSE
+    )
+    ON CONFLICT (salon_id, phone_e164) DO UPDATE SET
+      name = EXCLUDED.name,
+      preferred_language = EXCLUDED.preferred_language,
+      preferred_lang = EXCLUDED.preferred_lang,
+      updated_at = pg_catalog.now()
+    RETURNING id INTO v_client_id;
+
+    IF NOT v_owner_bypasses_rls AND v_caller_role = 'PUBLIC_FLOW' THEN
+      PERFORM pg_catalog.set_config('app.current_user_role', v_prev_role, true);
+      PERFORM pg_catalog.set_config('app.current_salon_id', v_prev_salon_id, true);
+    END IF;
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF NOT v_owner_bypasses_rls AND v_caller_role = 'PUBLIC_FLOW' THEN
+        PERFORM pg_catalog.set_config('app.current_user_role', v_prev_role, true);
+        PERFORM pg_catalog.set_config('app.current_salon_id', v_prev_salon_id, true);
+      END IF;
+      RAISE;
+  END;
+
+  PERFORM pg_catalog.set_config('app.current_client_id', v_client_id, true);
   RETURN v_client_id;
 END;
 $$;
 
 -- Controlled monthly booking counter increment (+1 per uncounted CONFIRMED booking, authoritative quota check)
+-- Defined BEFORE guard_bookings_public_update() so the trigger can verify SECURITY DEFINER function ownership.
 CREATE OR REPLACE FUNCTION increment_salon_monthly_booking_usage(
   p_salon_id TEXT,
   p_booking_id UUID,
@@ -1021,22 +1029,54 @@ CREATE OR REPLACE FUNCTION increment_salon_monthly_booking_usage(
 RETURNS INTEGER
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
+  v_caller_role TEXT;
+  v_prev_role TEXT;
+  v_prev_salon_id TEXT;
+  v_owner_bypasses_rls BOOLEAN := FALSE;
   v_billing_status TEXT;
   v_monthly_limit INTEGER;
   v_grace_limit INTEGER;
   v_counted_booking UUID;
   v_next_billable INTEGER;
 BEGIN
-  IF current_workcraft_role() NOT IN ('FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW') THEN
+  v_caller_role := public.current_workcraft_role();
+  IF v_caller_role NOT IN ('FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW') THEN
     RAISE EXCEPTION 'Unauthorized role for salon usage increment';
   END IF;
 
-  IF current_workcraft_role() <> 'FOUNDER' THEN
-    IF NULLIF(current_workcraft_salon_id(), '') IS NULL OR p_salon_id IS DISTINCT FROM current_workcraft_salon_id() THEN
+  IF v_caller_role <> 'FOUNDER' THEN
+    IF NULLIF(public.current_workcraft_salon_id(), '') IS NULL OR p_salon_id IS DISTINCT FROM public.current_workcraft_salon_id() THEN
       RAISE EXCEPTION 'Tenant mismatch for salon usage increment';
+    END IF;
+  END IF;
+
+  IF p_booking_id IS NULL THEN
+    RAISE EXCEPTION 'Booking id is required for salon usage increment';
+  END IF;
+
+  IF v_caller_role = 'PUBLIC_FLOW' THEN
+    IF NOT (
+      (
+        NULLIF(public.current_workcraft_booking_id(), '') IS NOT NULL
+        AND p_booking_id::text = public.current_workcraft_booking_id()
+      )
+      OR (
+        NULLIF(public.current_workcraft_token_hash(), '') IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM public.booking_access_tokens bat
+          WHERE bat.booking_id = p_booking_id
+            AND bat.salon_id = p_salon_id
+            AND bat.token_hash = public.current_workcraft_token_hash()
+            AND bat.revoked_at IS NULL
+            AND bat.expires_at > pg_catalog.now()
+        )
+      )
+    ) THEN
+      RAISE EXCEPTION 'PUBLIC_FLOW caller is not authorized to count usage for booking %', p_booking_id;
     END IF;
   END IF;
 
@@ -1046,7 +1086,7 @@ BEGIN
 
   SELECT s.billing_status, s.monthly_booking_limit, s.grace_overage_limit
     INTO v_billing_status, v_monthly_limit, v_grace_limit
-  FROM salons s
+  FROM public.salons s
   WHERE s.id = p_salon_id
   FOR UPDATE;
 
@@ -1054,35 +1094,76 @@ BEGIN
     RAISE EXCEPTION 'Salon not found or suspended';
   END IF;
 
-  UPDATE bookings b
-  SET usage_counted = TRUE
-  WHERE b.id = p_booking_id
-    AND b.salon_id = p_salon_id
-    AND b.status = 'CONFIRMED'
-    AND b.usage_counted = FALSE
-  RETURNING b.id INTO v_counted_booking;
+  -- Mark usage_counted = TRUE under caller's active role so guard_bookings_public_update()
+  -- runs and authorizes this transition exclusively via SECURITY DEFINER owner + internal GUC.
+  BEGIN
+    PERFORM pg_catalog.set_config('app._usage_mark_booking_id', p_booking_id::text, true);
+
+    UPDATE public.bookings b
+    SET usage_counted = TRUE
+    WHERE b.id = p_booking_id
+      AND b.salon_id = p_salon_id
+      AND b.status = 'CONFIRMED'
+      AND b.usage_counted = FALSE
+    RETURNING b.id INTO v_counted_booking;
+
+    PERFORM pg_catalog.set_config('app._usage_mark_booking_id', '', true);
+  EXCEPTION
+    WHEN OTHERS THEN
+      PERFORM pg_catalog.set_config('app._usage_mark_booking_id', '', true);
+      RAISE;
+  END;
 
   IF v_counted_booking IS NULL THEN
     RAISE EXCEPTION 'Usage increment requires an uncounted CONFIRMED booking in the scoped salon';
   END IF;
 
-  INSERT INTO salon_usage_monthly (
-    salon_id, billing_month, billable_bookings, overage_bookings, limit_snapshot, updated_at
-  )
-  VALUES (
-    p_salon_id,
-    p_billing_month,
-    1,
-    CASE WHEN 1 > v_monthly_limit THEN 1 - v_monthly_limit ELSE 0 END,
-    v_monthly_limit,
-    NOW()
-  )
-  ON CONFLICT (salon_id, billing_month) DO UPDATE SET
-    billable_bookings = salon_usage_monthly.billable_bookings + 1,
-    overage_bookings = GREATEST(0, (salon_usage_monthly.billable_bookings + 1) - v_monthly_limit),
-    limit_snapshot = v_monthly_limit,
-    updated_at = NOW()
-  RETURNING billable_bookings INTO v_next_billable;
+  SELECT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles r
+    WHERE r.rolname = CURRENT_USER
+      AND (r.rolsuper OR r.rolbypassrls)
+  ) INTO v_owner_bypasses_rls;
+
+  v_prev_role := COALESCE(pg_catalog.current_setting('app.current_user_role', TRUE), '');
+  v_prev_salon_id := COALESCE(pg_catalog.current_setting('app.current_salon_id', TRUE), '');
+
+  BEGIN
+    IF NOT v_owner_bypasses_rls AND v_caller_role = 'PUBLIC_FLOW' THEN
+      PERFORM pg_catalog.set_config('app.current_user_role', 'SALON_OWNER', true);
+      PERFORM pg_catalog.set_config('app.current_salon_id', p_salon_id, true);
+    END IF;
+
+    INSERT INTO public.salon_usage_monthly (
+      salon_id, billing_month, billable_bookings, overage_bookings, limit_snapshot, updated_at
+    )
+    VALUES (
+      p_salon_id,
+      p_billing_month,
+      1,
+      CASE WHEN 1 > v_monthly_limit THEN 1 - v_monthly_limit ELSE 0 END,
+      v_monthly_limit,
+      pg_catalog.now()
+    )
+    ON CONFLICT (salon_id, billing_month) DO UPDATE SET
+      billable_bookings = salon_usage_monthly.billable_bookings + 1,
+      overage_bookings = GREATEST(0, (salon_usage_monthly.billable_bookings + 1) - v_monthly_limit),
+      limit_snapshot = v_monthly_limit,
+      updated_at = pg_catalog.now()
+    RETURNING billable_bookings INTO v_next_billable;
+
+    IF NOT v_owner_bypasses_rls AND v_caller_role = 'PUBLIC_FLOW' THEN
+      PERFORM pg_catalog.set_config('app.current_user_role', v_prev_role, true);
+      PERFORM pg_catalog.set_config('app.current_salon_id', v_prev_salon_id, true);
+    END IF;
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF NOT v_owner_bypasses_rls AND v_caller_role = 'PUBLIC_FLOW' THEN
+        PERFORM pg_catalog.set_config('app.current_user_role', v_prev_role, true);
+        PERFORM pg_catalog.set_config('app.current_salon_id', v_prev_salon_id, true);
+      END IF;
+      RAISE;
+  END;
 
   IF v_next_billable > (v_monthly_limit + v_grace_limit) THEN
     RAISE EXCEPTION 'QUOTA_EXCEEDED: Salon % reached monthly online booking capacity (% + %)',
@@ -1093,6 +1174,168 @@ BEGIN
   RETURN v_next_billable;
 END;
 $$;
+
+-- Restrict PUBLIC_FLOW updates on bookings to stylist/time reschedule, CANCELED status, or controlled quota marking
+CREATE OR REPLACE FUNCTION guard_bookings_public_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_usage_fn_owner NAME;
+BEGIN
+  IF public.current_workcraft_role() <> 'PUBLIC_FLOW' THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.usage_counted IS DISTINCT FROM OLD.usage_counted THEN
+    SELECT pg_catalog.pg_get_userbyid(p.proowner)
+      INTO v_usage_fn_owner
+    FROM pg_catalog.pg_proc p
+    WHERE p.oid = pg_catalog.to_regprocedure('public.increment_salon_monthly_booking_usage(text, uuid, text)')
+      AND p.prosecdef IS TRUE;
+
+    IF OLD.usage_counted IS FALSE
+       AND NEW.usage_counted IS TRUE
+       AND OLD.status = 'CONFIRMED'
+       AND NEW.status = 'CONFIRMED'
+       AND v_usage_fn_owner IS NOT NULL
+       AND CURRENT_USER = v_usage_fn_owner
+       AND NULLIF(pg_catalog.current_setting('app._usage_mark_booking_id', TRUE), '') IS NOT DISTINCT FROM OLD.id::text
+       AND NEW.id IS NOT DISTINCT FROM OLD.id
+       AND NEW.salon_id IS NOT DISTINCT FROM OLD.salon_id
+       AND NEW.client_id IS NOT DISTINCT FROM OLD.client_id
+       AND NEW.stylist_id IS NOT DISTINCT FROM OLD.stylist_id
+       AND NEW.booking_ref IS NOT DISTINCT FROM OLD.booking_ref
+       AND NEW.services_snapshot IS NOT DISTINCT FROM OLD.services_snapshot
+       AND NEW.total_price IS NOT DISTINCT FROM OLD.total_price
+       AND NEW.total_duration_mins IS NOT DISTINCT FROM OLD.total_duration_mins
+       AND NEW.starts_at IS NOT DISTINCT FROM OLD.starts_at
+       AND NEW.ends_at IS NOT DISTINCT FROM OLD.ends_at
+       AND NEW.source IS NOT DISTINCT FROM OLD.source
+       AND NEW.deal_id IS NOT DISTINCT FROM OLD.deal_id
+       AND NEW.idempotency_key IS NOT DISTINCT FROM OLD.idempotency_key
+       AND NEW.proof_hash IS NOT DISTINCT FROM OLD.proof_hash
+       AND NEW.completed_at IS NOT DISTINCT FROM OLD.completed_at
+       AND NEW.created_at IS NOT DISTINCT FROM OLD.created_at THEN
+      RETURN NEW;
+    END IF;
+
+    RAISE EXCEPTION 'PUBLIC_FLOW may not directly modify bookings.usage_counted';
+  END IF;
+
+  IF (NEW.id IS DISTINCT FROM OLD.id
+      OR NEW.salon_id IS DISTINCT FROM OLD.salon_id
+      OR NEW.client_id IS DISTINCT FROM OLD.client_id
+      OR NEW.booking_ref IS DISTINCT FROM OLD.booking_ref
+      OR NEW.services_snapshot IS DISTINCT FROM OLD.services_snapshot
+      OR NEW.total_price IS DISTINCT FROM OLD.total_price
+      OR NEW.total_duration_mins IS DISTINCT FROM OLD.total_duration_mins
+      OR NEW.source IS DISTINCT FROM OLD.source
+      OR NEW.deal_id IS DISTINCT FROM OLD.deal_id
+      OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
+      OR NEW.proof_hash IS DISTINCT FROM OLD.proof_hash
+      OR NEW.completed_at IS DISTINCT FROM OLD.completed_at
+      OR NEW.created_at IS DISTINCT FROM OLD.created_at) THEN
+    RAISE EXCEPTION 'PUBLIC_FLOW may only reschedule stylist/time or cancel its authorized booking';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_guard_bookings_public_update ON bookings;
+CREATE TRIGGER trg_guard_bookings_public_update
+  BEFORE UPDATE ON bookings
+  FOR EACH ROW
+  EXECUTE FUNCTION guard_bookings_public_update();
+
+-- Least-privilege function EXECUTE grants & SECURITY DEFINER ownership/search_path audit
+REVOKE ALL ON FUNCTION public.guard_salon_billing_status_update() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.guard_auth_challenges_update() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.guard_booking_access_tokens_public_update() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.guard_bookings_public_update() FROM PUBLIC;
+
+REVOKE ALL ON FUNCTION public.get_public_stylist_busy_blocks(TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.upsert_public_booking_client(TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.increment_salon_monthly_booking_usage(TEXT, UUID, TEXT) FROM PUBLIC;
+
+DO $$
+DECLARE
+  r RECORD;
+  v_sig TEXT;
+  v_fn REGPROCEDURE;
+  v_owner NAME;
+  v_secdef BOOLEAN;
+  v_has_safe_search_path BOOLEAN;
+BEGIN
+  EXECUTE format(
+    'GRANT EXECUTE ON FUNCTION public.get_public_stylist_busy_blocks(TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT) TO %I',
+    CURRENT_USER
+  );
+  EXECUTE format(
+    'GRANT EXECUTE ON FUNCTION public.upsert_public_booking_client(TEXT, TEXT, TEXT, TEXT, TEXT) TO %I',
+    CURRENT_USER
+  );
+  EXECUTE format(
+    'GRANT EXECUTE ON FUNCTION public.increment_salon_monthly_booking_usage(TEXT, UUID, TEXT) TO %I',
+    CURRENT_USER
+  );
+
+  FOR r IN
+    SELECT rolname
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'staging_app_role'
+       OR (
+         rolcanlogin
+         AND rolname !~ '^pg_'
+         AND pg_catalog.has_table_privilege(oid, 'public.bookings'::regclass, 'INSERT')
+       )
+  LOOP
+    EXECUTE format(
+      'GRANT EXECUTE ON FUNCTION public.get_public_stylist_busy_blocks(TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT) TO %I',
+      r.rolname
+    );
+    EXECUTE format(
+      'GRANT EXECUTE ON FUNCTION public.upsert_public_booking_client(TEXT, TEXT, TEXT, TEXT, TEXT) TO %I',
+      r.rolname
+    );
+    EXECUTE format(
+      'GRANT EXECUTE ON FUNCTION public.increment_salon_monthly_booking_usage(TEXT, UUID, TEXT) TO %I',
+      r.rolname
+    );
+  END LOOP;
+
+  FOREACH v_sig IN ARRAY ARRAY[
+    'public.get_public_stylist_busy_blocks(text, timestamptz, timestamptz, text)',
+    'public.upsert_public_booking_client(text, text, text, text, text)',
+    'public.increment_salon_monthly_booking_usage(text, uuid, text)'
+  ]
+  LOOP
+    v_fn := pg_catalog.to_regprocedure(v_sig);
+    IF v_fn IS NULL THEN
+      RAISE EXCEPTION 'Missing required SECURITY DEFINER function: %', v_sig;
+    END IF;
+
+    SELECT
+      pg_catalog.pg_get_userbyid(p.proowner),
+      p.prosecdef,
+      pg_catalog.array_to_string(COALESCE(p.proconfig, ARRAY[]::TEXT[]), '|') LIKE '%search_path=%pg_catalog%public%pg_temp%'
+    INTO v_owner, v_secdef, v_has_safe_search_path
+    FROM pg_catalog.pg_proc p
+    WHERE p.oid = v_fn;
+
+    IF v_owner IS NULL OR v_owner = 'staging_app_role' THEN
+      RAISE EXCEPTION 'SECURITY DEFINER function % has unsafe owner %', v_sig, COALESCE(v_owner::text, '<null>');
+    END IF;
+    IF v_secdef IS NOT TRUE THEN
+      RAISE EXCEPTION 'Controlled RPC % must be SECURITY DEFINER', v_sig;
+    END IF;
+    IF v_has_safe_search_path IS NOT TRUE THEN
+      RAISE EXCEPTION 'SECURITY DEFINER function % must set search_path = pg_catalog, public, pg_temp', v_sig;
+    END IF;
+  END LOOP;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- 8. Unified Row-Level Security (FORCE RLS on All 34 Tables + Least Privilege)
