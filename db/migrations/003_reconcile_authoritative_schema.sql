@@ -92,6 +92,50 @@ AS $$
   );
 $$;
 
+CREATE OR REPLACE FUNCTION current_workcraft_token_hash()
+RETURNS TEXT
+LANGUAGE SQL
+STABLE
+AS $$
+  SELECT COALESCE(
+    NULLIF(current_setting('app.current_token_hash', TRUE), ''),
+    ''
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION current_workcraft_booking_id()
+RETURNS TEXT
+LANGUAGE SQL
+STABLE
+AS $$
+  SELECT COALESCE(
+    NULLIF(current_setting('app.current_booking_id', TRUE), ''),
+    ''
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION current_workcraft_client_id()
+RETURNS TEXT
+LANGUAGE SQL
+STABLE
+AS $$
+  SELECT COALESCE(
+    NULLIF(current_setting('app.current_client_id', TRUE), ''),
+    ''
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION current_workcraft_idempotency_key()
+RETURNS TEXT
+LANGUAGE SQL
+STABLE
+AS $$
+  SELECT COALESCE(
+    NULLIF(current_setting('app.current_idempotency_key', TRUE), ''),
+    ''
+  );
+$$;
+
 -- -----------------------------------------------------------------------------
 -- 2. Reconcile Existing 001 Tables Non-Destructively (TEXT salons.id preserved)
 -- -----------------------------------------------------------------------------
@@ -284,6 +328,12 @@ BEGIN
   END IF;
 END $$;
 
+-- Enforce unprivileged STARTER defaults on future salon inserts after 001 backfill completes
+ALTER TABLE salons
+  ALTER COLUMN package_tier SET DEFAULT 'STARTER',
+  ALTER COLUMN plan_tier SET DEFAULT 'STARTER',
+  ALTER COLUMN monthly_booking_limit SET DEFAULT 750;
+
 -- -----------------------------------------------------------------------------
 -- 3. Auth Memberships, Challenges, Biometrics & Single-Tier Agent Profiles
 -- -----------------------------------------------------------------------------
@@ -444,6 +494,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   deal_id UUID REFERENCES deals(id) ON DELETE SET NULL,
   idempotency_key TEXT,
   proof_hash TEXT NOT NULL,
+  usage_counted BOOLEAN NOT NULL DEFAULT FALSE,
   completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (ends_at > starts_at),
@@ -453,6 +504,9 @@ CREATE TABLE IF NOT EXISTS bookings (
     occupied_range WITH &&
   ) WHERE (status IN ('CONFIRMED', 'IN_CHAIR'))
 );
+
+ALTER TABLE bookings
+  ADD COLUMN IF NOT EXISTS usage_counted BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS booking_audit_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -663,7 +717,7 @@ CREATE INDEX IF NOT EXISTS idx_voice_threads_salon ON voice_threads (salon_id, c
 CREATE INDEX IF NOT EXISTS idx_client_browser_tokens_salon_client ON client_browser_tokens (salon_id, client_id);
 
 -- -----------------------------------------------------------------------------
--- 7. Billing, Entitlement & Agent-Assignment Trigger Guard (FOUNDER-Only)
+-- 7. Triggers & Controlled PUBLIC_FLOW Database Functions
 -- -----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION guard_salon_billing_status_update()
@@ -677,9 +731,25 @@ BEGIN
 
   IF TG_OP = 'INSERT' THEN
     IF NEW.billing_status IS DISTINCT FROM 'PENDING_ACTIVATION'
+       OR NEW.package_tier IS DISTINCT FROM 'STARTER'
+       OR NEW.plan_tier IS DISTINCT FROM 'STARTER'
+       OR NEW.monthly_booking_limit IS DISTINCT FROM 750
+       OR NEW.grace_overage_limit IS DISTINCT FROM 150
+       OR NEW.billing_cycle_start IS DISTINCT FROM CURRENT_DATE
        OR NEW.whatsapp_addon_enabled IS TRUE
-       OR NEW.meta_phone_number_id IS NOT NULL THEN
-      RAISE EXCEPTION 'Only FOUNDER may provision active salon billing_status or paid WhatsApp add-on entitlements';
+       OR NEW.meta_phone_number_id IS NOT NULL
+       OR (
+         current_workcraft_role() = 'AGENT'
+         AND (
+           NULLIF(current_workcraft_agent_id(), '') IS NULL
+           OR NEW.assigned_agent_id IS DISTINCT FROM current_workcraft_agent_id()
+         )
+       )
+       OR (
+         current_workcraft_role() <> 'AGENT'
+         AND NEW.assigned_agent_id IS NOT NULL
+       ) THEN
+      RAISE EXCEPTION 'Only FOUNDER may provision non-starter salon tier, custom limits, active billing status/cycle, WhatsApp entitlements, Meta phone ID, or arbitrary agent assignment';
     END IF;
     RETURN NEW;
   END IF;
@@ -693,7 +763,7 @@ BEGIN
       OR NEW.whatsapp_addon_enabled IS DISTINCT FROM OLD.whatsapp_addon_enabled
       OR NEW.meta_phone_number_id IS DISTINCT FROM OLD.meta_phone_number_id
       OR NEW.assigned_agent_id IS DISTINCT FROM OLD.assigned_agent_id) THEN
-    RAISE EXCEPTION 'Only FOUNDER may modify salon billing_status, tier, quotas, add-on entitlements, or assigned_agent_id';
+    RAISE EXCEPTION 'Only FOUNDER may modify salon billing_status, tier, quotas, billing_cycle_start, add-on entitlements, meta_phone_number_id, or assigned_agent_id';
   END IF;
 
   RETURN NEW;
@@ -705,6 +775,324 @@ CREATE TRIGGER trg_guard_salon_billing_status
   BEFORE INSERT OR UPDATE ON salons
   FOR EACH ROW
   EXECUTE FUNCTION guard_salon_billing_status_update();
+
+-- Restrict auth_challenges updates to valid attempt increments & consumption only
+CREATE OR REPLACE FUNCTION guard_auth_challenges_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF current_workcraft_role() = 'FOUNDER' THEN
+    RETURN NEW;
+  END IF;
+
+  IF OLD.consumed_at IS NOT NULL OR OLD.expires_at <= NOW() THEN
+    RAISE EXCEPTION 'Expired or consumed auth_challenges cannot be modified';
+  END IF;
+
+  IF (NEW.id IS DISTINCT FROM OLD.id
+      OR NEW.user_id IS DISTINCT FROM OLD.user_id
+      OR NEW.target_phone IS DISTINCT FROM OLD.target_phone
+      OR NEW.purpose IS DISTINCT FROM OLD.purpose
+      OR NEW.code_hash IS DISTINCT FROM OLD.code_hash
+      OR NEW.expires_at IS DISTINCT FROM OLD.expires_at
+      OR NEW.created_at IS DISTINCT FROM OLD.created_at) THEN
+    RAISE EXCEPTION 'Only attempts and consumed_at may be updated on auth_challenges';
+  END IF;
+
+  IF OLD.attempts >= 5 OR NEW.attempts < OLD.attempts OR NEW.attempts > 5 THEN
+    RAISE EXCEPTION 'auth_challenges verification attempt limit exceeded or invalid attempt count';
+  END IF;
+
+  IF NEW.consumed_at IS NULL THEN
+    IF NEW.attempts IS DISTINCT FROM OLD.attempts + 1 THEN
+      RAISE EXCEPTION 'Failed auth_challenges update must increment attempts by exactly 1';
+    END IF;
+  ELSE
+    IF NEW.attempts NOT IN (OLD.attempts, OLD.attempts + 1) THEN
+      RAISE EXCEPTION 'Invalid attempts transition while consuming auth_challenge';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_guard_auth_challenges_update ON auth_challenges;
+CREATE TRIGGER trg_guard_auth_challenges_update
+  BEFORE UPDATE ON auth_challenges
+  FOR EACH ROW
+  EXECUTE FUNCTION guard_auth_challenges_update();
+
+-- Restrict PUBLIC_FLOW updates on bookings to stylist/time reschedule or CANCELED status only
+CREATE OR REPLACE FUNCTION guard_bookings_public_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF current_workcraft_role() <> 'PUBLIC_FLOW' THEN
+    RETURN NEW;
+  END IF;
+
+  IF (NEW.id IS DISTINCT FROM OLD.id
+      OR NEW.salon_id IS DISTINCT FROM OLD.salon_id
+      OR NEW.client_id IS DISTINCT FROM OLD.client_id
+      OR NEW.booking_ref IS DISTINCT FROM OLD.booking_ref
+      OR NEW.services_snapshot IS DISTINCT FROM OLD.services_snapshot
+      OR NEW.total_price IS DISTINCT FROM OLD.total_price
+      OR NEW.total_duration_mins IS DISTINCT FROM OLD.total_duration_mins
+      OR NEW.source IS DISTINCT FROM OLD.source
+      OR NEW.deal_id IS DISTINCT FROM OLD.deal_id
+      OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
+      OR NEW.proof_hash IS DISTINCT FROM OLD.proof_hash
+      OR NEW.usage_counted IS DISTINCT FROM OLD.usage_counted
+      OR NEW.completed_at IS DISTINCT FROM OLD.completed_at
+      OR NEW.created_at IS DISTINCT FROM OLD.created_at) THEN
+    RAISE EXCEPTION 'PUBLIC_FLOW may only reschedule stylist/time or cancel its authorized booking';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_guard_bookings_public_update ON bookings;
+CREATE TRIGGER trg_guard_bookings_public_update
+  BEFORE UPDATE ON bookings
+  FOR EACH ROW
+  EXECUTE FUNCTION guard_bookings_public_update();
+
+-- Restrict PUBLIC_FLOW updates on booking_access_tokens to bounded expires_at extension only
+CREATE OR REPLACE FUNCTION guard_booking_access_tokens_public_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF current_workcraft_role() <> 'PUBLIC_FLOW' THEN
+    RETURN NEW;
+  END IF;
+
+  IF (NEW.id IS DISTINCT FROM OLD.id
+      OR NEW.token_hash IS DISTINCT FROM OLD.token_hash
+      OR NEW.booking_id IS DISTINCT FROM OLD.booking_id
+      OR NEW.salon_id IS DISTINCT FROM OLD.salon_id
+      OR NEW.revoked_at IS DISTINCT FROM OLD.revoked_at
+      OR NEW.created_at IS DISTINCT FROM OLD.created_at
+      OR NEW.expires_at <= NOW()
+      OR NEW.expires_at > NOW() + INTERVAL '365 days') THEN
+    RAISE EXCEPTION 'PUBLIC_FLOW may only extend expires_at on its verified active booking access token';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_guard_booking_access_tokens_public_update ON booking_access_tokens;
+CREATE TRIGGER trg_guard_booking_access_tokens_public_update
+  BEFORE UPDATE ON booking_access_tokens
+  FOR EACH ROW
+  EXECUTE FUNCTION guard_booking_access_tokens_public_update();
+
+-- Controlled non-PII busy slot query for availability (eliminates direct PUBLIC_FLOW bookings SELECT)
+CREATE OR REPLACE FUNCTION get_public_stylist_busy_blocks(
+  p_salon_id TEXT,
+  p_window_start TIMESTAMPTZ,
+  p_window_end TIMESTAMPTZ,
+  p_exclude_booking TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+  stylist_id UUID,
+  stylist_name TEXT,
+  starts_at TIMESTAMPTZ,
+  ends_at TIMESTAMPTZ,
+  status TEXT,
+  total_duration_mins INTEGER
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF current_workcraft_role() NOT IN ('FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW') THEN
+    RAISE EXCEPTION 'Unauthorized role for stylist busy block lookup';
+  END IF;
+
+  IF current_workcraft_role() <> 'FOUNDER' THEN
+    IF NULLIF(current_workcraft_salon_id(), '') IS NULL OR p_salon_id IS DISTINCT FROM current_workcraft_salon_id() THEN
+      RAISE EXCEPTION 'Tenant mismatch for stylist busy block lookup';
+    END IF;
+  END IF;
+
+  IF p_window_end <= p_window_start OR p_window_end - p_window_start > INTERVAL '14 days' THEN
+    RAISE EXCEPTION 'Invalid availability query window';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    b.stylist_id,
+    st.name AS stylist_name,
+    b.starts_at,
+    b.ends_at,
+    b.status,
+    b.total_duration_mins
+  FROM bookings b
+  JOIN stylists st ON st.id = b.stylist_id
+  WHERE b.salon_id = p_salon_id
+    AND b.status IN ('CONFIRMED', 'IN_CHAIR')
+    AND b.ends_at > p_window_start
+    AND b.starts_at < p_window_end
+    AND (p_exclude_booking IS NULL OR (b.id::text <> p_exclude_booking AND b.booking_ref <> p_exclude_booking))
+  ORDER BY b.starts_at ASC;
+END;
+$$;
+
+-- Controlled client upsert for public booking creation (returns client_id only; never exposes client directory)
+CREATE OR REPLACE FUNCTION upsert_public_booking_client(
+  p_salon_id TEXT,
+  p_generated_id TEXT,
+  p_name TEXT,
+  p_phone_e164 TEXT,
+  p_preferred_lang TEXT
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_client_id TEXT;
+  v_clean_lang TEXT;
+BEGIN
+  IF current_workcraft_role() NOT IN ('FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW') THEN
+    RAISE EXCEPTION 'Unauthorized role for booking client upsert';
+  END IF;
+
+  IF current_workcraft_role() <> 'FOUNDER' THEN
+    IF NULLIF(current_workcraft_salon_id(), '') IS NULL OR p_salon_id IS DISTINCT FROM current_workcraft_salon_id() THEN
+      RAISE EXCEPTION 'Tenant mismatch for booking client upsert';
+    END IF;
+  END IF;
+
+  IF NULLIF(BTRIM(p_salon_id), '') IS NULL
+     OR NULLIF(BTRIM(p_generated_id), '') IS NULL
+     OR NULLIF(BTRIM(p_name), '') IS NULL
+     OR NULLIF(BTRIM(p_phone_e164), '') IS NULL THEN
+    RAISE EXCEPTION 'Missing required client fields for booking';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM salons s
+    WHERE s.id = p_salon_id
+      AND s.billing_status <> 'SUSPENDED'
+  ) THEN
+    RAISE EXCEPTION 'Salon is unavailable or suspended';
+  END IF;
+
+  v_clean_lang := CASE
+    WHEN p_preferred_lang IN ('en', 'roman_ur', 'ur', 'ar', 'it', 'ru', 'fr', 'de', 'es')
+      THEN p_preferred_lang
+    ELSE 'en'
+  END;
+
+  INSERT INTO clients (
+    id, salon_id, name, phone, phone_e164, preferred_language, preferred_lang, awaiting_language_selection
+  )
+  VALUES (
+    p_generated_id, p_salon_id, BTRIM(p_name), BTRIM(p_phone_e164), BTRIM(p_phone_e164), v_clean_lang, v_clean_lang, FALSE
+  )
+  ON CONFLICT (salon_id, phone_e164) DO UPDATE SET
+    name = EXCLUDED.name,
+    preferred_language = EXCLUDED.preferred_language,
+    preferred_lang = EXCLUDED.preferred_lang,
+    updated_at = NOW()
+  RETURNING id INTO v_client_id;
+
+  PERFORM set_config('app.current_client_id', v_client_id, true);
+  RETURN v_client_id;
+END;
+$$;
+
+-- Controlled monthly booking counter increment (+1 per uncounted CONFIRMED booking, authoritative quota check)
+CREATE OR REPLACE FUNCTION increment_salon_monthly_booking_usage(
+  p_salon_id TEXT,
+  p_booking_id UUID,
+  p_billing_month TEXT
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_billing_status TEXT;
+  v_monthly_limit INTEGER;
+  v_grace_limit INTEGER;
+  v_counted_booking UUID;
+  v_next_billable INTEGER;
+BEGIN
+  IF current_workcraft_role() NOT IN ('FOUNDER', 'SALON_OWNER', 'PUBLIC_FLOW') THEN
+    RAISE EXCEPTION 'Unauthorized role for salon usage increment';
+  END IF;
+
+  IF current_workcraft_role() <> 'FOUNDER' THEN
+    IF NULLIF(current_workcraft_salon_id(), '') IS NULL OR p_salon_id IS DISTINCT FROM current_workcraft_salon_id() THEN
+      RAISE EXCEPTION 'Tenant mismatch for salon usage increment';
+    END IF;
+  END IF;
+
+  IF p_billing_month IS NULL OR p_billing_month !~ '^\d{4}-(0[1-9]|1[0-2])$' THEN
+    RAISE EXCEPTION 'Invalid billing_month format (expected YYYY-MM)';
+  END IF;
+
+  SELECT s.billing_status, s.monthly_booking_limit, s.grace_overage_limit
+    INTO v_billing_status, v_monthly_limit, v_grace_limit
+  FROM salons s
+  WHERE s.id = p_salon_id
+  FOR UPDATE;
+
+  IF NOT FOUND OR v_billing_status = 'SUSPENDED' THEN
+    RAISE EXCEPTION 'Salon not found or suspended';
+  END IF;
+
+  UPDATE bookings b
+  SET usage_counted = TRUE
+  WHERE b.id = p_booking_id
+    AND b.salon_id = p_salon_id
+    AND b.status = 'CONFIRMED'
+    AND b.usage_counted = FALSE
+  RETURNING b.id INTO v_counted_booking;
+
+  IF v_counted_booking IS NULL THEN
+    RAISE EXCEPTION 'Usage increment requires an uncounted CONFIRMED booking in the scoped salon';
+  END IF;
+
+  INSERT INTO salon_usage_monthly (
+    salon_id, billing_month, billable_bookings, overage_bookings, limit_snapshot, updated_at
+  )
+  VALUES (
+    p_salon_id,
+    p_billing_month,
+    1,
+    CASE WHEN 1 > v_monthly_limit THEN 1 - v_monthly_limit ELSE 0 END,
+    v_monthly_limit,
+    NOW()
+  )
+  ON CONFLICT (salon_id, billing_month) DO UPDATE SET
+    billable_bookings = salon_usage_monthly.billable_bookings + 1,
+    overage_bookings = GREATEST(0, (salon_usage_monthly.billable_bookings + 1) - v_monthly_limit),
+    limit_snapshot = v_monthly_limit,
+    updated_at = NOW()
+  RETURNING billable_bookings INTO v_next_billable;
+
+  IF v_next_billable > (v_monthly_limit + v_grace_limit) THEN
+    RAISE EXCEPTION 'QUOTA_EXCEEDED: Salon % reached monthly online booking capacity (% + %)',
+      p_salon_id, v_monthly_limit, v_grace_limit
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  RETURN v_next_billable;
+END;
+$$;
 
 -- -----------------------------------------------------------------------------
 -- 8. Unified Row-Level Security (FORCE RLS on All 34 Tables + Least Privilege)
@@ -747,8 +1135,10 @@ CREATE POLICY salons_public_lookup ON salons
     )
   );
 
--- Clients: PUBLIC_FLOW requires non-empty salon_id; SELECT / INSERT / UPDATE only (NO DELETE)
+-- Clients: PUBLIC_FLOW SELECT only for verified session client_id or verified active booking access token
 DROP POLICY IF EXISTS clients_public_flow_scoped ON clients;
+DROP POLICY IF EXISTS clients_public_flow_insert ON clients;
+DROP POLICY IF EXISTS clients_public_flow_update ON clients;
 DROP POLICY IF EXISTS clients_public_flow_select ON clients;
 CREATE POLICY clients_public_flow_select ON clients
   FOR SELECT
@@ -756,29 +1146,27 @@ CREATE POLICY clients_public_flow_select ON clients
     current_workcraft_role() = 'PUBLIC_FLOW'
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
-  );
-
-DROP POLICY IF EXISTS clients_public_flow_insert ON clients;
-CREATE POLICY clients_public_flow_insert ON clients
-  FOR INSERT
-  WITH CHECK (
-    current_workcraft_role() = 'PUBLIC_FLOW'
-    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
-    AND salon_id = current_workcraft_salon_id()
-  );
-
-DROP POLICY IF EXISTS clients_public_flow_update ON clients;
-CREATE POLICY clients_public_flow_update ON clients
-  FOR UPDATE
-  USING (
-    current_workcraft_role() = 'PUBLIC_FLOW'
-    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
-    AND salon_id = current_workcraft_salon_id()
-  )
-  WITH CHECK (
-    current_workcraft_role() = 'PUBLIC_FLOW'
-    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
-    AND salon_id = current_workcraft_salon_id()
+    AND (
+      (
+        NULLIF(current_workcraft_client_id(), '') IS NOT NULL
+        AND id = current_workcraft_client_id()
+      )
+      OR (
+        NULLIF(current_workcraft_token_hash(), '') IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM bookings b
+          JOIN booking_access_tokens bat
+            ON bat.booking_id = b.id
+           AND bat.salon_id = b.salon_id
+          WHERE b.client_id = clients.id
+            AND b.salon_id = current_workcraft_salon_id()
+            AND bat.token_hash = current_workcraft_token_hash()
+            AND bat.revoked_at IS NULL
+            AND bat.expires_at > NOW()
+        )
+      )
+    )
   );
 
 -- Services: PUBLIC_FLOW SELECT only, scoped to current_workcraft_salon_id()
@@ -890,7 +1278,7 @@ CREATE POLICY deals_public_flow_select ON deals
     AND salon_id = current_workcraft_salon_id()
   );
 
--- bookings: PUBLIC_FLOW SELECT / INSERT (CONFIRMED) / UPDATE (reschedule or cancel); NO DELETE
+-- bookings: PUBLIC_FLOW restricted strictly to verified token/session/new-booking/idempotency; NO DELETE
 DROP POLICY IF EXISTS bookings_public_flow_select ON bookings;
 CREATE POLICY bookings_public_flow_select ON bookings
   FOR SELECT
@@ -898,6 +1286,32 @@ CREATE POLICY bookings_public_flow_select ON bookings
     current_workcraft_role() = 'PUBLIC_FLOW'
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
+    AND (
+      (
+        NULLIF(current_workcraft_token_hash(), '') IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM booking_access_tokens bat
+          WHERE bat.booking_id = bookings.id
+            AND bat.salon_id = current_workcraft_salon_id()
+            AND bat.token_hash = current_workcraft_token_hash()
+            AND bat.revoked_at IS NULL
+            AND bat.expires_at > NOW()
+        )
+      )
+      OR (
+        NULLIF(current_workcraft_client_id(), '') IS NOT NULL
+        AND client_id = current_workcraft_client_id()
+      )
+      OR (
+        NULLIF(current_workcraft_booking_id(), '') IS NOT NULL
+        AND id::text = current_workcraft_booking_id()
+      )
+      OR (
+        NULLIF(current_workcraft_idempotency_key(), '') IS NOT NULL
+        AND idempotency_key = current_workcraft_idempotency_key()
+      )
+    )
   );
 
 DROP POLICY IF EXISTS bookings_public_flow_insert ON bookings;
@@ -908,6 +1322,11 @@ CREATE POLICY bookings_public_flow_insert ON bookings
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
     AND status = 'CONFIRMED'
+    AND usage_counted = FALSE
+    AND NULLIF(current_workcraft_client_id(), '') IS NOT NULL
+    AND client_id = current_workcraft_client_id()
+    AND NULLIF(current_workcraft_booking_id(), '') IS NOT NULL
+    AND id::text = current_workcraft_booking_id()
   );
 
 DROP POLICY IF EXISTS bookings_public_flow_update ON bookings;
@@ -918,15 +1337,35 @@ CREATE POLICY bookings_public_flow_update ON bookings
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
     AND status IN ('CONFIRMED', 'IN_CHAIR')
+    AND NULLIF(current_workcraft_token_hash(), '') IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM booking_access_tokens bat
+      WHERE bat.booking_id = bookings.id
+        AND bat.salon_id = current_workcraft_salon_id()
+        AND bat.token_hash = current_workcraft_token_hash()
+        AND bat.revoked_at IS NULL
+        AND bat.expires_at > NOW()
+    )
   )
   WITH CHECK (
     current_workcraft_role() = 'PUBLIC_FLOW'
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
     AND status IN ('CONFIRMED', 'IN_CHAIR', 'CANCELED')
+    AND NULLIF(current_workcraft_token_hash(), '') IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM booking_access_tokens bat
+      WHERE bat.booking_id = bookings.id
+        AND bat.salon_id = current_workcraft_salon_id()
+        AND bat.token_hash = current_workcraft_token_hash()
+        AND bat.revoked_at IS NULL
+        AND bat.expires_at > NOW()
+    )
   );
 
--- booking_audit_log: append-only CUSTOMER INSERT for PUBLIC_FLOW; NO SELECT / UPDATE / DELETE
+-- booking_audit_log: append-only CUSTOMER INSERT for authorized booking only; NO SELECT / UPDATE / DELETE
 DROP POLICY IF EXISTS booking_audit_log_public_flow_insert ON booking_audit_log;
 CREATE POLICY booking_audit_log_public_flow_insert ON booking_audit_log
   FOR INSERT
@@ -935,9 +1374,28 @@ CREATE POLICY booking_audit_log_public_flow_insert ON booking_audit_log
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
     AND actor_type = 'CUSTOMER'
+    AND action IN ('CREATED', 'RESCHEDULED', 'CANCELED')
+    AND (
+      (
+        NULLIF(current_workcraft_booking_id(), '') IS NOT NULL
+        AND booking_id::text = current_workcraft_booking_id()
+      )
+      OR (
+        NULLIF(current_workcraft_token_hash(), '') IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM booking_access_tokens bat
+          WHERE bat.booking_id = booking_audit_log.booking_id
+            AND bat.salon_id = current_workcraft_salon_id()
+            AND bat.token_hash = current_workcraft_token_hash()
+            AND bat.revoked_at IS NULL
+            AND bat.expires_at > NOW()
+        )
+      )
+    )
   );
 
--- booking_access_tokens: PUBLIC_FLOW SELECT / INSERT / UPDATE (unrevoked only); NO DELETE
+-- booking_access_tokens: PUBLIC_FLOW restricted strictly to exact token_hash & booking_id; NO DELETE
 DROP POLICY IF EXISTS booking_access_tokens_public_flow_select ON booking_access_tokens;
 CREATE POLICY booking_access_tokens_public_flow_select ON booking_access_tokens
   FOR SELECT
@@ -945,6 +1403,10 @@ CREATE POLICY booking_access_tokens_public_flow_select ON booking_access_tokens
     current_workcraft_role() = 'PUBLIC_FLOW'
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
+    AND NULLIF(current_workcraft_token_hash(), '') IS NOT NULL
+    AND token_hash = current_workcraft_token_hash()
+    AND revoked_at IS NULL
+    AND expires_at > NOW()
   );
 
 DROP POLICY IF EXISTS booking_access_tokens_public_flow_insert ON booking_access_tokens;
@@ -954,7 +1416,19 @@ CREATE POLICY booking_access_tokens_public_flow_insert ON booking_access_tokens
     current_workcraft_role() = 'PUBLIC_FLOW'
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
+    AND NULLIF(current_workcraft_token_hash(), '') IS NOT NULL
+    AND token_hash = current_workcraft_token_hash()
+    AND NULLIF(current_workcraft_booking_id(), '') IS NOT NULL
+    AND booking_id::text = current_workcraft_booking_id()
     AND revoked_at IS NULL
+    AND expires_at > NOW()
+    AND EXISTS (
+      SELECT 1
+      FROM bookings b
+      WHERE b.id = booking_access_tokens.booking_id
+        AND b.salon_id = current_workcraft_salon_id()
+        AND b.status IN ('CONFIRMED', 'IN_CHAIR')
+    )
   );
 
 DROP POLICY IF EXISTS booking_access_tokens_public_flow_update ON booking_access_tokens;
@@ -964,49 +1438,27 @@ CREATE POLICY booking_access_tokens_public_flow_update ON booking_access_tokens
     current_workcraft_role() = 'PUBLIC_FLOW'
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
+    AND NULLIF(current_workcraft_token_hash(), '') IS NOT NULL
+    AND token_hash = current_workcraft_token_hash()
     AND revoked_at IS NULL
+    AND expires_at > NOW()
   )
   WITH CHECK (
     current_workcraft_role() = 'PUBLIC_FLOW'
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
+    AND NULLIF(current_workcraft_token_hash(), '') IS NOT NULL
+    AND token_hash = current_workcraft_token_hash()
     AND revoked_at IS NULL
+    AND expires_at > NOW()
   );
 
--- salon_usage_monthly: PUBLIC_FLOW SELECT / INSERT / UPDATE (quota increment); NO DELETE
+-- salon_usage_monthly: ZERO direct PUBLIC_FLOW access (increments must go through increment_salon_monthly_booking_usage)
 DROP POLICY IF EXISTS salon_usage_monthly_public_flow_select ON salon_usage_monthly;
-CREATE POLICY salon_usage_monthly_public_flow_select ON salon_usage_monthly
-  FOR SELECT
-  USING (
-    current_workcraft_role() = 'PUBLIC_FLOW'
-    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
-    AND salon_id = current_workcraft_salon_id()
-  );
-
 DROP POLICY IF EXISTS salon_usage_monthly_public_flow_insert ON salon_usage_monthly;
-CREATE POLICY salon_usage_monthly_public_flow_insert ON salon_usage_monthly
-  FOR INSERT
-  WITH CHECK (
-    current_workcraft_role() = 'PUBLIC_FLOW'
-    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
-    AND salon_id = current_workcraft_salon_id()
-  );
-
 DROP POLICY IF EXISTS salon_usage_monthly_public_flow_update ON salon_usage_monthly;
-CREATE POLICY salon_usage_monthly_public_flow_update ON salon_usage_monthly
-  FOR UPDATE
-  USING (
-    current_workcraft_role() = 'PUBLIC_FLOW'
-    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
-    AND salon_id = current_workcraft_salon_id()
-  )
-  WITH CHECK (
-    current_workcraft_role() = 'PUBLIC_FLOW'
-    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
-    AND salon_id = current_workcraft_salon_id()
-  );
 
--- counter_notifications: PUBLIC_FLOW INSERT only; NO SELECT / UPDATE / DELETE
+-- counter_notifications: PUBLIC_FLOW INSERT restricted to authorized booking only; NO SELECT / UPDATE / DELETE
 DROP POLICY IF EXISTS counter_notifications_public_flow_insert ON counter_notifications;
 CREATE POLICY counter_notifications_public_flow_insert ON counter_notifications
   FOR INSERT
@@ -1014,6 +1466,26 @@ CREATE POLICY counter_notifications_public_flow_insert ON counter_notifications
     current_workcraft_role() = 'PUBLIC_FLOW'
     AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
+    AND booking_id IS NOT NULL
+    AND event_type IN ('NEW_BOOKING', 'RESCHEDULED', 'CANCELED')
+    AND (
+      (
+        NULLIF(current_workcraft_booking_id(), '') IS NOT NULL
+        AND booking_id::text = current_workcraft_booking_id()
+      )
+      OR (
+        NULLIF(current_workcraft_token_hash(), '') IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM booking_access_tokens bat
+          WHERE bat.booking_id = counter_notifications.booking_id
+            AND bat.salon_id = current_workcraft_salon_id()
+            AND bat.token_hash = current_workcraft_token_hash()
+            AND bat.revoked_at IS NULL
+            AND bat.expires_at > NOW()
+        )
+      )
+    )
   );
 
 -- Note: client_browser_tokens, marketing_consents, and reviews_log have NO demonstrated PUBLIC_FLOW SQL
@@ -1102,6 +1574,8 @@ CREATE POLICY auth_challenges_self_select ON auth_challenges
     AND NULLIF(current_workcraft_user_id(), '') IS NOT NULL
     AND user_id IS NOT NULL
     AND user_id::text = current_workcraft_user_id()
+    AND consumed_at IS NULL
+    AND expires_at > NOW()
   );
 
 DROP POLICY IF EXISTS auth_challenges_self_update ON auth_challenges;
@@ -1113,12 +1587,15 @@ CREATE POLICY auth_challenges_self_update ON auth_challenges
     AND user_id IS NOT NULL
     AND user_id::text = current_workcraft_user_id()
     AND consumed_at IS NULL
+    AND expires_at > NOW()
+    AND attempts < 5
   )
   WITH CHECK (
     current_workcraft_role() IN ('SALON_OWNER', 'AGENT')
     AND NULLIF(current_workcraft_user_id(), '') IS NOT NULL
     AND user_id IS NOT NULL
     AND user_id::text = current_workcraft_user_id()
+    AND attempts <= 5
   );
 
 DROP POLICY IF EXISTS auth_challenges_public_client_insert ON auth_challenges;
@@ -1130,6 +1607,8 @@ CREATE POLICY auth_challenges_public_client_insert ON auth_challenges
     AND user_id IS NULL
     AND consumed_at IS NULL
     AND attempts = 0
+    AND expires_at > NOW()
+    AND expires_at <= NOW() + INTERVAL '30 minutes'
   );
 
 DROP POLICY IF EXISTS auth_challenges_public_client_select ON auth_challenges;
@@ -1154,12 +1633,14 @@ CREATE POLICY auth_challenges_public_client_update ON auth_challenges
     AND id::text = current_workcraft_challenge_id()
     AND consumed_at IS NULL
     AND expires_at > NOW()
+    AND attempts < 5
   )
   WITH CHECK (
     current_workcraft_role() = 'PUBLIC_FLOW'
     AND purpose = 'CROSS_DEVICE_CLIENT'
     AND NULLIF(current_workcraft_challenge_id(), '') IS NOT NULL
     AND id::text = current_workcraft_challenge_id()
+    AND attempts <= 5
   );
 
 -- founder_biometrics & founder_incidents & audit_logs (Founder strictly)
