@@ -379,6 +379,49 @@ async function writePgLocalGucs(
   );
 }
 
+async function setPublicFlowScopedGucs(
+  client: PoolClient,
+  scope: {
+    publicCode?: string | null;
+    tokenHash?: string | null;
+    bookingId?: string | null;
+    clientId?: string | null;
+    idempotencyKey?: string | null;
+  }
+): Promise<void> {
+  const activeRole = ACTIVE_TX_ROLES.get(client);
+  if (activeRole && activeRole !== 'PUBLIC_FLOW') {
+    throw new PgContextError(
+      'PRIVILEGE_ESCALATION',
+      `setPublicFlowScopedGucs cannot be called inside a ${activeRole} transaction.`
+    );
+  }
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (scope.publicCode !== undefined) {
+    params.push(cleanActorId(scope.publicCode, 'publicCode'));
+    clauses.push(`set_config('app.current_public_code', $${params.length}, true)`);
+  }
+  if (scope.tokenHash !== undefined) {
+    params.push(cleanActorId(scope.tokenHash, 'tokenHash'));
+    clauses.push(`set_config('app.current_token_hash', $${params.length}, true)`);
+  }
+  if (scope.bookingId !== undefined) {
+    params.push(cleanActorId(scope.bookingId, 'bookingId'));
+    clauses.push(`set_config('app.current_booking_id', $${params.length}, true)`);
+  }
+  if (scope.clientId !== undefined) {
+    params.push(cleanActorId(scope.clientId, 'clientId'));
+    clauses.push(`set_config('app.current_client_id', $${params.length}, true)`);
+  }
+  if (scope.idempotencyKey !== undefined) {
+    params.push(cleanActorId(scope.idempotencyKey, 'idempotencyKey'));
+    clauses.push(`set_config('app.current_idempotency_key', $${params.length}, true)`);
+  }
+  if (clauses.length === 0) return;
+  await client.query(`SELECT ${clauses.join(', ')}`, params);
+}
+
 export async function applyPgActorContext(
   client: PoolClient,
   ctx: PgActorContext
@@ -643,8 +686,8 @@ export async function persistPostgresSnapshotMirror(
             params.currencySymbol,
             params.defaultLang || 'en',
             enabledLangs,
-            packageTier,
-            params.monthlyLimit,
+            'STARTER',
+            750,
             params.address || '',
             params.googleMapsUrl || '',
             params.googleReviewUrl || '',
@@ -703,8 +746,8 @@ export async function persistPostgresSnapshotMirror(
           params.currencySymbol,
           params.defaultLang || 'en',
           enabledLangs,
-          packageTier,
-          params.monthlyLimit,
+          'STARTER',
+          750,
           params.address || '',
           params.googleMapsUrl || '',
           params.googleReviewUrl || '',
@@ -735,6 +778,7 @@ export async function findSalonByPublicCodeInPostgres(
   if (!pool) return null;
   try {
     return await withPgTransaction(createPublicFlowLookupActor(), async (client) => {
+      await setPublicFlowScopedGucs(client, { publicCode: cleanCode });
       const res = await client.query<{
         id: string;
         public_code: string;
@@ -856,6 +900,7 @@ export async function recordBookingInPostgres(params: {
 
   try {
     return await withPgTransaction(createPublicFlowLookupActor(), async (client) => {
+      await setPublicFlowScopedGucs(client, { publicCode: cleanCode });
       const salonRes = await client.query<{ id: string }>(
         'SELECT id FROM salons WHERE public_code = $1 LIMIT 1',
         [cleanCode]
@@ -872,23 +917,29 @@ export async function recordBookingInPostgres(params: {
       // Narrow transaction RLS context to the resolved salon_id (salons.id TEXT)
       await narrowPublicFlowSalonContext(client, salonId);
 
+      const bookingUuid = crypto.randomUUID();
+      await setPublicFlowScopedGucs(client, {
+        tokenHash: params.accessTokenHash,
+        bookingId: bookingUuid,
+        idempotencyKey: params.idempotencyKey || '',
+      });
+
+      if (params.idempotencyKey) {
+        const dup = await client.query(
+          `SELECT id FROM bookings WHERE salon_id = $1 AND idempotency_key = $2 LIMIT 1`,
+          [salonId, params.idempotencyKey]
+        );
+        if (dup.rows.length > 0) return { ok: true as const };
+      }
+
       const generatedClientId = `cli-${Date.now().toString(36)}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
       const cliRes = await client.query<{ id: string }>(
-        `INSERT INTO clients (
-           id, salon_id, name, phone, phone_e164, preferred_language, preferred_lang, awaiting_language_selection
-         )
-         VALUES ($1, $2, $3, $4, $4, $5, $5, FALSE)
-         ON CONFLICT (salon_id, phone_e164) DO UPDATE SET
-           name = EXCLUDED.name,
-           preferred_language = EXCLUDED.preferred_language,
-           preferred_lang = EXCLUDED.preferred_lang,
-           updated_at = NOW()
-         RETURNING id`,
+        `SELECT upsert_public_booking_client($1, $2, $3, $4, $5) AS id`,
         [
-          generatedClientId,
           salonId,
+          generatedClientId,
           params.clientName,
           params.clientPhoneE164,
           params.preferredLang,
@@ -905,23 +956,16 @@ export async function recordBookingInPostgres(params: {
       );
       const stylistUuid = styRes.rows[0].id;
 
-      if (params.idempotencyKey) {
-        const dup = await client.query(
-          `SELECT id FROM bookings WHERE salon_id = $1 AND idempotency_key = $2 LIMIT 1`,
-          [salonId, params.idempotencyKey]
-        );
-        if (dup.rows.length > 0) return { ok: true as const };
-      }
-
       const bkRes = await client.query<{ id: string }>(
         `INSERT INTO bookings (
-           salon_id, client_id, stylist_id, booking_ref, services_snapshot,
+           id, salon_id, client_id, stylist_id, booking_ref, services_snapshot,
            total_price, total_duration_mins, starts_at, ends_at,
            status, source, idempotency_key, proof_hash
          )
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::timestamptz, $9::timestamptz, 'CONFIRMED', $10, $11, $12)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::timestamptz, $10::timestamptz, 'CONFIRMED', $11, $12, $13)
          RETURNING id`,
         [
+          bookingUuid,
           salonId,
           clientId,
           stylistUuid,
@@ -936,22 +980,17 @@ export async function recordBookingInPostgres(params: {
           params.proofHash,
         ]
       );
-      const bookingUuid = bkRes.rows[0].id;
+      const committedBookingUuid = bkRes.rows[0].id;
 
       await client.query(
         `INSERT INTO booking_access_tokens (token_hash, booking_id, salon_id, expires_at)
          VALUES ($1, $2, $3, $4::timestamptz)`,
-        [params.accessTokenHash, bookingUuid, salonId, params.accessTokenExpiresAtIso]
+        [params.accessTokenHash, committedBookingUuid, salonId, params.accessTokenExpiresAtIso]
       );
 
       await client.query(
-        `INSERT INTO salon_usage_monthly (salon_id, billing_month, billable_bookings, limit_snapshot)
-         VALUES ($1, $2, 1, $3)
-         ON CONFLICT (salon_id, billing_month) DO UPDATE SET
-           billable_bookings = salon_usage_monthly.billable_bookings + 1,
-           limit_snapshot = EXCLUDED.limit_snapshot,
-           updated_at = NOW()`,
-        [salonId, params.billingMonth, params.monthlyLimit]
+        `SELECT increment_salon_monthly_booking_usage($1, $2, $3) AS billable_bookings`,
+        [salonId, committedBookingUuid, params.billingMonth]
       );
 
       await client.query(
@@ -959,7 +998,7 @@ export async function recordBookingInPostgres(params: {
          VALUES ($1, $2, 'CUSTOMER', 'CREATED', $3::jsonb)`,
         [
           salonId,
-          bookingUuid,
+          committedBookingUuid,
           JSON.stringify({ startsAt: params.startsAtIso, stylist: params.stylistName }),
         ]
       );
@@ -973,6 +1012,13 @@ export async function recordBookingInPostgres(params: {
         ok: false,
         code: 'OVERLAP',
         error: 'That stylist was just booked for this time slot. Please choose another open slot.',
+      };
+    }
+    if (pgErr?.code === 'P0002') {
+      return {
+        ok: false,
+        code: 'DB_UNAVAILABLE',
+        error: 'This salon has reached its monthly online booking capacity. Please contact the salon directly.',
       };
     }
     console.error('Postgres booking commit failed (fail-closed):', err);
@@ -1326,33 +1372,75 @@ async function queryAvailabilitySnapshotWithClient(
     [params.salonId]
   );
 
-  const bookingsRes = await client.query<{
-    id: string;
-    booking_ref: string;
-    stylist_id: string;
-    stylist_name: string;
-    starts_at: string | Date;
-    ends_at: string | Date;
-    status: PgBookingStatus;
-    total_duration_mins: number;
-  }>(
-    `SELECT b.id, b.booking_ref, b.stylist_id, st.name AS stylist_name,
-            b.starts_at, b.ends_at, b.status, b.total_duration_mins
-     FROM bookings b
-     JOIN stylists st ON st.id = b.stylist_id
-     WHERE b.salon_id = $1
-       AND b.status IN ('CONFIRMED', 'IN_CHAIR')
-       AND b.ends_at > $2::timestamptz
-       AND b.starts_at < $3::timestamptz
-       AND ($4::text IS NULL OR (b.id::text <> $4 AND b.booking_ref <> $4))
-     ORDER BY b.starts_at ASC`,
-    [
-      params.salonId,
-      params.windowStartIso,
-      params.windowEndIso,
-      params.excludeBookingId || null,
-    ]
-  );
+  const isPublicFlow = ACTIVE_TX_ROLES.get(client) === 'PUBLIC_FLOW';
+  let availabilityBookings: PgAvailabilitySnapshot['bookings'];
+  if (isPublicFlow) {
+    const busyRes = await client.query<{
+      stylist_id: string;
+      stylist_name: string;
+      starts_at: string | Date;
+      ends_at: string | Date;
+      status: PgBookingStatus;
+      total_duration_mins: number;
+    }>(
+      `SELECT stylist_id, stylist_name, starts_at, ends_at, status, total_duration_mins
+       FROM get_public_stylist_busy_blocks($1, $2::timestamptz, $3::timestamptz, $4)`,
+      [
+        params.salonId,
+        params.windowStartIso,
+        params.windowEndIso,
+        params.excludeBookingId || null,
+      ]
+    );
+    availabilityBookings = busyRes.rows.map((r) => ({
+      id: '',
+      bookingRef: '',
+      stylistId: r.stylist_id,
+      stylistName: r.stylist_name,
+      startsAtIso: toIsoString(r.starts_at),
+      endsAtIso: toIsoString(r.ends_at),
+      status: r.status,
+      totalDurationMins: Number(r.total_duration_mins ?? 35),
+    }));
+  } else {
+    const bookingsRes = await client.query<{
+      id: string;
+      booking_ref: string;
+      stylist_id: string;
+      stylist_name: string;
+      starts_at: string | Date;
+      ends_at: string | Date;
+      status: PgBookingStatus;
+      total_duration_mins: number;
+    }>(
+      `SELECT b.id, b.booking_ref, b.stylist_id, st.name AS stylist_name,
+              b.starts_at, b.ends_at, b.status, b.total_duration_mins
+       FROM bookings b
+       JOIN stylists st ON st.id = b.stylist_id
+       WHERE b.salon_id = $1
+         AND b.status IN ('CONFIRMED', 'IN_CHAIR')
+         AND b.ends_at > $2::timestamptz
+         AND b.starts_at < $3::timestamptz
+         AND ($4::text IS NULL OR (b.id::text <> $4 AND b.booking_ref <> $4))
+       ORDER BY b.starts_at ASC`,
+      [
+        params.salonId,
+        params.windowStartIso,
+        params.windowEndIso,
+        params.excludeBookingId || null,
+      ]
+    );
+    availabilityBookings = bookingsRes.rows.map((r) => ({
+      id: r.id,
+      bookingRef: r.booking_ref,
+      stylistId: r.stylist_id,
+      stylistName: r.stylist_name,
+      startsAtIso: toIsoString(r.starts_at),
+      endsAtIso: toIsoString(r.ends_at),
+      status: r.status,
+      totalDurationMins: Number(r.total_duration_mins ?? 35),
+    }));
+  }
 
   const leavesRes = await client.query<{
     id: string;
@@ -1398,16 +1486,7 @@ async function queryAvailabilitySnapshotWithClient(
       active: Boolean(r.active),
       eligibleStylists: Array.isArray(r.eligible_stylists) ? r.eligible_stylists : [],
     })),
-    bookings: bookingsRes.rows.map((r) => ({
-      id: r.id,
-      bookingRef: r.booking_ref,
-      stylistId: r.stylist_id,
-      stylistName: r.stylist_name,
-      startsAtIso: toIsoString(r.starts_at),
-      endsAtIso: toIsoString(r.ends_at),
-      status: r.status,
-      totalDurationMins: Number(r.total_duration_mins ?? 35),
-    })),
+    bookings: availabilityBookings,
     leaves: leavesRes.rows.map((r) => ({
       id: r.id,
       stylistId: r.stylist_id,
@@ -1459,6 +1538,7 @@ export async function getBookingByAccessTokenFromPostgres(
 
   const tokenHash = hashAccessToken(rawToken);
   return await withPgTransaction(createPublicFlowLookupActor(), async (client) => {
+    await setPublicFlowScopedGucs(client, { publicCode });
     const salonRes = await client.query<{ id: string }>(
       'SELECT id FROM salons WHERE public_code = $1 LIMIT 1',
       [publicCode]
@@ -1467,6 +1547,7 @@ export async function getBookingByAccessTokenFromPostgres(
     const salonId = salonRes.rows[0].id;
 
     await narrowPublicFlowSalonContext(client, salonId);
+    await setPublicFlowScopedGucs(client, { tokenHash });
 
     const res = await client.query<
       RawJoinedBookingRow & { revoked_at: string | Date | null; expires_at: string | Date }
@@ -1531,6 +1612,7 @@ export async function rescheduleBookingByAccessTokenInPostgres(params: {
   const tokenHash = hashAccessToken(params.rawToken);
   try {
     return await withPgTransaction(createPublicFlowLookupActor(), async (client) => {
+      await setPublicFlowScopedGucs(client, { publicCode });
       const salonRes = await client.query<{ id: string }>(
         'SELECT id FROM salons WHERE public_code = $1 LIMIT 1',
         [publicCode]
@@ -1545,6 +1627,7 @@ export async function rescheduleBookingByAccessTokenInPostgres(params: {
       const salonId = salonRes.rows[0].id;
 
       await narrowPublicFlowSalonContext(client, salonId);
+      await setPublicFlowScopedGucs(client, { tokenHash });
 
       const lockRes = await client.query<
         RawJoinedBookingRow & {
@@ -1751,6 +1834,7 @@ export async function cancelBookingByAccessTokenInPostgres(params: {
   const tokenHash = hashAccessToken(params.rawToken);
   try {
     return await withPgTransaction(createPublicFlowLookupActor(), async (client) => {
+      await setPublicFlowScopedGucs(client, { publicCode });
       const salonRes = await client.query<{ id: string }>(
         'SELECT id FROM salons WHERE public_code = $1 LIMIT 1',
         [publicCode]
@@ -1765,6 +1849,7 @@ export async function cancelBookingByAccessTokenInPostgres(params: {
       const salonId = salonRes.rows[0].id;
 
       await narrowPublicFlowSalonContext(client, salonId);
+      await setPublicFlowScopedGucs(client, { tokenHash });
 
       const lockRes = await client.query<
         RawJoinedBookingRow & {
