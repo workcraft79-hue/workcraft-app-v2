@@ -242,6 +242,53 @@ test(
       await client.query('ROLLBACK TO SAVEPOINT sp_restricted_col');
       await client.query('RELEASE SAVEPOINT sp_restricted_col');
 
+      // 2b) Direct PUBLIC_FLOW stylists INSERT and UPDATE must fail with RLS denial
+      await client.query('SAVEPOINT sp_stylist_insert');
+      await assert.rejects(
+        () =>
+          client.query(`INSERT INTO stylists (salon_id, name) VALUES ($1, 'Rogue Public Barber')`, [
+            salonId,
+          ]),
+        /row-level security policy for table "stylists"/
+      );
+      await client.query('ROLLBACK TO SAVEPOINT sp_stylist_insert');
+      await client.query('RELEASE SAVEPOINT sp_stylist_insert');
+
+      await client.query('SAVEPOINT sp_stylist_update');
+      await assert.rejects(
+        () => client.query(`UPDATE stylists SET active = FALSE WHERE id = $1`, [stylistId]),
+        /row-level security policy for table "stylists"/
+      );
+      await client.query('ROLLBACK TO SAVEPOINT sp_stylist_update');
+      await client.query('RELEASE SAVEPOINT sp_stylist_update');
+
+      // 2c) Unauthorized booking status transitions under PUBLIC_FLOW must be rejected by guard_bookings_public_update()
+      for (const badStatus of ['IN_CHAIR', 'COMPLETED', 'NO_SHOW']) {
+        await client.query('SAVEPOINT sp_bad_status');
+        await assert.rejects(
+          () =>
+            client.query(`UPDATE bookings SET status = $1 WHERE id = $2`, [badStatus, bookingId]),
+          /PUBLIC_FLOW status transition CONFIRMED ->/
+        );
+        await client.query('ROLLBACK TO SAVEPOINT sp_bad_status');
+        await client.query('RELEASE SAVEPOINT sp_bad_status');
+      }
+
+      // CANCELED combined with time/stylist mutation must be rejected
+      await client.query('SAVEPOINT sp_cancel_mut');
+      await assert.rejects(
+        () =>
+          client.query(
+            `UPDATE bookings
+             SET status = 'CANCELED', starts_at = '2026-12-10T09:00:00.000Z'
+             WHERE id = $1`,
+            [bookingId]
+          ),
+        /PUBLIC_FLOW cancellation may not alter stylist_id or booking time/
+      );
+      await client.query('ROLLBACK TO SAVEPOINT sp_cancel_mut');
+      await client.query('RELEASE SAVEPOINT sp_cancel_mut');
+
       // 3) Authorized PUBLIC_FLOW time reschedule (leaving usage_counted untouched) still succeeds
       await client.query('SAVEPOINT sp_reschedule');
       await client.query(
@@ -264,6 +311,16 @@ test(
         [bookingId]
       );
       assert.equal(checkBk.rows[0].usage_counted, true);
+
+      // 5) Authorized PUBLIC_FLOW cancellation (without slot/stylist mutation) succeeds, then terminal status rejects further updates
+      await client.query(`UPDATE bookings SET status = 'CANCELED' WHERE id = $1`, [bookingId]);
+      await client.query('SAVEPOINT sp_terminal_reopen');
+      await assert.rejects(
+        () => client.query(`UPDATE bookings SET status = 'CONFIRMED' WHERE id = $1`, [bookingId]),
+        /PUBLIC_FLOW cannot modify booking from terminal status CANCELED/
+      );
+      await client.query('ROLLBACK TO SAVEPOINT sp_terminal_reopen');
+      await client.query('RELEASE SAVEPOINT sp_terminal_reopen');
 
       // Roll back entire synthetic test transaction
       await client.query('ROLLBACK');
@@ -300,6 +357,10 @@ test(
                  'STARTER', 'STARTER', 'ACTIVE', 1, 0)`,
         [salonId, publicCode]
       );
+      await seedClient.query(
+        `INSERT INTO stylists (salon_id, name, active) VALUES ($1, 'Quota Barber', TRUE)`,
+        [salonId]
+      );
       await seedClient.query('COMMIT');
     } finally {
       seedClient.release();
@@ -307,6 +368,32 @@ test(
 
     setPgPoolOverrideForTests(pool);
     try {
+      // 0) Unknown stylist under PUBLIC_FLOW fails closed without inserting stylists or bookings
+      const unknownStylistRes = await recordBookingInPostgres({
+        salonPublicCode: publicCode,
+        bookingRef: `BK-IT-UNK-${suffix}`,
+        clientName: 'Unknown Stylist Client',
+        clientPhoneE164: '+923001119000',
+        preferredLang: 'en',
+        stylistName: 'Ghost Barber',
+        servicesSnapshot: [{ name: 'Haircut', price: 1000, durationMins: 30 }],
+        totalPrice: 1000,
+        totalDurationMins: 30,
+        startsAtIso: '2026-12-11T06:00:00.000Z',
+        endsAtIso: '2026-12-11T06:30:00.000Z',
+        source: 'WEB_LINK',
+        idempotencyKey: `idem-it-unk-${suffix}`,
+        proofHash: `proof-it-unk-${suffix}`,
+        billingMonth: '2026-12',
+        monthlyLimit: 1,
+        accessTokenHash: crypto.createHash('sha256').update(`tok-unk-${suffix}`).digest('hex'),
+        accessTokenExpiresAtIso: '2026-12-18T06:30:00.000Z',
+      });
+      assert.equal(unknownStylistRes.ok, false);
+      if (!unknownStylistRes.ok) {
+        assert.equal(unknownStylistRes.code, 'OVERLAP');
+      }
+
       // 1) First booking within quota (1 of 1) succeeds and marks usage_counted = TRUE
       const firstRes = await recordBookingInPostgres({
         salonPublicCode: publicCode,
