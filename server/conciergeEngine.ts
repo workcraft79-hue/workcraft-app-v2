@@ -42,8 +42,8 @@ import type {
   WhatsAppMessageLog,
 } from '../src/types/concierge.js';
 import { kvGetJson, kvSetJson } from './kvBridge.js';
+import { PgContextError } from './pgContextError.js';
 import {
-  PgContextError,
   type PgActorContext,
   type PgAvailabilitySnapshot,
   type PgBookingRecord,
