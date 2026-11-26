@@ -601,7 +601,26 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
         return { rows, rowCount: rows.length };
       }
 
+      if (sql.startsWith('SELECT id FROM stylists WHERE salon_id = $1')) {
+        const salonId = String(params[0]);
+        const name = String(params[1] ?? '').trim().toLowerCase();
+        const st = state.stylists.find(
+          (x) =>
+            x.salon_id === salonId &&
+            canSeeSalonRow(x.salon_id, 'stylists') &&
+            x.active &&
+            x.name.trim().toLowerCase() === name
+        );
+        return st ? { rows: [{ id: st.id }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+
       if (sql.startsWith('INSERT INTO stylists')) {
+        if (
+          gucs['app.current_user_role'] === 'PUBLIC_FLOW' ||
+          !['FOUNDER', 'SALON_OWNER'].includes(gucs['app.current_user_role'])
+        ) {
+          throw new Error('new row violates row-level security policy for table "stylists"');
+        }
         const salonId = String(params[0]);
         const name = String(params[1]);
         if (!canSeeSalonRow(salonId, 'stylists')) throw new Error('RLS denied stylists insert');
@@ -613,6 +632,18 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
           st.active = true;
         }
         return { rows: [{ id: st.id }], rowCount: 1 };
+      }
+
+      if (sql.startsWith('UPDATE stylists')) {
+        if (
+          gucs['app.current_user_role'] === 'PUBLIC_FLOW' ||
+          !['FOUNDER', 'SALON_OWNER'].includes(gucs['app.current_user_role'])
+        ) {
+          throw new Error('new row violates row-level security policy for table "stylists"');
+        }
+        const salonId = gucs['app.current_salon_id'];
+        const target = state.stylists.find((x) => canSeeSalonRow(x.salon_id, 'stylists') && x.salon_id === salonId);
+        return { rows: [], rowCount: target ? 1 : 0 };
       }
 
       if (sql.startsWith('UPDATE bookings SET stylist_id = $1')) {
@@ -633,6 +664,9 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
         if (!canSeeSalonRow(salonId, 'bookings')) throw new Error('RLS denied bookings update');
         const bk = state.bookings.find((b) => b.id === bookingId && b.salon_id === salonId);
         if (!bk) return { rows: [], rowCount: 0 };
+        if (gucs['app.current_user_role'] === 'PUBLIC_FLOW' && !['CONFIRMED', 'IN_CHAIR'].includes(bk.status)) {
+          throw new Error(`PUBLIC_FLOW cannot modify booking from terminal status ${bk.status}`);
+        }
 
         // Enforce bookings_no_stylist_overlap in mock DB
         const nextStart = new Date(startsAt).getTime();
@@ -658,23 +692,47 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
         return { rows: [], rowCount: 1 };
       }
 
+      if (sql.startsWith("UPDATE bookings SET status = 'CANCELED', starts_at =")) {
+        const [bookingId, salonId] = params as [string, string];
+        if (!canSeeSalonRow(salonId, 'bookings')) throw new Error('RLS denied bookings cancel');
+        const bk = state.bookings.find((b) => b.id === bookingId && b.salon_id === salonId);
+        if (!bk) return { rows: [], rowCount: 0 };
+        if (gucs['app.current_user_role'] === 'PUBLIC_FLOW') {
+          if (!['CONFIRMED', 'IN_CHAIR'].includes(bk.status)) {
+            throw new Error(`PUBLIC_FLOW cannot modify booking from terminal status ${bk.status}`);
+          }
+          throw new Error('PUBLIC_FLOW cancellation may not alter stylist_id or booking time');
+        }
+        bk.status = 'CANCELED';
+        return { rows: [], rowCount: 1 };
+      }
+
       if (sql.startsWith("UPDATE bookings SET status = 'CANCELED'")) {
         const [bookingId, salonId] = params as [string, string];
         if (!canSeeSalonRow(salonId, 'bookings')) throw new Error('RLS denied bookings cancel');
         const bk = state.bookings.find((b) => b.id === bookingId && b.salon_id === salonId);
-        if (bk) bk.status = 'CANCELED';
-        return { rows: [], rowCount: bk ? 1 : 0 };
+        if (!bk) return { rows: [], rowCount: 0 };
+        if (gucs['app.current_user_role'] === 'PUBLIC_FLOW' && !['CONFIRMED', 'IN_CHAIR'].includes(bk.status)) {
+          throw new Error(`PUBLIC_FLOW cannot modify booking from terminal status ${bk.status}`);
+        }
+        bk.status = 'CANCELED';
+        return { rows: [], rowCount: 1 };
       }
 
       if (sql.startsWith("UPDATE bookings SET status = 'COMPLETED'")) {
         const [nowIso, bookingId, salonId] = params as [string, string, string];
         if (!canSeeSalonRow(salonId, 'bookings')) throw new Error('RLS denied bookings complete');
         const bk = state.bookings.find((b) => b.id === bookingId && b.salon_id === salonId);
-        if (bk) {
-          bk.status = 'COMPLETED';
-          bk.completed_at = bk.completed_at || nowIso;
+        if (!bk) return { rows: [], rowCount: 0 };
+        if (gucs['app.current_user_role'] === 'PUBLIC_FLOW') {
+          if (!['CONFIRMED', 'IN_CHAIR'].includes(bk.status)) {
+            throw new Error(`PUBLIC_FLOW cannot modify booking from terminal status ${bk.status}`);
+          }
+          throw new Error(`PUBLIC_FLOW status transition ${bk.status} -> COMPLETED is not permitted`);
         }
-        return { rows: [], rowCount: bk ? 1 : 0 };
+        bk.status = 'COMPLETED';
+        bk.completed_at = bk.completed_at || nowIso;
+        return { rows: [], rowCount: 1 };
       }
 
       if (sql.startsWith('UPDATE bookings SET status = $1')) {
@@ -686,13 +744,20 @@ function createStatefulMockPgPool(initial?: Partial<DbStateSnapshot>) {
         ];
         if (!canSeeSalonRow(salonId, 'bookings')) throw new Error('RLS denied bookings status update');
         const bk = state.bookings.find((b) => b.id === bookingId && b.salon_id === salonId);
-        if (bk) {
-          bk.status = nextStatus;
-          if (nextStatus === 'COMPLETED' && !bk.completed_at) {
-            bk.completed_at = nowIso;
+        if (!bk) return { rows: [], rowCount: 0 };
+        if (gucs['app.current_user_role'] === 'PUBLIC_FLOW') {
+          if (!['CONFIRMED', 'IN_CHAIR'].includes(bk.status)) {
+            throw new Error(`PUBLIC_FLOW cannot modify booking from terminal status ${bk.status}`);
+          }
+          if (nextStatus !== bk.status && nextStatus !== 'CANCELED') {
+            throw new Error(`PUBLIC_FLOW status transition ${bk.status} -> ${nextStatus} is not permitted`);
           }
         }
-        return { rows: [], rowCount: bk ? 1 : 0 };
+        bk.status = nextStatus;
+        if (nextStatus === 'COMPLETED' && !bk.completed_at) {
+          bk.completed_at = nowIso;
+        }
+        return { rows: [], rowCount: 1 };
       }
 
       if (sql.startsWith('UPDATE booking_access_tokens SET expires_at = $1')) {
@@ -2041,4 +2106,284 @@ test('12. Quota exceeded (SQLSTATE P0002) rolls back entire public booking trans
   assert.equal(mock.getState().bookingAuditLog.length, 0);
   assert.equal(mock.getState().usageMonthly[0].billable_bookings, 2);
 });
+
+test('13. PUBLIC_FLOW has zero write access on stylists and booking/reschedule reject unknown or inactive stylists cleanly', async () => {
+  const bkUuid = '00000000-0000-4000-8000-000000000113';
+  const rawToken = makeBookingToken('wc_7k9m2p4x8q2a', 'stylist-guard-secret-1');
+  const mock = createStatefulMockPgPool({
+    stylists: [
+      { id: 'sty-1', salon_id: '1', name: 'Master Aslam', chair_label: 'Chair 1', active: true },
+      { id: 'sty-2', salon_id: '1', name: 'Tariq Mehmood', chair_label: 'Chair 2', active: true },
+      { id: 'sty-inactive', salon_id: '1', name: 'Former Barber', chair_label: 'Chair 3', active: false },
+    ],
+    bookings: [
+      {
+        id: bkUuid,
+        salon_id: '1',
+        client_id: 'cli-1',
+        stylist_id: 'sty-1',
+        booking_ref: 'BK-WEB-113',
+        services_snapshot: [{ id: 'svc-1', name: 'Classic Haircut', price: 1200, durationMins: 35 }],
+        total_price: 1200,
+        total_duration_mins: 35,
+        starts_at: '2026-12-03T07:00:00.000Z',
+        ends_at: '2026-12-03T07:35:00.000Z',
+        status: 'CONFIRMED',
+        source: 'WEB_LINK',
+        deal_id: null,
+        idempotency_key: null,
+        proof_hash: 'proof-113',
+        completed_at: null,
+        created_at: '2026-12-01T10:00:00.000Z',
+      },
+    ],
+    bookingAccessTokens: [
+      {
+        id: 'tok-113',
+        token_hash: hashToken(rawToken),
+        booking_id: bkUuid,
+        salon_id: '1',
+        expires_at: '2026-12-10T07:35:00.000Z',
+        revoked_at: null,
+      },
+    ],
+  });
+  setPgPoolOverrideForTests(mock.pool);
+
+  // 1) Direct PUBLIC_FLOW INSERT and UPDATE on stylists are denied by RLS
+  const rawClient = await mock.pool.connect();
+  try {
+    await rawClient.query('BEGIN');
+    await rawClient.query(
+      `SELECT set_config('app.current_user_role', $1, true), set_config('app.current_salon_id', $2, true), set_config('app.current_agent_id', $3, true), set_config('app.current_user_id', $4, true)`,
+      ['PUBLIC_FLOW', '1', '', '']
+    );
+    await assert.rejects(
+      () => rawClient.query(`INSERT INTO stylists (salon_id, name) VALUES ($1, $2)`, ['1', 'Rogue Barber']),
+      /row-level security policy for table "stylists"/
+    );
+    await assert.rejects(
+      () => rawClient.query(`UPDATE stylists SET active = FALSE WHERE id = $1`, ['sty-1']),
+      /row-level security policy for table "stylists"/
+    );
+    await rawClient.query('ROLLBACK');
+  } finally {
+    rawClient.release();
+  }
+
+  // 2) Unknown/inactive stylist on public booking creation is rejected without writing stylists
+  mock.queries.length = 0;
+  const stylistCountBefore = mock.getState().stylists.length;
+  const badBooking = await recordBookingInPostgres({
+    salonPublicCode: 'wc_7k9m2p4x8q2a',
+    bookingRef: 'BK-WEB-BAD-STYLIST',
+    clientName: 'Walk Visitor',
+    clientPhoneE164: '+923009887766',
+    preferredLang: 'en',
+    stylistName: 'Former Barber',
+    servicesSnapshot: [{ id: 'svc-1', name: 'Haircut', price: 1200, durationMins: 35 }],
+    totalPrice: 1200,
+    totalDurationMins: 35,
+    startsAtIso: '2026-12-03T09:00:00.000Z',
+    endsAtIso: '2026-12-03T09:35:00.000Z',
+    source: 'WEB_LINK',
+    idempotencyKey: 'idem-bad-stylist',
+    proofHash: 'proof-bad-stylist',
+    billingMonth: '2026-12',
+    monthlyLimit: 100,
+    accessTokenHash: hashToken(makeBookingToken('wc_7k9m2p4x8q2a', 'bad-stylist-tok')),
+    accessTokenExpiresAtIso: '2026-12-10T09:35:00.000Z',
+  });
+  assert.equal(badBooking.ok, false);
+  if (!badBooking.ok) {
+    assert.equal(badBooking.code, 'OVERLAP');
+  }
+  assert.equal(mock.getState().stylists.length, stylistCountBefore);
+
+  // 3) Public access-token reschedule to a valid active stylist still succeeds without writing stylists
+  const okResched = await rescheduleBookingByAccessToken(rawToken, {
+    appointmentDate: '2026-12-03',
+    timeSlot: '05:00 PM',
+    barberName: 'Tariq Mehmood',
+  });
+  assert.equal(okResched.ok, true);
+  assert.equal(okResched.statusCode, 200);
+  assert.equal(mock.getState().bookings[0].stylist_id, 'sty-2');
+  assert.equal(
+    mock.queries.some((q) => q.text.startsWith('INSERT INTO stylists') || q.text.startsWith('UPDATE stylists')),
+    false
+  );
+});
+
+test('14. guard_bookings_public_update restricts PUBLIC_FLOW to status-preserving reschedules or CANCELED transitions while preserving usage_counted RPC', async () => {
+  const bkConfirmedId = '00000000-0000-4000-8000-000000000114';
+  const bkInChairId = '00000000-0000-4000-8000-000000000115';
+  const bkCompletedId = '00000000-0000-4000-8000-000000000116';
+  const confirmedToken = makeBookingToken('wc_7k9m2p4x8q2a', 'confirmed-guard-tok-1');
+
+  const mock = createStatefulMockPgPool({
+    bookings: [
+      {
+        id: bkConfirmedId,
+        salon_id: '1',
+        client_id: 'cli-1',
+        stylist_id: 'sty-1',
+        booking_ref: 'BK-WEB-114',
+        services_snapshot: [{ name: 'Haircut', price: 1200, durationMins: 35 }],
+        total_price: 1200,
+        total_duration_mins: 35,
+        starts_at: '2026-12-03T07:00:00.000Z',
+        ends_at: '2026-12-03T07:35:00.000Z',
+        status: 'CONFIRMED',
+        source: 'WEB_LINK',
+        deal_id: null,
+        idempotency_key: null,
+        proof_hash: 'proof-114',
+        usage_counted: false,
+        completed_at: null,
+        created_at: '2026-12-01T10:00:00.000Z',
+      },
+      {
+        id: bkInChairId,
+        salon_id: '1',
+        client_id: 'cli-1',
+        stylist_id: 'sty-2',
+        booking_ref: 'BK-WEB-115',
+        services_snapshot: [{ name: 'Haircut', price: 1200, durationMins: 35 }],
+        total_price: 1200,
+        total_duration_mins: 35,
+        starts_at: '2026-12-03T08:00:00.000Z',
+        ends_at: '2026-12-03T08:35:00.000Z',
+        status: 'IN_CHAIR',
+        source: 'WEB_LINK',
+        deal_id: null,
+        idempotency_key: null,
+        proof_hash: 'proof-115',
+        usage_counted: true,
+        completed_at: null,
+        created_at: '2026-12-01T10:00:00.000Z',
+      },
+      {
+        id: bkCompletedId,
+        salon_id: '1',
+        client_id: 'cli-1',
+        stylist_id: 'sty-1',
+        booking_ref: 'BK-WEB-116',
+        services_snapshot: [{ name: 'Haircut', price: 1200, durationMins: 35 }],
+        total_price: 1200,
+        total_duration_mins: 35,
+        starts_at: '2026-12-03T09:00:00.000Z',
+        ends_at: '2026-12-03T09:35:00.000Z',
+        status: 'COMPLETED',
+        source: 'WEB_LINK',
+        deal_id: null,
+        idempotency_key: null,
+        proof_hash: 'proof-116',
+        usage_counted: true,
+        completed_at: '2026-12-03T09:35:00.000Z',
+        created_at: '2026-12-01T10:00:00.000Z',
+      },
+    ],
+    bookingAccessTokens: [
+      {
+        id: 'tok-114',
+        token_hash: hashToken(confirmedToken),
+        booking_id: bkConfirmedId,
+        salon_id: '1',
+        expires_at: '2026-12-10T07:35:00.000Z',
+        revoked_at: null,
+      },
+    ],
+  });
+  setPgPoolOverrideForTests(mock.pool);
+
+  const rawClient = await mock.pool.connect();
+  try {
+    await rawClient.query('BEGIN');
+    await rawClient.query(
+      `SELECT set_config('app.current_user_role', $1, true), set_config('app.current_salon_id', $2, true), set_config('app.current_agent_id', $3, true), set_config('app.current_user_id', $4, true)`,
+      ['PUBLIC_FLOW', '1', '', '']
+    );
+    await rawClient.query(
+      `SELECT set_config('app.current_booking_id', $1, true), set_config('app.current_token_hash', $2, true)`,
+      [bkConfirmedId, hashToken(confirmedToken)]
+    );
+
+    // Disallowed status transitions for CONFIRMED
+    for (const badStatus of ['IN_CHAIR', 'COMPLETED', 'NO_SHOW'] as const) {
+      await assert.rejects(
+        () =>
+          rawClient.query(
+            `UPDATE bookings SET status = $1, completed_at = $2 WHERE id = $3 AND salon_id = $4`,
+            [badStatus, '2026-12-03T07:35:00.000Z', bkConfirmedId, '1']
+          ),
+        /PUBLIC_FLOW status transition CONFIRMED ->/
+      );
+    }
+
+    // Disallowed IN_CHAIR -> CONFIRMED or COMPLETED
+    await assert.rejects(
+      () =>
+        rawClient.query(
+          `UPDATE bookings SET status = $1, completed_at = $2 WHERE id = $3 AND salon_id = $4`,
+          ['CONFIRMED', '', bkInChairId, '1']
+        ),
+      /PUBLIC_FLOW status transition IN_CHAIR -> CONFIRMED is not permitted/
+    );
+    await assert.rejects(
+      () =>
+        rawClient.query(
+          `UPDATE bookings SET status = 'COMPLETED', completed_at = $1 WHERE id = $2 AND salon_id = $3`,
+          ['2026-12-03T08:35:00.000Z', bkInChairId, '1']
+        ),
+      /PUBLIC_FLOW status transition IN_CHAIR -> COMPLETED is not permitted/
+    );
+
+    // Disallowed cancellation that simultaneously alters booking time/stylist
+    await assert.rejects(
+      () =>
+        rawClient.query(
+          `UPDATE bookings SET status = 'CANCELED', starts_at = '2026-12-03T12:00:00.000Z' WHERE id = $1 AND salon_id = $2`,
+          [bkConfirmedId, '1']
+        ),
+      /PUBLIC_FLOW cancellation may not alter stylist_id or booking time/
+    );
+
+    // Disallowed update on terminal COMPLETED booking
+    await assert.rejects(
+      () =>
+        rawClient.query(
+          `UPDATE bookings SET status = 'CANCELED' WHERE id = $1 AND salon_id = $2`,
+          [bkCompletedId, '1']
+        ),
+      /PUBLIC_FLOW cannot modify booking from terminal status COMPLETED/
+    );
+
+    // Controlled RPC still marks usage_counted = TRUE cleanly while keeping CONFIRMED
+    const incRes = await rawClient.query<{ billable_bookings: number }>(
+      `SELECT increment_salon_monthly_booking_usage($1, $2, $3) AS billable_bookings`,
+      ['1', bkConfirmedId, '2026-12']
+    );
+    assert.equal(incRes.rows[0].billable_bookings, 2);
+    assert.equal(mock.getState().bookings[0].usage_counted, true);
+
+    await rawClient.query('COMMIT');
+  } finally {
+    rawClient.release();
+  }
+
+  // Permitted status-preserving reschedule followed by clean CANCELED transition
+  const resched = await rescheduleBookingByAccessToken(confirmedToken, {
+    appointmentDate: '2026-12-03',
+    timeSlot: '06:00 PM',
+    barberName: 'Tariq Mehmood',
+  });
+  assert.equal(resched.ok, true);
+  assert.equal(resched.booking?.status, 'CONFIRMED');
+
+  const canceled = await cancelBookingByAccessToken(confirmedToken, 'Change of plans');
+  assert.equal(canceled.ok, true);
+  assert.equal(canceled.booking?.status, 'CANCELED');
+});
+
 
