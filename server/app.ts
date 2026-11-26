@@ -89,11 +89,12 @@ import {
   verifyOwnerLoginChallenge,
 } from './security.js';
 import { enforceRateLimit, extractClientIpKey, isRateLimiterConfigured } from './rateLimiter.js';
+import { PgContextError } from './pgContextError.js';
 import {
-  PgContextError,
   assertProductionDatabaseReady,
   createPublicFlowSalonActor,
   derivePgActorFromAuthUser,
+  syncSalonStylistsInPostgres,
 } from './postgresRepo.js';
 import {
   resolveTargetLocale,
@@ -844,6 +845,11 @@ export function createApiApp(port = 3000): express.Express {
       );
       if (barbers.length > 0) {
         syncSalonBarbers(newSalonId, barbers);
+        await syncSalonStylistsInPostgres(
+          newSalonId,
+          barbers,
+          derivePgActorFromAuthUser(reg.user, { targetSalonId: newSalonId })
+        );
       }
 
       const finalState = getSalonConciergeState(newSalonId);
@@ -2334,13 +2340,18 @@ export function createApiApp(port = 3000): express.Express {
     '/api/salons/:salonId/barbers',
     requireAuth,
     requireSalonTenantAccess(false),
-    (req, res) => {
+    async (req: AuthenticatedRequest, res) => {
       try {
         const { salonId } = req.params;
         const barbers = Array.isArray(req.body?.barbers) ? req.body.barbers : [];
         const state = syncSalonBarbers(salonId, barbers);
+        const actor = derivePgActorFromAuthUser(req.authUser!, { targetSalonId: salonId });
+        await syncSalonStylistsInPostgres(salonId, state.barbers, actor);
         return res.json(state);
       } catch (err) {
+        if (err instanceof PgContextError) {
+          return res.status(403).json({ error: err.message });
+        }
         console.error('Sync barbers error:', err);
         return res.status(500).json({ error: 'Failed to sync barbers.' });
       }
