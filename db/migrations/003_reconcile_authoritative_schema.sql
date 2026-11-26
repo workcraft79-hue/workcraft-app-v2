@@ -10,6 +10,7 @@
 --   * Enforces single-tier individual agents (FOUNDER-governed; ZERO co-agent tables)
 --   * Keeps agent commissions at 0% default and cash custody limits deferred
 --   * Ensures payment_submissions require explicit FOUNDER approval before activation
+--   * Enforces least-privilege PUBLIC_FLOW policies and scoped auth_challenges / salons_public_lookup
 -- =============================================================================
 
 BEGIN;
@@ -69,6 +70,28 @@ AS $$
   );
 $$;
 
+CREATE OR REPLACE FUNCTION current_workcraft_public_code()
+RETURNS TEXT
+LANGUAGE SQL
+STABLE
+AS $$
+  SELECT COALESCE(
+    NULLIF(current_setting('app.current_public_code', TRUE), ''),
+    ''
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION current_workcraft_challenge_id()
+RETURNS TEXT
+LANGUAGE SQL
+STABLE
+AS $$
+  SELECT COALESCE(
+    NULLIF(current_setting('app.current_challenge_id', TRUE), ''),
+    ''
+  );
+$$;
+
 -- -----------------------------------------------------------------------------
 -- 2. Reconcile Existing 001 Tables Non-Destructively (TEXT salons.id preserved)
 -- -----------------------------------------------------------------------------
@@ -119,6 +142,16 @@ ALTER TABLE salons
   ADD CONSTRAINT salons_default_lang_check
   CHECK (default_lang IN ('en', 'roman_ur', 'ur', 'ar', 'it', 'ru', 'fr', 'de', 'es'));
 
+ALTER TABLE salons DROP CONSTRAINT IF EXISTS salons_monthly_booking_limit_check;
+ALTER TABLE salons
+  ADD CONSTRAINT salons_monthly_booking_limit_check
+  CHECK (monthly_booking_limit > 0);
+
+ALTER TABLE salons DROP CONSTRAINT IF EXISTS salons_grace_overage_limit_check;
+ALTER TABLE salons
+  ADD CONSTRAINT salons_grace_overage_limit_check
+  CHECK (grace_overage_limit >= 0);
+
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -133,20 +166,6 @@ BEGIN
   END IF;
 END $$;
 
--- Temporarily mark migration transaction as FOUNDER strictly for idempotent backfill, then clear
-SELECT set_config('app.current_user_role', 'FOUNDER', true);
-
-UPDATE salons
-SET
-  public_code = COALESCE(NULLIF(public_code, ''), 'wc_' || substring(encode(digest(id, 'sha256'), 'hex') from 1 for 16)),
-  owner_auth_phone = CASE WHEN owner_auth_phone = '' THEN whatsapp_phone ELSE owner_auth_phone END,
-  public_contact_phone = CASE WHEN public_contact_phone = '' THEN whatsapp_phone ELSE public_contact_phone END,
-  currency_code = CASE WHEN currency_code = 'PKR' AND currency <> 'PKR' THEN currency ELSE currency_code END,
-  plan_tier = CASE WHEN plan_tier <> package_tier THEN package_tier ELSE plan_tier END
-WHERE public_code IS NULL OR public_code = '' OR owner_auth_phone = '' OR public_contact_phone = '' OR plan_tier <> package_tier;
-
-SELECT set_config('app.current_user_role', '', true);
-
 -- Reconcile app_users with TOTP, recovery codes, session version & multi-branch array
 ALTER TABLE app_users
   ADD COLUMN IF NOT EXISTS auth_phone TEXT,
@@ -156,12 +175,15 @@ ALTER TABLE app_users
   ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS recovery_codes_hashes JSONB NOT NULL DEFAULT '[]'::jsonb;
 
+ALTER TABLE app_users DROP CONSTRAINT IF EXISTS app_users_session_version_check;
+ALTER TABLE app_users
+  ADD CONSTRAINT app_users_session_version_check
+  CHECK (session_version >= 1);
+
 -- Reconcile services
 ALTER TABLE services
   ADD COLUMN IF NOT EXISTS buffer_after_mins INTEGER NOT NULL DEFAULT 0 CHECK (buffer_after_mins BETWEEN 0 AND 120),
   ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
-
-UPDATE services SET active = is_active WHERE active IS DISTINCT FROM is_active;
 
 -- Reconcile clients (keep id TEXT PK & existing columns, add Web-First columns)
 ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_preferred_language_check;
@@ -173,7 +195,7 @@ ALTER TABLE clients
   ADD COLUMN IF NOT EXISTS phone_e164 TEXT,
   ADD COLUMN IF NOT EXISTS preferred_lang TEXT NOT NULL DEFAULT 'en',
   ADD COLUMN IF NOT EXISTS birth_day_month TEXT NOT NULL DEFAULT '',
-  ADD COLUMN IF NOT EXISTS total_visits INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS total_visits INTEGER NOT NULL DEFAULT 0 CHECK (total_visits >= 0),
   ADD COLUMN IF NOT EXISTS last_service_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
   ADD COLUMN IF NOT EXISTS last_stylist_id UUID,
   ADD COLUMN IF NOT EXISTS marketing_opted_in BOOLEAN NOT NULL DEFAULT FALSE,
@@ -185,12 +207,73 @@ ALTER TABLE clients
   ADD CONSTRAINT clients_preferred_lang_check
   CHECK (preferred_lang IN ('en', 'roman_ur', 'ur', 'ar', 'it', 'ru', 'fr', 'de', 'es'));
 
+-- Reconcile agent_invite_tokens (Founder-issued single-use invites only)
+ALTER TABLE agent_invite_tokens
+  ADD COLUMN IF NOT EXISTS permissions_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'FOUNDER';
+
+-- Mark migration transaction as FOUNDER across ALL idempotent backfills on FORCE-RLS 001 tables
+SELECT set_config('app.current_user_role', 'FOUNDER', true);
+
+UPDATE salons
+SET
+  public_code = COALESCE(
+    NULLIF(BTRIM(public_code), ''),
+    'wc_' || substring(encode(digest(id, 'sha256'), 'hex') from 1 for 16)
+  ),
+  owner_auth_phone = COALESCE(NULLIF(BTRIM(owner_auth_phone), ''), whatsapp_phone),
+  public_contact_phone = COALESCE(NULLIF(BTRIM(public_contact_phone), ''), whatsapp_phone),
+  currency_code = CASE
+    WHEN (currency_code IS NULL OR BTRIM(currency_code) = '' OR currency_code = 'PKR')
+         AND NULLIF(BTRIM(currency), '') IS NOT NULL
+         AND currency <> 'PKR'
+      THEN currency
+    ELSE COALESCE(NULLIF(BTRIM(currency_code), ''), 'PKR')
+  END,
+  plan_tier = CASE
+    WHEN NULLIF(BTRIM(plan_tier), '') IS NULL
+         OR (plan_tier = 'PRO++' AND package_tier IS DISTINCT FROM 'PRO++')
+      THEN package_tier
+    ELSE plan_tier
+  END
+WHERE NULLIF(BTRIM(public_code), '') IS NULL
+   OR NULLIF(BTRIM(owner_auth_phone), '') IS NULL
+   OR NULLIF(BTRIM(public_contact_phone), '') IS NULL
+   OR (currency_code = 'PKR' AND NULLIF(BTRIM(currency), '') IS NOT NULL AND currency <> 'PKR')
+   OR NULLIF(BTRIM(currency_code), '') IS NULL
+   OR NULLIF(BTRIM(plan_tier), '') IS NULL
+   OR (plan_tier = 'PRO++' AND package_tier IS DISTINCT FROM 'PRO++');
+
+UPDATE app_users
+SET
+  auth_phone = COALESCE(NULLIF(BTRIM(auth_phone), ''), NULLIF(BTRIM(phone), '')),
+  allowed_salon_ids = CASE
+    WHEN user_role = 'SALON_OWNER'
+         AND NULLIF(BTRIM(salon_id), '') IS NOT NULL
+         AND (allowed_salon_ids IS NULL OR cardinality(allowed_salon_ids) = 0)
+      THEN ARRAY[salon_id]::TEXT[]
+    ELSE COALESCE(allowed_salon_ids, ARRAY[]::TEXT[])
+  END
+WHERE (NULLIF(BTRIM(auth_phone), '') IS NULL AND NULLIF(BTRIM(phone), '') IS NOT NULL)
+   OR (
+     user_role = 'SALON_OWNER'
+     AND NULLIF(BTRIM(salon_id), '') IS NOT NULL
+     AND (allowed_salon_ids IS NULL OR cardinality(allowed_salon_ids) = 0)
+   );
+
+UPDATE services
+SET active = COALESCE(is_active, TRUE)
+WHERE active IS DISTINCT FROM COALESCE(is_active, TRUE);
+
 UPDATE clients
 SET
-  phone_e164 = COALESCE(NULLIF(phone_e164, ''), phone),
-  preferred_lang = COALESCE(NULLIF(preferred_language, ''), preferred_lang, 'en'),
-  birth_day_month = CASE WHEN birth_day_month = '' THEN birth_date ELSE birth_day_month END
-WHERE phone_e164 IS NULL;
+  phone_e164 = COALESCE(NULLIF(BTRIM(phone_e164), ''), NULLIF(BTRIM(phone), '')),
+  preferred_lang = COALESCE(NULLIF(BTRIM(preferred_language), ''), NULLIF(BTRIM(preferred_lang), ''), 'en'),
+  birth_day_month = COALESCE(NULLIF(BTRIM(birth_day_month), ''), NULLIF(BTRIM(birth_date), ''), '')
+WHERE NULLIF(BTRIM(phone_e164), '') IS NULL
+   OR NULLIF(BTRIM(preferred_lang), '') IS NULL
+   OR (NULLIF(BTRIM(birth_day_month), '') IS NULL AND NULLIF(BTRIM(birth_date), '') IS NOT NULL);
 
 DO $$
 BEGIN
@@ -200,12 +283,6 @@ BEGIN
     ALTER TABLE clients ADD CONSTRAINT clients_salon_phone_e164_key UNIQUE (salon_id, phone_e164);
   END IF;
 END $$;
-
--- Reconcile agent_invite_tokens (Founder-issued single-use invites only)
-ALTER TABLE agent_invite_tokens
-  ADD COLUMN IF NOT EXISTS permissions_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'FOUNDER';
 
 -- -----------------------------------------------------------------------------
 -- 3. Auth Memberships, Challenges, Biometrics & Single-Tier Agent Profiles
@@ -226,7 +303,7 @@ CREATE TABLE IF NOT EXISTS auth_challenges (
   purpose TEXT NOT NULL CHECK (purpose IN ('OWNER_LOGIN', 'AGENT_LOGIN', 'CROSS_DEVICE_CLIENT')),
   code_hash TEXT NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
-  attempts INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   consumed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -270,11 +347,25 @@ CREATE TABLE IF NOT EXISTS stylists (
   UNIQUE (salon_id, name)
 );
 
--- Non-destructive copy of any existing 001 barbers into stylists
+-- Non-destructive copy of any existing 001 barbers into stylists (runs under FOUNDER GUC)
 INSERT INTO stylists (id, salon_id, name, chair_label, active, created_at)
 SELECT b.id, b.salon_id, b.name, b.chair_label, b.is_active, b.created_at
 FROM barbers b
-ON CONFLICT (salon_id, name) DO NOTHING;
+ON CONFLICT DO NOTHING;
+
+-- Clear temporary migration FOUNDER role now that all 001/003 backfills are complete
+SELECT set_config('app.current_user_role', '', true);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'clients_last_stylist_id_fkey'
+  ) THEN
+    ALTER TABLE clients
+      ADD CONSTRAINT clients_last_stylist_id_fkey
+      FOREIGN KEY (last_stylist_id) REFERENCES stylists(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS service_stylists (
   service_id UUID NOT NULL REFERENCES services(id) ON DELETE CASCADE,
@@ -389,7 +480,7 @@ CREATE TABLE IF NOT EXISTS salon_usage_monthly (
   billing_month TEXT NOT NULL,
   billable_bookings INTEGER NOT NULL DEFAULT 0 CHECK (billable_bookings >= 0),
   overage_bookings INTEGER NOT NULL DEFAULT 0 CHECK (overage_bookings >= 0),
-  limit_snapshot INTEGER NOT NULL,
+  limit_snapshot INTEGER NOT NULL CHECK (limit_snapshot > 0),
   meta_messages_used INTEGER NOT NULL DEFAULT 0 CHECK (meta_messages_used >= 0),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (salon_id, billing_month)
@@ -416,7 +507,7 @@ CREATE TABLE IF NOT EXISTS walk_in_queue (
   service_name TEXT NOT NULL DEFAULT 'Classic Service',
   preferred_stylist_id UUID REFERENCES stylists(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'WAITING' CHECK (status IN ('WAITING', 'IN_CHAIR', 'COMPLETED', 'LEFT')),
-  queue_position INTEGER NOT NULL DEFAULT 1,
+  queue_position INTEGER NOT NULL DEFAULT 1 CHECK (queue_position >= 1),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -487,7 +578,7 @@ CREATE TABLE IF NOT EXISTS commission_ledger (
   agent_id TEXT NOT NULL,
   salon_id TEXT REFERENCES salons(id) ON DELETE SET NULL,
   payment_submission_id UUID REFERENCES payment_submissions(id) ON DELETE SET NULL,
-  commission_pct NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (commission_pct >= 0),
+  commission_pct NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (commission_pct >= 0 AND commission_pct <= 100),
   commission_amount INTEGER NOT NULL DEFAULT 0 CHECK (commission_amount >= 0),
   currency TEXT NOT NULL DEFAULT 'PKR',
   status TEXT NOT NULL DEFAULT 'RECORDED_ZERO' CHECK (status IN ('RECORDED_ZERO', 'PENDING', 'PAID', 'VOID')),
@@ -547,17 +638,32 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 -- Performance indexes
 CREATE INDEX IF NOT EXISTS idx_bookings_salon_starts ON bookings (salon_id, starts_at);
+CREATE INDEX IF NOT EXISTS idx_bookings_salon_ref ON bookings (salon_id, booking_ref);
 CREATE INDEX IF NOT EXISTS idx_bookings_stylist_starts ON bookings (stylist_id, starts_at) WHERE status IN ('CONFIRMED', 'IN_CHAIR');
+CREATE INDEX IF NOT EXISTS idx_booking_audit_log_salon_created ON booking_audit_log (salon_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_booking_access_tokens_booking ON booking_access_tokens (booking_id);
 CREATE INDEX IF NOT EXISTS idx_stylists_salon ON stylists (salon_id);
 CREATE INDEX IF NOT EXISTS idx_stylist_leaves_stylist ON stylist_leaves (stylist_id, starts_at, ends_at);
+CREATE INDEX IF NOT EXISTS idx_stylist_leaves_salon_window ON stylist_leaves (salon_id, starts_at, ends_at);
 CREATE INDEX IF NOT EXISTS idx_deals_salon_active ON deals (salon_id, active, expires_at);
 CREATE INDEX IF NOT EXISTS idx_counter_notifications_salon ON counter_notifications (salon_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_payment_submissions_status ON payment_submissions (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_submissions_salon ON payment_submissions (salon_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_submissions_agent ON payment_submissions (agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cash_custody_ledger_agent ON cash_custody_ledger (agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_commission_ledger_agent ON commission_ledger (agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_user_purpose ON auth_challenges (user_id, purpose, expires_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_expires ON auth_challenges (expires_at);
+CREATE INDEX IF NOT EXISTS idx_salon_memberships_salon ON salon_memberships (salon_id);
+CREATE INDEX IF NOT EXISTS idx_walk_in_queue_salon ON walk_in_queue (salon_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bridal_bookings_salon ON bridal_bookings (salon_id, event_date);
+CREATE INDEX IF NOT EXISTS idx_service_packages_salon ON service_packages (salon_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_voice_threads_salon ON voice_threads (salon_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_client_browser_tokens_salon_client ON client_browser_tokens (salon_id, client_id);
 
 -- -----------------------------------------------------------------------------
--- 7. Billing Status Trigger Guard (FOUNDER-Only Activation)
+-- 7. Billing, Entitlement & Agent-Assignment Trigger Guard (FOUNDER-Only)
 -- -----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION guard_salon_billing_status_update()
@@ -565,58 +671,127 @@ RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
+  IF current_workcraft_role() = 'FOUNDER' THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.billing_status IS DISTINCT FROM 'PENDING_ACTIVATION'
+       OR NEW.whatsapp_addon_enabled IS TRUE
+       OR NEW.meta_phone_number_id IS NOT NULL THEN
+      RAISE EXCEPTION 'Only FOUNDER may provision active salon billing_status or paid WhatsApp add-on entitlements';
+    END IF;
+    RETURN NEW;
+  END IF;
+
   IF (NEW.billing_status IS DISTINCT FROM OLD.billing_status
       OR NEW.package_tier IS DISTINCT FROM OLD.package_tier
       OR NEW.plan_tier IS DISTINCT FROM OLD.plan_tier
-      OR NEW.monthly_booking_limit IS DISTINCT FROM OLD.monthly_booking_limit)
-     AND current_workcraft_role() <> 'FOUNDER' THEN
-    RAISE EXCEPTION 'Only FOUNDER may modify salon billing_status, tier, or monthly quotas';
+      OR NEW.monthly_booking_limit IS DISTINCT FROM OLD.monthly_booking_limit
+      OR NEW.grace_overage_limit IS DISTINCT FROM OLD.grace_overage_limit
+      OR NEW.billing_cycle_start IS DISTINCT FROM OLD.billing_cycle_start
+      OR NEW.whatsapp_addon_enabled IS DISTINCT FROM OLD.whatsapp_addon_enabled
+      OR NEW.meta_phone_number_id IS DISTINCT FROM OLD.meta_phone_number_id
+      OR NEW.assigned_agent_id IS DISTINCT FROM OLD.assigned_agent_id) THEN
+    RAISE EXCEPTION 'Only FOUNDER may modify salon billing_status, tier, quotas, add-on entitlements, or assigned_agent_id';
   END IF;
+
   RETURN NEW;
 END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_guard_salon_billing_status ON salons;
 CREATE TRIGGER trg_guard_salon_billing_status
-  BEFORE UPDATE ON salons
+  BEFORE INSERT OR UPDATE ON salons
   FOR EACH ROW
   EXECUTE FUNCTION guard_salon_billing_status_update();
 
 -- -----------------------------------------------------------------------------
--- 8. Unified Row-Level Security (FORCE RLS + Explicit Public & Agent Scopes)
+-- 8. Unified Row-Level Security (FORCE RLS on All 34 Tables + Least Privilege)
 -- -----------------------------------------------------------------------------
 
--- Public storefront read/insert/update policies scoped strictly to current_workcraft_salon_id()
+-- Re-assert ENABLE & FORCE ROW LEVEL SECURITY on all 9 base 001 tables
+DO $$
+DECLARE
+  tbl TEXT;
+BEGIN
+  FOR tbl IN
+    SELECT unnest(ARRAY[
+      'app_users', 'salons', 'barbers', 'services', 'appointments',
+      'clients', 'whatsapp_messages', 'alerts', 'agent_invite_tokens'
+    ])
+  LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tbl);
+  END LOOP;
+END $$;
+
+-- Public storefront lookup on salons: strictly scoped to the resolved salon_id OR requested public_code
 DROP POLICY IF EXISTS salons_public_lookup ON salons;
 CREATE POLICY salons_public_lookup ON salons
   FOR SELECT
   USING (
     current_workcraft_role() = 'PUBLIC_FLOW'
-    AND public_code IS NOT NULL
+    AND NULLIF(BTRIM(public_code), '') IS NOT NULL
     AND billing_status <> 'SUSPENDED'
+    AND (
+      (
+        NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+        AND id = current_workcraft_salon_id()
+      )
+      OR (
+        NULLIF(current_workcraft_salon_id(), '') IS NULL
+        AND NULLIF(current_workcraft_public_code(), '') IS NOT NULL
+        AND public_code = current_workcraft_public_code()
+      )
+    )
   );
 
+-- Clients: PUBLIC_FLOW requires non-empty salon_id; SELECT / INSERT / UPDATE only (NO DELETE)
 DROP POLICY IF EXISTS clients_public_flow_scoped ON clients;
-CREATE POLICY clients_public_flow_scoped ON clients
-  FOR ALL
+DROP POLICY IF EXISTS clients_public_flow_select ON clients;
+CREATE POLICY clients_public_flow_select ON clients
+  FOR SELECT
   USING (
     current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+DROP POLICY IF EXISTS clients_public_flow_insert ON clients;
+CREATE POLICY clients_public_flow_insert ON clients
+  FOR INSERT
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+DROP POLICY IF EXISTS clients_public_flow_update ON clients;
+CREATE POLICY clients_public_flow_update ON clients
+  FOR UPDATE
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
   )
   WITH CHECK (
     current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
   );
 
+-- Services: PUBLIC_FLOW SELECT only, scoped to current_workcraft_salon_id()
 DROP POLICY IF EXISTS services_public_flow_select ON services;
 CREATE POLICY services_public_flow_select ON services
   FOR SELECT
   USING (
     current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
   );
 
--- New tenant-scoped operational tables (Salon Owner & Founder, plus scoped Public/Agent policies)
+-- Tenant-scoped 003 operational tables (ENABLE + FORCE RLS, Founder & Salon Owner isolation)
 DO $$
 DECLARE
   tbl TEXT;
@@ -639,14 +814,14 @@ BEGIN
     );
     EXECUTE format('DROP POLICY IF EXISTS %I ON %I', tbl || '_owner_isolated', tbl);
     EXECUTE format(
-      'CREATE POLICY %I ON %I FOR ALL USING (current_workcraft_role() = ''SALON_OWNER'' AND salon_id = current_workcraft_salon_id()) WITH CHECK (current_workcraft_role() = ''SALON_OWNER'' AND salon_id = current_workcraft_salon_id())',
+      'CREATE POLICY %I ON %I FOR ALL USING (current_workcraft_role() = ''SALON_OWNER'' AND NULLIF(current_workcraft_salon_id(), '''') IS NOT NULL AND salon_id = current_workcraft_salon_id()) WITH CHECK (current_workcraft_role() = ''SALON_OWNER'' AND NULLIF(current_workcraft_salon_id(), '''') IS NOT NULL AND salon_id = current_workcraft_salon_id())',
       tbl || '_owner_isolated',
       tbl
     );
   END LOOP;
 END $$;
 
--- Public booking flow scoped policies (requires SET LOCAL app.current_salon_id to match resolved public_code)
+-- Remove legacy broad FOR ALL PUBLIC_FLOW policies before applying granular least-privilege policies
 DO $$
 DECLARE
   tbl TEXT;
@@ -659,13 +834,190 @@ BEGIN
     ])
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON %I', tbl || '_public_flow_scoped', tbl);
-    EXECUTE format(
-      'CREATE POLICY %I ON %I FOR ALL USING (current_workcraft_role() = ''PUBLIC_FLOW'' AND salon_id = current_workcraft_salon_id()) WITH CHECK (current_workcraft_role() = ''PUBLIC_FLOW'' AND salon_id = current_workcraft_salon_id())',
-      tbl || '_public_flow_scoped',
-      tbl
-    );
   END LOOP;
 END $$;
+
+-- stylists: PUBLIC_FLOW SELECT / INSERT / UPDATE (for ON CONFLICT DO UPDATE); NO DELETE
+DROP POLICY IF EXISTS stylists_public_flow_select ON stylists;
+CREATE POLICY stylists_public_flow_select ON stylists
+  FOR SELECT
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+DROP POLICY IF EXISTS stylists_public_flow_insert ON stylists;
+CREATE POLICY stylists_public_flow_insert ON stylists
+  FOR INSERT
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+DROP POLICY IF EXISTS stylists_public_flow_update ON stylists;
+CREATE POLICY stylists_public_flow_update ON stylists
+  FOR UPDATE
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  )
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+-- stylist_leaves: PUBLIC_FLOW SELECT only
+DROP POLICY IF EXISTS stylist_leaves_public_flow_select ON stylist_leaves;
+CREATE POLICY stylist_leaves_public_flow_select ON stylist_leaves
+  FOR SELECT
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+-- deals: PUBLIC_FLOW SELECT only (active/non-deleted storefront view)
+DROP POLICY IF EXISTS deals_public_flow_select ON deals;
+CREATE POLICY deals_public_flow_select ON deals
+  FOR SELECT
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+-- bookings: PUBLIC_FLOW SELECT / INSERT (CONFIRMED) / UPDATE (reschedule or cancel); NO DELETE
+DROP POLICY IF EXISTS bookings_public_flow_select ON bookings;
+CREATE POLICY bookings_public_flow_select ON bookings
+  FOR SELECT
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+DROP POLICY IF EXISTS bookings_public_flow_insert ON bookings;
+CREATE POLICY bookings_public_flow_insert ON bookings
+  FOR INSERT
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+    AND status = 'CONFIRMED'
+  );
+
+DROP POLICY IF EXISTS bookings_public_flow_update ON bookings;
+CREATE POLICY bookings_public_flow_update ON bookings
+  FOR UPDATE
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+    AND status IN ('CONFIRMED', 'IN_CHAIR')
+  )
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+    AND status IN ('CONFIRMED', 'IN_CHAIR', 'CANCELED')
+  );
+
+-- booking_audit_log: append-only CUSTOMER INSERT for PUBLIC_FLOW; NO SELECT / UPDATE / DELETE
+DROP POLICY IF EXISTS booking_audit_log_public_flow_insert ON booking_audit_log;
+CREATE POLICY booking_audit_log_public_flow_insert ON booking_audit_log
+  FOR INSERT
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+    AND actor_type = 'CUSTOMER'
+  );
+
+-- booking_access_tokens: PUBLIC_FLOW SELECT / INSERT / UPDATE (unrevoked only); NO DELETE
+DROP POLICY IF EXISTS booking_access_tokens_public_flow_select ON booking_access_tokens;
+CREATE POLICY booking_access_tokens_public_flow_select ON booking_access_tokens
+  FOR SELECT
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+DROP POLICY IF EXISTS booking_access_tokens_public_flow_insert ON booking_access_tokens;
+CREATE POLICY booking_access_tokens_public_flow_insert ON booking_access_tokens
+  FOR INSERT
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+    AND revoked_at IS NULL
+  );
+
+DROP POLICY IF EXISTS booking_access_tokens_public_flow_update ON booking_access_tokens;
+CREATE POLICY booking_access_tokens_public_flow_update ON booking_access_tokens
+  FOR UPDATE
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+    AND revoked_at IS NULL
+  )
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+    AND revoked_at IS NULL
+  );
+
+-- salon_usage_monthly: PUBLIC_FLOW SELECT / INSERT / UPDATE (quota increment); NO DELETE
+DROP POLICY IF EXISTS salon_usage_monthly_public_flow_select ON salon_usage_monthly;
+CREATE POLICY salon_usage_monthly_public_flow_select ON salon_usage_monthly
+  FOR SELECT
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+DROP POLICY IF EXISTS salon_usage_monthly_public_flow_insert ON salon_usage_monthly;
+CREATE POLICY salon_usage_monthly_public_flow_insert ON salon_usage_monthly
+  FOR INSERT
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+DROP POLICY IF EXISTS salon_usage_monthly_public_flow_update ON salon_usage_monthly;
+CREATE POLICY salon_usage_monthly_public_flow_update ON salon_usage_monthly
+  FOR UPDATE
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  )
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+-- counter_notifications: PUBLIC_FLOW INSERT only; NO SELECT / UPDATE / DELETE
+DROP POLICY IF EXISTS counter_notifications_public_flow_insert ON counter_notifications;
+CREATE POLICY counter_notifications_public_flow_insert ON counter_notifications
+  FOR INSERT
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
+
+-- Note: client_browser_tokens, marketing_consents, and reviews_log have NO demonstrated PUBLIC_FLOW SQL
+-- queries in application code and therefore grant ZERO PUBLIC_FLOW table access (FOUNDER & SALON_OWNER only).
 
 -- Agent scoped access for stylists of assigned salons only
 DROP POLICY IF EXISTS stylists_agent_assigned ON stylists;
@@ -673,6 +1025,7 @@ CREATE POLICY stylists_agent_assigned ON stylists
   FOR ALL
   USING (
     current_workcraft_role() = 'AGENT'
+    AND NULLIF(current_workcraft_agent_id(), '') IS NOT NULL
     AND EXISTS (
       SELECT 1 FROM salons s
       WHERE s.id = stylists.salon_id
@@ -681,6 +1034,7 @@ CREATE POLICY stylists_agent_assigned ON stylists
   )
   WITH CHECK (
     current_workcraft_role() = 'AGENT'
+    AND NULLIF(current_workcraft_agent_id(), '') IS NOT NULL
     AND EXISTS (
       SELECT 1 FROM salons s
       WHERE s.id = stylists.salon_id
@@ -688,17 +1042,20 @@ CREATE POLICY stylists_agent_assigned ON stylists
     )
   );
 
--- service_stylists (join table)
+-- service_stylists (join table): separate OWNER write vs PUBLIC_FLOW read-only (prevents PUBLIC_FLOW DELETE)
 ALTER TABLE service_stylists ENABLE ROW LEVEL SECURITY;
 ALTER TABLE service_stylists FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS service_stylists_founder_all ON service_stylists;
 CREATE POLICY service_stylists_founder_all ON service_stylists
   FOR ALL USING (current_workcraft_role() = 'FOUNDER') WITH CHECK (current_workcraft_role() = 'FOUNDER');
+
 DROP POLICY IF EXISTS service_stylists_salon_scoped ON service_stylists;
-CREATE POLICY service_stylists_salon_scoped ON service_stylists
+DROP POLICY IF EXISTS service_stylists_owner_isolated ON service_stylists;
+CREATE POLICY service_stylists_owner_isolated ON service_stylists
   FOR ALL
   USING (
-    current_workcraft_role() IN ('SALON_OWNER', 'PUBLIC_FLOW')
+    current_workcraft_role() = 'SALON_OWNER'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND EXISTS (
       SELECT 1 FROM stylists st
       WHERE st.id = service_stylists.stylist_id
@@ -707,6 +1064,7 @@ CREATE POLICY service_stylists_salon_scoped ON service_stylists
   )
   WITH CHECK (
     current_workcraft_role() = 'SALON_OWNER'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND EXISTS (
       SELECT 1 FROM stylists st
       WHERE st.id = service_stylists.stylist_id
@@ -714,13 +1072,95 @@ CREATE POLICY service_stylists_salon_scoped ON service_stylists
     )
   );
 
--- auth_challenges (Founder & challenge self-service/auth flow)
+DROP POLICY IF EXISTS service_stylists_public_flow_select ON service_stylists;
+CREATE POLICY service_stylists_public_flow_select ON service_stylists
+  FOR SELECT
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM stylists st
+      WHERE st.id = service_stylists.stylist_id
+        AND st.salon_id = current_workcraft_salon_id()
+    )
+  );
+
+-- auth_challenges: strictly restricted to FOUNDER, authenticated challenge owner, or single scoped challenge GUC
 ALTER TABLE auth_challenges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auth_challenges FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS auth_challenges_founder_all ON auth_challenges;
 CREATE POLICY auth_challenges_founder_all ON auth_challenges
-  FOR ALL USING (current_workcraft_role() IN ('FOUNDER', 'PUBLIC_FLOW'))
-  WITH CHECK (current_workcraft_role() IN ('FOUNDER', 'PUBLIC_FLOW'));
+  FOR ALL
+  USING (current_workcraft_role() = 'FOUNDER')
+  WITH CHECK (current_workcraft_role() = 'FOUNDER');
+
+DROP POLICY IF EXISTS auth_challenges_self_select ON auth_challenges;
+CREATE POLICY auth_challenges_self_select ON auth_challenges
+  FOR SELECT
+  USING (
+    current_workcraft_role() IN ('SALON_OWNER', 'AGENT')
+    AND NULLIF(current_workcraft_user_id(), '') IS NOT NULL
+    AND user_id IS NOT NULL
+    AND user_id::text = current_workcraft_user_id()
+  );
+
+DROP POLICY IF EXISTS auth_challenges_self_update ON auth_challenges;
+CREATE POLICY auth_challenges_self_update ON auth_challenges
+  FOR UPDATE
+  USING (
+    current_workcraft_role() IN ('SALON_OWNER', 'AGENT')
+    AND NULLIF(current_workcraft_user_id(), '') IS NOT NULL
+    AND user_id IS NOT NULL
+    AND user_id::text = current_workcraft_user_id()
+    AND consumed_at IS NULL
+  )
+  WITH CHECK (
+    current_workcraft_role() IN ('SALON_OWNER', 'AGENT')
+    AND NULLIF(current_workcraft_user_id(), '') IS NOT NULL
+    AND user_id IS NOT NULL
+    AND user_id::text = current_workcraft_user_id()
+  );
+
+DROP POLICY IF EXISTS auth_challenges_public_client_insert ON auth_challenges;
+CREATE POLICY auth_challenges_public_client_insert ON auth_challenges
+  FOR INSERT
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND purpose = 'CROSS_DEVICE_CLIENT'
+    AND user_id IS NULL
+    AND consumed_at IS NULL
+    AND attempts = 0
+  );
+
+DROP POLICY IF EXISTS auth_challenges_public_client_select ON auth_challenges;
+CREATE POLICY auth_challenges_public_client_select ON auth_challenges
+  FOR SELECT
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND purpose = 'CROSS_DEVICE_CLIENT'
+    AND NULLIF(current_workcraft_challenge_id(), '') IS NOT NULL
+    AND id::text = current_workcraft_challenge_id()
+    AND consumed_at IS NULL
+    AND expires_at > NOW()
+  );
+
+DROP POLICY IF EXISTS auth_challenges_public_client_update ON auth_challenges;
+CREATE POLICY auth_challenges_public_client_update ON auth_challenges
+  FOR UPDATE
+  USING (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND purpose = 'CROSS_DEVICE_CLIENT'
+    AND NULLIF(current_workcraft_challenge_id(), '') IS NOT NULL
+    AND id::text = current_workcraft_challenge_id()
+    AND consumed_at IS NULL
+    AND expires_at > NOW()
+  )
+  WITH CHECK (
+    current_workcraft_role() = 'PUBLIC_FLOW'
+    AND purpose = 'CROSS_DEVICE_CLIENT'
+    AND NULLIF(current_workcraft_challenge_id(), '') IS NOT NULL
+    AND id::text = current_workcraft_challenge_id()
+  );
 
 -- founder_biometrics & founder_incidents & audit_logs (Founder strictly)
 DO $$
@@ -749,7 +1189,11 @@ CREATE POLICY agent_profiles_founder_all ON agent_profiles
   FOR ALL USING (current_workcraft_role() = 'FOUNDER') WITH CHECK (current_workcraft_role() = 'FOUNDER');
 DROP POLICY IF EXISTS agent_profiles_self_select ON agent_profiles;
 CREATE POLICY agent_profiles_self_select ON agent_profiles
-  FOR SELECT USING (current_workcraft_role() = 'AGENT' AND agent_id = current_workcraft_agent_id());
+  FOR SELECT USING (
+    current_workcraft_role() = 'AGENT'
+    AND NULLIF(current_workcraft_agent_id(), '') IS NOT NULL
+    AND agent_id = current_workcraft_agent_id()
+  );
 
 -- payment_submissions (Founder manages all; Agent reads/inserts own submissions; Owner reads/inserts own salon)
 ALTER TABLE payment_submissions ENABLE ROW LEVEL SECURITY;
@@ -759,26 +1203,42 @@ CREATE POLICY payment_submissions_founder_all ON payment_submissions
   FOR ALL USING (current_workcraft_role() = 'FOUNDER') WITH CHECK (current_workcraft_role() = 'FOUNDER');
 DROP POLICY IF EXISTS payment_submissions_agent_scoped ON payment_submissions;
 CREATE POLICY payment_submissions_agent_scoped ON payment_submissions
-  FOR SELECT USING (current_workcraft_role() = 'AGENT' AND agent_id = current_workcraft_agent_id());
+  FOR SELECT USING (
+    current_workcraft_role() = 'AGENT'
+    AND NULLIF(current_workcraft_agent_id(), '') IS NOT NULL
+    AND agent_id = current_workcraft_agent_id()
+  );
 DROP POLICY IF EXISTS payment_submissions_agent_insert ON payment_submissions;
 CREATE POLICY payment_submissions_agent_insert ON payment_submissions
   FOR INSERT WITH CHECK (
     current_workcraft_role() = 'AGENT'
+    AND NULLIF(current_workcraft_agent_id(), '') IS NOT NULL
     AND agent_id = current_workcraft_agent_id()
+    AND submitted_by_role = 'AGENT'
     AND status = 'PENDING_REVIEW'
+    AND reviewed_by IS NULL
+    AND reviewed_at IS NULL
   );
 DROP POLICY IF EXISTS payment_submissions_owner_scoped ON payment_submissions;
 CREATE POLICY payment_submissions_owner_scoped ON payment_submissions
-  FOR SELECT USING (current_workcraft_role() = 'SALON_OWNER' AND salon_id = current_workcraft_salon_id());
+  FOR SELECT USING (
+    current_workcraft_role() = 'SALON_OWNER'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
+    AND salon_id = current_workcraft_salon_id()
+  );
 DROP POLICY IF EXISTS payment_submissions_owner_insert ON payment_submissions;
 CREATE POLICY payment_submissions_owner_insert ON payment_submissions
   FOR INSERT WITH CHECK (
     current_workcraft_role() = 'SALON_OWNER'
+    AND NULLIF(current_workcraft_salon_id(), '') IS NOT NULL
     AND salon_id = current_workcraft_salon_id()
+    AND submitted_by_role = 'SALON_OWNER'
     AND status = 'PENDING_REVIEW'
+    AND reviewed_by IS NULL
+    AND reviewed_at IS NULL
   );
 
--- cash_custody_ledger & commission_ledger (Founder all; Agent scoped read/insert own)
+-- cash_custody_ledger & commission_ledger (Founder all; Agent scoped read own)
 DO $$
 DECLARE
   tbl TEXT;
@@ -796,7 +1256,7 @@ BEGIN
     );
     EXECUTE format('DROP POLICY IF EXISTS %I ON %I', tbl || '_agent_select', tbl);
     EXECUTE format(
-      'CREATE POLICY %I ON %I FOR SELECT USING (current_workcraft_role() = ''AGENT'' AND agent_id = current_workcraft_agent_id())',
+      'CREATE POLICY %I ON %I FOR SELECT USING (current_workcraft_role() = ''AGENT'' AND NULLIF(current_workcraft_agent_id(), '''') IS NOT NULL AND agent_id = current_workcraft_agent_id())',
       tbl || '_agent_select',
       tbl
     );
