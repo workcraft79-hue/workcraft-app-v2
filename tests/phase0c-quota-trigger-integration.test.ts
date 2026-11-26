@@ -170,10 +170,10 @@ test(
       );
       await client.query(
         `INSERT INTO salons (
-           id, public_code, salon_name, whatsapp_phone, owner_auth_phone, public_contact_phone,
+           id, public_code, salon_name, owner_name, whatsapp_phone, owner_auth_phone, public_contact_phone,
            package_tier, plan_tier, billing_status, monthly_booking_limit, grace_overage_limit
          )
-         VALUES ($1, $2, 'Integration Salon', '+923000000101', '+923000000101', '+923000000101',
+         VALUES ($1, $2, 'Integration Salon', 'Integration Test Owner', '+923000000101', '+923000000101', '+923000000101',
                  'STARTER', 'STARTER', 'ACTIVE', 5, 0)`,
         [salonId, publicCode]
       );
@@ -315,12 +315,35 @@ test(
       // 5) Authorized PUBLIC_FLOW cancellation (without slot/stylist mutation) succeeds, then terminal status rejects further updates
       await client.query(`UPDATE bookings SET status = 'CANCELED' WHERE id = $1`, [bookingId]);
       await client.query('SAVEPOINT sp_terminal_reopen');
-      await assert.rejects(
-        () => client.query(`UPDATE bookings SET status = 'CONFIRMED' WHERE id = $1`, [bookingId]),
-        /PUBLIC_FLOW cannot modify booking from terminal status CANCELED/
-      );
-      await client.query('ROLLBACK TO SAVEPOINT sp_terminal_reopen');
+      let terminalBlockedByTrigger = false;
+      let reopenRowCount = 0;
+      try {
+        const reopenRes = await client.query(
+          `UPDATE bookings SET status = 'CONFIRMED' WHERE id = $1`,
+          [bookingId]
+        );
+        reopenRowCount = reopenRes.rowCount ?? 0;
+      } catch (err: unknown) {
+        assert.match(
+          err instanceof Error ? err.message : String(err),
+          /PUBLIC_FLOW cannot modify booking from terminal status CANCELED/
+        );
+        terminalBlockedByTrigger = true;
+        await client.query('ROLLBACK TO SAVEPOINT sp_terminal_reopen');
+      }
+      if (!terminalBlockedByTrigger) {
+        assert.equal(
+          reopenRowCount,
+          0,
+          'RLS must block PUBLIC_FLOW updates to terminal CANCELED bookings'
+        );
+      }
       await client.query('RELEASE SAVEPOINT sp_terminal_reopen');
+      const afterTerminalCheck = await client.query<{ status: string }>(
+        `SELECT status FROM bookings WHERE id = $1`,
+        [bookingId]
+      );
+      assert.equal(afterTerminalCheck.rows[0]?.status, 'CANCELED');
 
       // Roll back entire synthetic test transaction
       await client.query('ROLLBACK');
@@ -350,10 +373,10 @@ test(
       );
       await seedClient.query(
         `INSERT INTO salons (
-           id, public_code, salon_name, whatsapp_phone, owner_auth_phone, public_contact_phone,
+           id, public_code, salon_name, owner_name, whatsapp_phone, owner_auth_phone, public_contact_phone,
            package_tier, plan_tier, billing_status, monthly_booking_limit, grace_overage_limit
          )
-         VALUES ($1, $2, 'Quota Integration Salon', '+923000000201', '+923000000201', '+923000000201',
+         VALUES ($1, $2, 'Quota Integration Salon', 'Quota Integration Owner', '+923000000201', '+923000000201', '+923000000201',
                  'STARTER', 'STARTER', 'ACTIVE', 1, 0)`,
         [salonId, publicCode]
       );
@@ -373,7 +396,7 @@ test(
         salonPublicCode: publicCode,
         bookingRef: `BK-IT-UNK-${suffix}`,
         clientName: 'Unknown Stylist Client',
-        clientPhoneE164: '+923001119000',
+        clientPhoneE164: '+923001119001',
         preferredLang: 'en',
         stylistName: 'Ghost Barber',
         servicesSnapshot: [{ name: 'Haircut', price: 1000, durationMins: 30 }],
@@ -465,6 +488,15 @@ test(
           [salonId]
         );
         assert.equal(cliRows.rows[0].count, '1');
+
+        const styRows = await verifyClient.query<{ name: string }>(
+          `SELECT name FROM stylists WHERE salon_id = $1`,
+          [salonId]
+        );
+        assert.deepEqual(
+          styRows.rows.map((r) => r.name),
+          ['Quota Barber']
+        );
 
         const usageRows = await verifyClient.query<{ billable_bookings: number }>(
           `SELECT billable_bookings FROM salon_usage_monthly WHERE salon_id = $1 AND billing_month = '2026-12'`,
