@@ -213,7 +213,16 @@ function createMockSingleClientPool(options?: {
         connState.scopedGucs['app.current_client_id'] = 'cli-mock-1';
         return { rows: [{ id: 'cli-mock-1' }], rowCount: 1 };
       }
-      if (normalizedSql.startsWith('INSERT INTO stylists')) {
+      if (
+        normalizedSql.startsWith('INSERT INTO stylists') ||
+        normalizedSql.startsWith('UPDATE stylists')
+      ) {
+        if (connState.localGucs['app.current_user_role'] === 'PUBLIC_FLOW') {
+          throw new Error('new row violates row-level security policy for table "stylists"');
+        }
+        return { rows: [{ id: '00000000-0000-4000-8000-000000000001' }], rowCount: 1 };
+      }
+      if (normalizedSql.startsWith('SELECT id FROM stylists WHERE salon_id = $1')) {
         return { rows: [{ id: '00000000-0000-4000-8000-000000000001' }], rowCount: 1 };
       }
       if (normalizedSql.startsWith('SELECT id FROM bookings WHERE salon_id')) {
@@ -518,6 +527,18 @@ test('4. Public Flow uses lookup context then narrows app.current_salon_id befor
   assert.equal(
     mock.queries.some((q) => q.text.includes('INSERT INTO salon_usage_monthly')),
     false
+  );
+  assert.equal(
+    mock.queries.some(
+      (q) => q.text.startsWith('INSERT INTO stylists') || q.text.startsWith('UPDATE stylists')
+    ),
+    false,
+    'PUBLIC_FLOW must never write to stylists'
+  );
+  assert.equal(
+    mock.queries.some((q) => q.text.startsWith('SELECT id FROM stylists WHERE salon_id = $1')),
+    true,
+    'Expected read-only active stylist lookup during PUBLIC_FLOW booking'
   );
 
   // Cannot escalate role mid-transaction or narrow inside non-PUBLIC_FLOW
