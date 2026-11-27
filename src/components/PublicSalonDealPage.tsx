@@ -100,6 +100,76 @@ const DEAL_COPY: Record<
     copiedBtn: 'تم النسخ',
     minUnit: 'دقيقة',
   },
+  it: {
+    activeDealBadge: 'OFFERTA ATTIVA',
+    expiredDealBadge: 'OFFERTA SCADUTA',
+    expiresLabel: 'Valida fino al',
+    includedServices: 'Servizi Inclusi',
+    bookDealBtn: 'Prenota Questa Offerta',
+    bookRegularBtn: 'Prenota Servizi Standard',
+    expiredNotice: 'Questa offerta promozionale è scaduta e non è più prenotabile.',
+    purgedVideoNotice: 'Il video promozionale è stato rimosso automaticamente.',
+    openMapsBtn: 'Indicazioni Google Maps',
+    copyBtn: 'Copia',
+    copiedBtn: 'Copiato',
+    minUnit: 'min',
+  },
+  ru: {
+    activeDealBadge: 'АКТИВНАЯ АКЦИЯ',
+    expiredDealBadge: 'АКЦИЯ ЗАВЕРШЕНА',
+    expiresLabel: 'Действует до',
+    includedServices: 'Включённые услуги',
+    bookDealBtn: 'Забронировать акцию',
+    bookRegularBtn: 'Выбрать обычные услуги',
+    expiredNotice: 'Срок действия этой акции истёк.',
+    purgedVideoNotice: 'Промо-видео было автоматически удалено.',
+    openMapsBtn: 'Маршрут на Google Картах',
+    copyBtn: 'Копировать',
+    copiedBtn: 'Скопировано',
+    minUnit: 'мин',
+  },
+  fr: {
+    activeDealBadge: 'OFFRE EN COURS',
+    expiredDealBadge: 'OFFRE EXPIRÉE',
+    expiresLabel: "Valable jusqu'au",
+    includedServices: 'Services Inclus',
+    bookDealBtn: 'Réserver Cette Offre',
+    bookRegularBtn: 'Réserver les Services Standards',
+    expiredNotice: 'Cette offre promotionnelle a expiré.',
+    purgedVideoNotice: 'La vidéo promotionnelle a été supprimée automatiquement.',
+    openMapsBtn: 'Itinéraire Google Maps',
+    copyBtn: 'Copier',
+    copiedBtn: 'Copié',
+    minUnit: 'min',
+  },
+  de: {
+    activeDealBadge: 'AKTUELLES ANGEBOT',
+    expiredDealBadge: 'ANGEBOT ABGELAUFEN',
+    expiresLabel: 'Gültig bis',
+    includedServices: 'Enthaltene Leistungen',
+    bookDealBtn: 'Dieses Angebot buchen',
+    bookRegularBtn: 'Reguläre Leistungen buchen',
+    expiredNotice: 'Dieses Angebot ist abgelaufen und nicht mehr buchbar.',
+    purgedVideoNotice: 'Das Werbevideo wurde automatisch entfernt.',
+    openMapsBtn: 'Google Maps Route',
+    copyBtn: 'Kopieren',
+    copiedBtn: 'Kopiert',
+    minUnit: 'Min',
+  },
+  es: {
+    activeDealBadge: 'OFERTA ACTIVA',
+    expiredDealBadge: 'OFERTA EXPIRADA',
+    expiresLabel: 'Válida hasta',
+    includedServices: 'Servicios Incluidos',
+    bookDealBtn: 'Reservar Esta Oferta',
+    bookRegularBtn: 'Reservar Servicios Regulares',
+    expiredNotice: 'Esta oferta promocional ha expirado.',
+    purgedVideoNotice: 'El video promocional fue eliminado automáticamente.',
+    openMapsBtn: 'Cómo llegar en Google Maps',
+    copyBtn: 'Copiar',
+    copiedBtn: 'Copiado',
+    minUnit: 'min',
+  },
 };
 
 export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
@@ -170,18 +240,18 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B141A] text-[#E9EDEF] flex items-center justify-center p-6">
-        <div className="text-xs font-mono text-[#8696A0]">Loading salon offer...</div>
+      <div className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex items-center justify-center p-6">
+        <div className="text-xs font-mono text-[#8B949E]">Loading salon offer...</div>
       </div>
     );
   }
 
   if (error || !payload) {
     return (
-      <div className="min-h-screen bg-[#0B141A] text-[#E9EDEF] flex items-center justify-center p-6">
-        <div className="max-w-md w-full rounded-2xl border border-[#2A3942] bg-[#111B21] p-6 text-center space-y-3">
+      <div className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex items-center justify-center p-6">
+        <div className="max-w-md w-full rounded-2xl border border-[#30363D] bg-[#161B22] p-6 text-center space-y-3">
           <AlertTriangle className="size-8 text-[#F87171] mx-auto" />
-          <p className="text-sm font-semibold text-[#E9EDEF]">{error || 'Deal not found.'}</p>
+          <p className="text-sm font-semibold text-[#F0F6FC]">{error || 'Deal not found.'}</p>
         </div>
       </div>
     );
@@ -223,29 +293,29 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
   return (
     <div
       dir={dir}
-      className="min-h-screen bg-[#0B141A] text-[#E9EDEF] flex flex-col items-center sm:py-6 sm:px-4"
+      className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex flex-col items-center sm:py-6 sm:px-4"
     >
-      <div className="w-full max-w-md bg-[#111B21] min-h-screen sm:min-h-0 sm:rounded-3xl sm:border sm:border-[#222E35] sm:shadow-2xl overflow-hidden flex flex-col">
-        {/* Top-Left Crisp Transparent WorkCraft Logo Header */}
+      <div className="w-full max-w-md bg-[#161B22] min-h-screen sm:min-h-0 sm:rounded-3xl sm:border sm:border-[#30363D] sm:shadow-2xl overflow-hidden flex flex-col">
+        {/* Top-Left Crisp White-Label Salon Header */}
         <header
           dir="ltr"
-          className="bg-[#202C33] border-b border-[#2A3942] px-3.5 py-2.5 flex items-center justify-between gap-2.5"
+          className="bg-[#161B22] border-b border-[#30363D] px-3.5 py-2.5 flex items-center justify-between gap-2.5"
         >
           <div className="flex items-center gap-2.5 min-w-0">
             <img
               src={LOGO_URL}
-              alt="WorkCraft"
+              alt={payload.salonName}
               className="size-10 sm:size-11 bg-transparent object-contain shrink-0"
             />
             <div className="min-w-0">
               <span
                 className={`text-[10px] font-mono font-bold uppercase tracking-wider block ${
-                  isExpired ? 'text-[#F87171]' : 'text-[#25D366]'
+                  isExpired ? 'text-[#F87171]' : 'text-[#06B6D4]'
                 }`}
               >
                 {isExpired ? copy.expiredDealBadge : copy.activeDealBadge}
               </span>
-              <h1 className="text-sm font-bold text-[#E9EDEF] truncate">{payload.salonName}</h1>
+              <h1 className="text-sm font-bold text-[#F0F6FC] truncate">{payload.salonName}</h1>
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -253,7 +323,7 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
               aria-label="Language"
               value={lang}
               onChange={(e) => setLang(e.target.value as ClientPreferredLang)}
-              className="min-h-[36px] rounded-lg border border-[#2A3942] bg-[#111B21] px-2 text-xs text-[#E9EDEF] focus:outline-none focus:border-[#25D366]"
+              className="min-h-[36px] rounded-lg border border-[#30363D] bg-[#0D1117] px-2 text-xs text-[#F0F6FC] focus:outline-none focus:border-[#06B6D4]"
             >
               {payload.availableLanguages.map((l) => (
                 <option key={l.lang} value={l.lang}>
@@ -265,7 +335,7 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="min-h-[36px] min-w-[36px] rounded-lg border border-[#2A3942] bg-[#111B21] grid place-items-center text-[#8696A0] hover:text-[#E9EDEF]"
+                className="min-h-[36px] min-w-[36px] rounded-lg border border-[#30363D] bg-[#0D1117] grid place-items-center text-[#8B949E] hover:text-[#F0F6FC]"
               >
                 <X className="size-4" />
               </button>
@@ -275,9 +345,9 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
 
         {/* Body */}
         <main className="flex-1 p-4 space-y-4">
-          {/* Promotional Video Player (Text-first per Query 10: shown only if video uploaded or expired/purged) */}
+          {/* Promotional Video Player */}
           {(hasActiveVideo || videoPurged) && (
-            <div className="rounded-2xl overflow-hidden border border-[#2A3942] bg-[#0B141A]">
+            <div className="rounded-2xl overflow-hidden border border-[#30363D] bg-[#0D1117]">
               {hasActiveVideo ? (
                 <video
                   src={deal.videoUrl}
@@ -288,8 +358,8 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
                 />
               ) : (
                 <div className="p-5 text-center space-y-2">
-                  <Film className="size-6 text-[#8696A0] mx-auto" />
-                  <p className="text-xs text-[#8696A0] leading-relaxed">
+                  <Film className="size-6 text-[#8B949E] mx-auto" />
+                  <p className="text-xs text-[#8B949E] leading-relaxed">
                     {copy.purgedVideoNotice}
                   </p>
                 </div>
@@ -298,55 +368,55 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
           )}
 
           {/* Deal Details */}
-          <div className="rounded-2xl border border-[#2A3942] bg-[#202C33] p-4 space-y-3">
+          <div className="rounded-2xl border border-[#30363D] bg-[#1F242D] p-4 space-y-3">
             <div className="flex items-start justify-between gap-2">
-              <h2 className="text-lg font-bold text-[#E9EDEF] leading-snug">{localizedDealTitle}</h2>
+              <h2 className="text-lg font-bold text-[#F0F6FC] leading-snug">{localizedDealTitle}</h2>
               <span
                 dir="ltr"
-                className="rounded-lg bg-[#0B2E1E] border border-[#14532D] px-2.5 py-1 text-xs font-mono font-bold text-[#25D366] shrink-0"
+                className="rounded-lg bg-[#0D3822] border border-[#116329] px-2.5 py-1 text-xs font-mono font-bold text-[#3FB950] shrink-0"
               >
                 {discountSummary}
               </span>
             </div>
 
             {localizedDealDesc && (
-              <p className="text-xs text-[#D1D7DB] leading-relaxed">{localizedDealDesc}</p>
+              <p className="text-xs text-[#C9D1D9] leading-relaxed">{localizedDealDesc}</p>
             )}
 
-            <div className="flex items-center gap-2 text-xs font-mono text-[#FBBF24] pt-1">
+            <div className="flex items-center gap-2 text-xs font-mono text-[#D29922] pt-1">
               <CalendarClock className="size-4 shrink-0" />
               <span>
                 {copy.expiresLabel}:{' '}
                 {new Date(deal.expiresAt).toLocaleDateString(
-                  lang === 'ur' ? 'ur-PK' : lang === 'ar' ? 'ar-AE' : 'en-GB'
+                  lang === 'ur' ? 'ur-PK' : lang === 'ar' ? 'ar-AE' : lang === 'it' ? 'it-IT' : lang === 'ru' ? 'ru-RU' : lang === 'fr' ? 'fr-FR' : lang === 'de' ? 'de-DE' : lang === 'es' ? 'es-ES' : 'en-GB'
                 )}
               </span>
             </div>
           </div>
 
           {isExpired && (
-            <div className="rounded-xl border border-[#7F1D1D] bg-[#3B1219] p-3.5 text-xs text-[#FCA5A5] flex items-start gap-2">
+            <div className="rounded-xl border border-[#da3633] bg-[#4C1C1D] p-3.5 text-xs text-[#FCA5A5] flex items-start gap-2">
               <AlertTriangle className="size-4 shrink-0 mt-0.5 text-[#F87171]" />
               <span>{copy.expiredNotice}</span>
             </div>
           )}
 
-          {/* Included Services (Localized per Query 1) */}
-          <div className="rounded-2xl border border-[#2A3942] bg-[#202C33] p-4 space-y-2.5">
-            <h3 className="text-xs font-mono font-bold uppercase text-[#8696A0] flex items-center gap-1.5">
-              <Scissors className="size-3.5 text-[#25D366]" />
+          {/* Included Services */}
+          <div className="rounded-2xl border border-[#30363D] bg-[#1F242D] p-4 space-y-2.5">
+            <h3 className="text-xs font-mono font-bold uppercase text-[#8B949E] flex items-center gap-1.5">
+              <Scissors className="size-3.5 text-[#06B6D4]" />
               <span>{copy.includedServices}</span>
             </h3>
             <div className="space-y-1.5">
               {payload.matchedServices.map((svc) => (
                 <div
                   key={svc.id || svc.name}
-                  className="flex items-center justify-between text-xs py-1 border-b border-[#2A3942] last:border-none"
+                  className="flex items-center justify-between text-xs py-1 border-b border-[#30363D] last:border-none"
                 >
-                  <span className="text-[#E9EDEF] font-medium">
+                  <span className="text-[#F0F6FC] font-medium">
                     {svc.translations?.[lang] || svc.name} · {svc.durationMins || 35} {copy.minUnit}
                   </span>
-                  <span dir="ltr" className="font-mono text-[#8696A0] tabular-nums">
+                  <span dir="ltr" className="font-mono text-[#8B949E] tabular-nums">
                     {payload.currencySymbol}
                     {svc.price.toLocaleString()}
                   </span>
@@ -355,10 +425,10 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
             </div>
           </div>
 
-          {/* Salon Address + Google Maps Directions & Small Copy Button (Query 8) */}
-          <div className="rounded-2xl border border-[#2A3942] bg-[#182229] p-3.5 space-y-2.5">
-            <div className="flex items-start gap-2 text-xs text-[#D1D7DB]">
-              <MapPin className="size-4 text-[#25D366] shrink-0 mt-0.5" />
+          {/* Salon Address + Google Maps Directions & Small Copy Button */}
+          <div className="rounded-2xl border border-[#30363D] bg-[#0D1117] p-3.5 space-y-2.5">
+            <div className="flex items-start gap-2 text-xs text-[#C9D1D9]">
+              <MapPin className="size-4 text-[#06B6D4] shrink-0 mt-0.5" />
               <span className="leading-relaxed">{payload.address}</span>
             </div>
             <div className="flex items-center gap-2">
@@ -366,25 +436,25 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
                 href={payload.googleMapsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 min-h-[38px] rounded-lg border border-[#2A3942] bg-[#202C33] hover:border-[#25D366] px-3 text-xs font-semibold text-[#53BDEB] flex items-center justify-center gap-1.5 transition"
+                className="flex-1 min-h-[38px] rounded-lg border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3 text-xs font-semibold text-[#06B6D4] flex items-center justify-center gap-1.5 transition"
               >
-                <MapPin className="size-3.5 text-[#25D366] shrink-0" />
+                <MapPin className="size-3.5 text-[#06B6D4] shrink-0" />
                 <span>{copy.openMapsBtn}</span>
                 <ExternalLink className="size-3 shrink-0" />
               </a>
               <button
                 type="button"
                 onClick={() => void handleCopyMaps()}
-                className="min-h-[38px] rounded-lg border border-[#2A3942] bg-[#202C33] hover:border-[#53BDEB] px-3 text-xs font-semibold text-[#D1D7DB] flex items-center gap-1.5 shrink-0 transition"
+                className="min-h-[38px] rounded-lg border border-[#30363D] bg-[#161B22] hover:border-[#06B6D4] px-3 text-xs font-semibold text-[#C9D1D9] flex items-center gap-1.5 shrink-0 transition"
               >
                 {copiedMaps ? (
                   <>
-                    <Check className="size-3.5 text-[#25D366]" />
-                    <span className="text-[#25D366]">{copy.copiedBtn}</span>
+                    <Check className="size-3.5 text-[#3FB950]" />
+                    <span className="text-[#3FB950]">{copy.copiedBtn}</span>
                   </>
                 ) : (
                   <>
-                    <Copy className="size-3.5 text-[#8696A0]" />
+                    <Copy className="size-3.5 text-[#8B949E]" />
                     <span>{copy.copyBtn}</span>
                   </>
                 )}
@@ -394,7 +464,7 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
         </main>
 
         {/* Bottom CTA */}
-        <footer className="sticky bottom-0 border-t border-[#2A3942] bg-[#202C33] p-4">
+        <footer className="sticky bottom-0 border-t border-[#30363D] bg-[#161B22] p-4">
           {!isExpired ? (
             <button
               type="button"
@@ -405,7 +475,7 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
                   setShowFlow(true);
                 }
               }}
-              className="w-full min-h-[48px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] text-sm font-bold flex items-center justify-center gap-2 transition"
+              className="w-full min-h-[48px] rounded-xl bg-[#06B6D4] hover:bg-[#0891B2] text-[#0D1117] text-sm font-bold flex items-center justify-center gap-2 transition"
             >
               <Tag className="size-4" />
               <span>{copy.bookDealBtn}</span>
@@ -414,7 +484,7 @@ export const PublicSalonDealPage: React.FC<PublicSalonDealPageProps> = ({
             <button
               type="button"
               onClick={() => setShowFlow(true)}
-              className="w-full min-h-[48px] rounded-xl border border-[#2A3942] bg-[#111B21] hover:bg-[#2A3942] text-[#E9EDEF] text-xs font-bold flex items-center justify-center gap-2 transition"
+              className="w-full min-h-[48px] rounded-xl border border-[#30363D] bg-[#0D1117] hover:bg-[#1F242D] text-[#F0F6FC] text-xs font-bold flex items-center justify-center gap-2 transition"
             >
               <span>{copy.bookRegularBtn}</span>
             </button>
