@@ -474,27 +474,8 @@ async function writePgLocalGucs(
        set_config('app.current_agent_id', $3, true),
        set_config('app.current_user_id', $4, true),
        set_config('app.actor_context_payload', $5, true),
-       set_config('app.actor_context_signature', $6, true),
-       set_config('app.current_public_code', $7, true),
-       set_config('app.current_token_hash', $8, true),
-       set_config('app.current_booking_id', $9, true),
-       set_config('app.current_client_id', $10, true),
-       set_config('app.current_idempotency_key', $11, true),
-       set_config('app.current_challenge_id', $12, true)`,
-    [
-      normalized.role,
-      normalized.salonId,
-      normalized.agentId,
-      normalized.userId,
-      signed.payload,
-      signed.signature,
-      scope.publicCode,
-      scope.tokenHash,
-      scope.bookingId,
-      scope.clientId,
-      scope.idempotencyKey,
-      scope.challengeId,
-    ]
+       set_config('app.actor_context_signature', $6, true)`,
+    [normalized.role, normalized.salonId, normalized.agentId, normalized.userId, signed.payload, signed.signature]
   );
 }
 
@@ -533,7 +514,28 @@ async function setPublicFlowScopedGucs(
     }
   }
   ACTIVE_TX_SCOPES.set(client, next);
-  await writePgLocalGucs(client, actor);
+  const signed = signPgActorContext(actor, next);
+  await client.query(
+    `SELECT
+       set_config('app.current_public_code', $1, true),
+       set_config('app.current_token_hash', $2, true),
+       set_config('app.current_booking_id', $3, true),
+       set_config('app.current_client_id', $4, true),
+       set_config('app.current_idempotency_key', $5, true),
+       set_config('app.current_challenge_id', $6, true),
+       set_config('app.actor_context_payload', $7, true),
+       set_config('app.actor_context_signature', $8, true)`,
+    [
+      next.publicCode,
+      next.tokenHash,
+      next.bookingId,
+      next.clientId,
+      next.idempotencyKey,
+      next.challengeId,
+      signed.payload,
+      signed.signature,
+    ]
+  );
 }
 
 export async function applyPgActorContext(
