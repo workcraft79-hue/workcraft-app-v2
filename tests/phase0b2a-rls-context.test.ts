@@ -313,7 +313,9 @@ test('1. Founder transaction sets exact migration-003 transaction-local GUCs', a
   assert.equal(mock.queries.length, 4);
   assert.equal(mock.queries[0].text, 'BEGIN');
   assert.match(mock.queries[1].text, /set_config\('app\.current_user_role', \$1, true\)/);
-  assert.deepEqual(mock.queries[1].params, ['FOUNDER', '', '', 'usr-founder-1']);
+  assert.deepEqual(mock.queries[1].params?.slice(0, 4), ['FOUNDER', '', '', 'usr-founder-1']);
+  assert.equal(typeof mock.queries[1].params?.[4], 'string', 'signed actor payload must be attached');
+  assert.match(String(mock.queries[1].params?.[5]), /^[0-9a-f]{64}$/);
   assert.equal(mock.queries[2].text, 'SELECT id FROM salons LIMIT 1');
   assert.deepEqual(mock.queries[2].activeGucsAtExecution, {
     'app.current_user_role': 'FOUNDER',
@@ -455,7 +457,8 @@ test('4. Public Flow uses lookup context then narrows app.current_salon_id befor
   const found = await findSalonByPublicCodeInPostgres('wc_studio42');
   assert.equal(found?.id, 'salon-public-42');
   const lookupSetConfig = mock.queries[1];
-  assert.deepEqual(lookupSetConfig.params, ['PUBLIC_FLOW', '', '', '']);
+  assert.deepEqual(lookupSetConfig.params?.slice(0, 4), ['PUBLIC_FLOW', '', '', '']);
+  assert.match(String(lookupSetConfig.params?.[5]), /^[0-9a-f]{64}$/);
 
   mock.queries.length = 0;
 
@@ -721,7 +724,8 @@ test('7. Express routes ignore spoofed req.body/req.query identity fields and en
       q.text.includes("set_config('app.current_user_role'")
     );
     assert.equal(setConfigCalls.length, 1);
-    assert.deepEqual(setConfigCalls[0].params, ['SALON_OWNER', '1', '', 'usr-salon-1']);
+    assert.deepEqual(setConfigCalls[0].params?.slice(0, 4), ['SALON_OWNER', '1', '', 'usr-salon-1']);
+    assert.match(String(setConfigCalls[0].params?.[5]), /^[0-9a-f]{64}$/);
 
     const salonUpdateCall = mock.queries.find((q) => q.text.startsWith('INSERT INTO salons'));
     assert.ok(salonUpdateCall);

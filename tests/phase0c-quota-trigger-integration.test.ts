@@ -215,6 +215,30 @@ test(
         [salonId, bookingId, tokenHash]
       );
 
+      // 0) PUBLIC_FLOW may extend a verified token, but must never shorten its expiry.
+      await client.query('SAVEPOINT sp_token_expiry_shorten');
+      await assert.rejects(
+        () =>
+          client.query(
+            `UPDATE booking_access_tokens
+             SET expires_at = NOW() + INTERVAL '1 day'
+             WHERE token_hash = $1`,
+            [tokenHash]
+          ),
+        /PUBLIC_FLOW may only extend expires_at/
+      );
+      await client.query('ROLLBACK TO SAVEPOINT sp_token_expiry_shorten');
+      await client.query('RELEASE SAVEPOINT sp_token_expiry_shorten');
+
+      await client.query('SAVEPOINT sp_token_expiry_extend');
+      await client.query(
+        `UPDATE booking_access_tokens
+         SET expires_at = NOW() + INTERVAL '30 days'
+         WHERE token_hash = $1`,
+        [tokenHash]
+      );
+      await client.query('RELEASE SAVEPOINT sp_token_expiry_extend');
+
       // 1) Direct UPDATE of usage_counted under PUBLIC_FLOW must fail even if caller tries to forge app._usage_mark_booking_id
       await client.query('SAVEPOINT sp_direct_usage');
       const roleCheck = await client.query<{ is_fn_owner: boolean }>(
