@@ -86,8 +86,72 @@ export interface NormalizedPgActorContext {
   userId: string;
 }
 
+interface PgActorSignedScope {
+  publicCode: string;
+  tokenHash: string;
+  bookingId: string;
+  clientId: string;
+  idempotencyKey: string;
+  challengeId: string;
+}
+
 const PUBLIC_LOOKUP_CONTEXTS = new WeakSet<PgActorContext>();
 const ACTIVE_TX_ROLES = new WeakMap<PoolClient, PgActorRole>();
+const ACTIVE_TX_ACTORS = new WeakMap<PoolClient, NormalizedPgActorContext>();
+const ACTIVE_TX_SCOPES = new WeakMap<PoolClient, PgActorSignedScope>();
+
+function getPgActorContextKey(): Buffer {
+  const configured = (process.env.PG_ACTOR_CONTEXT_SECRET || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{64,}$/.test(configured) || configured.length % 2 !== 0) {
+    throw new PgContextError(
+      'MISSING_IDENTITY',
+      'PostgreSQL RLS signing is not configured: PG_ACTOR_CONTEXT_SECRET must be a 32-byte-or-longer hex secret.'
+    );
+  }
+  const key = Buffer.from(configured, 'hex');
+  if (key.length < 32) {
+    throw new PgContextError('MISSING_IDENTITY', 'PostgreSQL RLS signing key is too short.');
+  }
+  return key;
+}
+
+function signPgActorContext(
+  actor: NormalizedPgActorContext,
+  scope: PgActorSignedScope
+): { payload: string; signature: string } {
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const claims = {
+    v: 1,
+    kid: 'v1',
+    iat: issuedAt,
+    exp: issuedAt + 900,
+    nonce: crypto.randomBytes(16).toString('hex'),
+    role: actor.role,
+    salonId: actor.salonId,
+    agentId: actor.agentId,
+    userId: actor.userId,
+    publicCode: scope.publicCode,
+    tokenHash: scope.tokenHash,
+    bookingId: scope.bookingId,
+    clientId: scope.clientId,
+    idempotencyKey: scope.idempotencyKey,
+    challengeId: scope.challengeId,
+  };
+  const payload = JSON.stringify(claims);
+  const signature = crypto.createHmac('sha256', getPgActorContextKey()).update(payload, 'utf8').digest('hex');
+  return { payload, signature };
+}
+
+function emptyPgActorScope(): PgActorSignedScope {
+  return {
+    publicCode: '',
+    tokenHash: '',
+    bookingId: '',
+    clientId: '',
+    idempotencyKey: '',
+    challengeId: '',
+  };
+}
 
 function isProductionEnv(): boolean {
   return process.env.NODE_ENV === 'production';
@@ -401,13 +465,36 @@ async function writePgLocalGucs(
   client: PoolClient,
   normalized: NormalizedPgActorContext
 ): Promise<void> {
+  const scope = ACTIVE_TX_SCOPES.get(client) || emptyPgActorScope();
+  const signed = signPgActorContext(normalized, scope);
   await client.query(
     `SELECT
        set_config('app.current_user_role', $1, true),
        set_config('app.current_salon_id', $2, true),
        set_config('app.current_agent_id', $3, true),
-       set_config('app.current_user_id', $4, true)`,
-    [normalized.role, normalized.salonId, normalized.agentId, normalized.userId]
+       set_config('app.current_user_id', $4, true),
+       set_config('app.actor_context_payload', $5, true),
+       set_config('app.actor_context_signature', $6, true),
+       set_config('app.current_public_code', $7, true),
+       set_config('app.current_token_hash', $8, true),
+       set_config('app.current_booking_id', $9, true),
+       set_config('app.current_client_id', $10, true),
+       set_config('app.current_idempotency_key', $11, true),
+       set_config('app.current_challenge_id', $12, true)`,
+    [
+      normalized.role,
+      normalized.salonId,
+      normalized.agentId,
+      normalized.userId,
+      signed.payload,
+      signed.signature,
+      scope.publicCode,
+      scope.tokenHash,
+      scope.bookingId,
+      scope.clientId,
+      scope.idempotencyKey,
+      scope.challengeId,
+    ]
   );
 }
 
@@ -419,39 +506,34 @@ async function setPublicFlowScopedGucs(
     bookingId?: string | null;
     clientId?: string | null;
     idempotencyKey?: string | null;
+    challengeId?: string | null;
   }
 ): Promise<void> {
   const activeRole = ACTIVE_TX_ROLES.get(client);
-  if (activeRole && activeRole !== 'PUBLIC_FLOW') {
+  const actor = ACTIVE_TX_ACTORS.get(client);
+  if (activeRole !== 'PUBLIC_FLOW' || !actor || actor.role !== 'PUBLIC_FLOW') {
     throw new PgContextError(
       'PRIVILEGE_ESCALATION',
-      `setPublicFlowScopedGucs cannot be called inside a ${activeRole} transaction.`
+      'Public-flow scope can only be changed inside a verified PUBLIC_FLOW transaction.'
     );
   }
-  const clauses: string[] = [];
-  const params: string[] = [];
-  if (scope.publicCode !== undefined) {
-    params.push(cleanActorId(scope.publicCode, 'publicCode'));
-    clauses.push(`set_config('app.current_public_code', $${params.length}, true)`);
+
+  const current = ACTIVE_TX_SCOPES.get(client) || emptyPgActorScope();
+  const next: PgActorSignedScope = { ...current };
+  for (const key of [
+    'publicCode',
+    'tokenHash',
+    'bookingId',
+    'clientId',
+    'idempotencyKey',
+    'challengeId',
+  ] as const) {
+    if (scope[key] !== undefined) {
+      next[key] = cleanActorId(scope[key], key);
+    }
   }
-  if (scope.tokenHash !== undefined) {
-    params.push(cleanActorId(scope.tokenHash, 'tokenHash'));
-    clauses.push(`set_config('app.current_token_hash', $${params.length}, true)`);
-  }
-  if (scope.bookingId !== undefined) {
-    params.push(cleanActorId(scope.bookingId, 'bookingId'));
-    clauses.push(`set_config('app.current_booking_id', $${params.length}, true)`);
-  }
-  if (scope.clientId !== undefined) {
-    params.push(cleanActorId(scope.clientId, 'clientId'));
-    clauses.push(`set_config('app.current_client_id', $${params.length}, true)`);
-  }
-  if (scope.idempotencyKey !== undefined) {
-    params.push(cleanActorId(scope.idempotencyKey, 'idempotencyKey'));
-    clauses.push(`set_config('app.current_idempotency_key', $${params.length}, true)`);
-  }
-  if (clauses.length === 0) return;
-  await client.query(`SELECT ${clauses.join(', ')}`, params);
+  ACTIVE_TX_SCOPES.set(client, next);
+  await writePgLocalGucs(client, actor);
 }
 
 export async function applyPgActorContext(
@@ -466,6 +548,8 @@ export async function applyPgActorContext(
       `Cannot switch PostgreSQL transaction role from ${activeRole} to ${normalized.role}.`
     );
   }
+  ACTIVE_TX_ACTORS.set(client, normalized);
+  if (!ACTIVE_TX_SCOPES.has(client)) ACTIVE_TX_SCOPES.set(client, emptyPgActorScope());
   await writePgLocalGucs(client, normalized);
 }
 
@@ -486,6 +570,8 @@ export async function narrowPublicFlowSalonContext(
   }
   const scoped = createPublicFlowSalonActor(salonId);
   const normalized = validatePgActorContext(scoped);
+  ACTIVE_TX_ACTORS.set(client, normalized);
+  if (!ACTIVE_TX_SCOPES.has(client)) ACTIVE_TX_SCOPES.set(client, emptyPgActorScope());
   await writePgLocalGucs(client, normalized);
 }
 
@@ -508,6 +594,8 @@ export async function withPgTransaction<T>(
     await client.query('BEGIN');
     inTx = true;
     ACTIVE_TX_ROLES.set(client, normalized.role);
+    ACTIVE_TX_ACTORS.set(client, normalized);
+    ACTIVE_TX_SCOPES.set(client, emptyPgActorScope());
     await writePgLocalGucs(client, normalized);
     const result = await fn(client);
     await client.query('COMMIT');
@@ -525,6 +613,8 @@ export async function withPgTransaction<T>(
     throw err;
   } finally {
     ACTIVE_TX_ROLES.delete(client);
+    ACTIVE_TX_ACTORS.delete(client);
+    ACTIVE_TX_SCOPES.delete(client);
     client.release();
   }
 }
@@ -1000,6 +1090,7 @@ export async function recordBookingInPostgres(params: {
         ]
       );
       const clientId = cliRes.rows[0].id;
+      await setPublicFlowScopedGucs(client, { clientId });
 
       const styRes = await client.query<{ id: string }>(
         `SELECT id
