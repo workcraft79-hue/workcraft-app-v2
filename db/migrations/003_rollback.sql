@@ -397,6 +397,13 @@ BEGIN
       ADD CONSTRAINT salons_default_lang_check
       CHECK (default_lang IN ('en', 'roman_ur', 'ur', 'ar'));
   END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'salons' AND column_name = 'grace_overage_limit'
+  ) THEN
+    ALTER TABLE salons ALTER COLUMN grace_overage_limit SET DEFAULT 50;
+  END IF;
 END $$;
 
 COMMIT;
