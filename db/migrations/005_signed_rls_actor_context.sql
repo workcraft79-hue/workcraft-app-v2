@@ -3,6 +3,8 @@
 -- Until an active key is provisioned and PG_ACTOR_CONTEXT_SECRET is configured in the
 -- trusted server runtime, the verifier returns NULL and RLS identity helpers fail closed.
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
 CREATE SCHEMA IF NOT EXISTS workcraft_private;
 REVOKE ALL ON SCHEMA workcraft_private FROM PUBLIC;
 
