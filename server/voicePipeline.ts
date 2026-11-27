@@ -1,6 +1,12 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
-import type { VoiceDialect } from '../src/types/voice.js';
+
+export type VoiceDialect =
+  | 'Roman Urdu (Lahori)'
+  | 'Standard Urdu'
+  | 'Lahori Punjabi'
+  | 'Gulf Arabic'
+  | 'English';
 
 export interface VoicePipelineInput {
   audioBase64?: string;
