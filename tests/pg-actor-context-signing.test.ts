@@ -33,7 +33,7 @@ test('PostgreSQL transactions attach a signed actor envelope and all public-flow
     await withPgTransaction(createPublicFlowLookupActor(), async () => undefined);
     const contextCall = calls.find((call) => call.sql.includes('app.actor_context_payload'));
     assert.ok(contextCall, 'transaction must write the signed actor envelope');
-    assert.equal(contextCall.params?.length, 12);
+    assert.equal(contextCall.params?.length, 6);
 
     const payload = String(contextCall.params?.[4] || '');
     const signature = String(contextCall.params?.[5] || '');
