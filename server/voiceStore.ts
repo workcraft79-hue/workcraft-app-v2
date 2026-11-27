@@ -1,11 +1,59 @@
 import fs from 'fs';
 import path from 'path';
-import type {
-  SystemUsageCostSnapshot,
-  VoiceDialect,
-  VoiceReplyRecord,
-  VoiceThreadItem,
-} from '../src/types/voice.js';
+import type { VoiceDialect } from './voicePipeline.js';
+
+export type { VoiceDialect };
+
+export interface VoiceReplyRecord {
+  id: string;
+  senderRole: 'FOUNDER' | 'SALON_OWNER';
+  originalText: string;
+  translatedText: string;
+  targetDialect: VoiceDialect;
+  targetVoice: string;
+  detectedInputLanguage: string;
+  audioDataUrl?: string;
+  audioBytes?: number;
+  createdAt: string;
+  timeLabel: string;
+}
+
+export interface VoiceThreadItem {
+  id: string;
+  serial: string;
+  salonId: string;
+  ownerName: string;
+  salonName: string;
+  city: string;
+  duration: string;
+  receivedAgo: string;
+  dialect: VoiceDialect;
+  speechLangCode: 'ur-PK' | 'ar-AE' | 'en-US';
+  incomingTranscript: string;
+  incomingAudioDataUrl?: string;
+  audioBytes: number;
+  unread: boolean;
+  createdAt: string;
+  replies: VoiceReplyRecord[];
+}
+
+export interface SystemUsageCostSnapshot {
+  monthlySoftwareCostUsd: number;
+  storageUsedKb: number;
+  storageQuotaMb: number;
+  storageUsagePct: number;
+  activeVoiceClips: number;
+  expiredClipsPurged: number;
+  retentionDays: number;
+  geminiFreeTierCallsToday: number;
+  geminiFreeTierDailyLimit: number;
+  ttsProvider: string;
+  whatsappHealth: 'HEALTHY' | 'ISSUE';
+  alertThresholdPct: number;
+  isNearFreeLimit: boolean;
+  lastCleanupAt: string;
+  autoAlertNote: string;
+}
 
 const DATA_DIR = path.resolve(process.cwd(), '.data');
 const VOICE_STORE_FILE = path.join(DATA_DIR, 'voice-store.json');
