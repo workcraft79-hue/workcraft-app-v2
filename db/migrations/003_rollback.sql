@@ -210,6 +210,44 @@ DROP FUNCTION IF EXISTS public.get_public_stylist_busy_blocks(TEXT, TIMESTAMPTZ,
 DROP FUNCTION IF EXISTS public.upsert_public_booking_client(TEXT, TEXT, TEXT, TEXT, TEXT) RESTRICT;
 DROP FUNCTION IF EXISTS public.increment_salon_monthly_booking_usage(TEXT, UUID, TEXT) RESTRICT;
 
+-- Guarded removal of 003 policies that depend on the six 003 GUC helper functions
+-- before dropping those functions (including counter_notifications, dropped in Section 5)
+DO $$
+BEGIN
+  IF to_regclass('public.booking_access_tokens') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS booking_access_tokens_public_flow_insert ON public.booking_access_tokens';
+    EXECUTE 'DROP POLICY IF EXISTS booking_access_tokens_public_flow_select ON public.booking_access_tokens';
+    EXECUTE 'DROP POLICY IF EXISTS booking_access_tokens_public_flow_update ON public.booking_access_tokens';
+  END IF;
+
+  IF to_regclass('public.booking_audit_log') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS booking_audit_log_public_flow_insert ON public.booking_audit_log';
+  END IF;
+
+  IF to_regclass('public.bookings') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS bookings_public_flow_insert ON public.bookings';
+    EXECUTE 'DROP POLICY IF EXISTS bookings_public_flow_select ON public.bookings';
+    EXECUTE 'DROP POLICY IF EXISTS bookings_public_flow_update ON public.bookings';
+  END IF;
+
+  IF to_regclass('public.counter_notifications') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS counter_notifications_public_flow_insert ON public.counter_notifications';
+  END IF;
+
+  IF to_regclass('public.auth_challenges') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS auth_challenges_public_client_select ON public.auth_challenges';
+    EXECUTE 'DROP POLICY IF EXISTS auth_challenges_public_client_update ON public.auth_challenges';
+  END IF;
+
+  IF to_regclass('public.clients') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS clients_public_flow_select ON public.clients';
+  END IF;
+
+  IF to_regclass('public.salons') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS salons_public_lookup ON public.salons';
+  END IF;
+END $$;
+
 DROP FUNCTION IF EXISTS public.current_workcraft_public_code() RESTRICT;
 DROP FUNCTION IF EXISTS public.current_workcraft_challenge_id() RESTRICT;
 DROP FUNCTION IF EXISTS public.current_workcraft_token_hash() RESTRICT;
