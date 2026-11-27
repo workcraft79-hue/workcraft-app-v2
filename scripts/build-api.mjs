@@ -8,7 +8,6 @@ fs.mkdirSync(outDir, { recursive: true });
 
 const targets = [
   { entry: 'server/vercelIndex.ts', outfile: 'api/index.mjs' },
-  { entry: 'server/vercelTranslateVoice.ts', outfile: 'api/translate-voice.mjs' },
 ];
 
 for (const { entry, outfile } of targets) {
