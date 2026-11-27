@@ -1855,7 +1855,8 @@ test('7 & 8. Cross-tenant access and missing/invalid identities fail closed acro
     );
     assert.equal(spoofRes.status, 200);
     const setCfg = mock.queries.find((q) => q.text.includes("set_config('app.current_user_role'"));
-    assert.deepEqual(setCfg?.params, ['SALON_OWNER', '1', '', 'usr-owner-1']);
+    assert.deepEqual(setCfg?.params?.slice(0, 4), ['SALON_OWNER', '1', '', 'usr-owner-1']);
+    assert.match(String(setCfg?.params?.[5]), /^[0-9a-f]{64}$/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
