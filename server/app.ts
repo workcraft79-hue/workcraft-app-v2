@@ -986,54 +986,76 @@ export function createApiApp(port = 3000): express.Express {
     }
   });
 
-  app.post('/api/translate-voice', requireAuth, async (req, res) => {
-    try {
-      const rawText = sanitizePlainText(req.body?.text, 1000);
-      const audioBase64 = typeof req.body?.audioBase64 === 'string' ? req.body.audioBase64.trim() : '';
-      const audioMimeType =
-        typeof req.body?.audioMimeType === 'string'
-          ? sanitizePlainText(req.body.audioMimeType, 80)
-          : 'audio/webm;codecs=opus';
-      const targetLocaleRaw = sanitizePlainText(req.body?.targetLocale, 20);
-      const targetDialectRaw = sanitizePlainText(req.body?.targetDialect, 60);
+  app.post(
+    '/api/translate-voice',
+    requireAuth,
+    requireRole('FOUNDER', 'SALON_OWNER'),
+    async (req: AuthenticatedRequest, res) => {
+      try {
+        const user = req.authUser!;
+        const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
+        const rl = await enforceRateLimit(`voice:translate:${user.userId}:${ipKey}`, 30, 300, {
+          failClosedInProd: true,
+        });
+        if (rl.unavailable) {
+          return res.status(503).json({
+            error: 'Voice translation rate limiter unavailable.',
+          });
+        }
+        if (!rl.allowed) {
+          res.setHeader('Retry-After', String(rl.retryAfterSec));
+          return res.status(429).json({
+            error: `Too many voice translation requests. Retry after ${rl.retryAfterSec}s.`,
+          });
+        }
 
-      if (!rawText && !audioBase64) {
-        return res.status(400).json({ error: 'Compressed audio recording or message text is required.' });
-      }
-      if (audioBase64.length > 3 * 1024 * 1024) {
-        return res.status(413).json({ error: 'Compressed voice note exceeds size limit.' });
-      }
+        const rawText = sanitizePlainText(req.body?.text, 1000);
+        const audioBase64 = typeof req.body?.audioBase64 === 'string' ? req.body.audioBase64.trim() : '';
+        const audioMimeType =
+          typeof req.body?.audioMimeType === 'string'
+            ? sanitizePlainText(req.body.audioMimeType, 80)
+            : 'audio/webm;codecs=opus';
+        const targetLocaleRaw = sanitizePlainText(req.body?.targetLocale, 20);
+        const targetDialectRaw = sanitizePlainText(req.body?.targetDialect, 60);
 
-      const result = await translateAndSynthesizeVoice({
-        audioBase64,
-        audioMimeType,
-        text: rawText,
-        targetLocale: targetLocaleRaw || undefined,
-        targetDialect: targetDialectRaw || undefined,
-      });
+        if (!rawText && !audioBase64) {
+          return res.status(400).json({ error: 'Compressed audio recording or message text is required.' });
+        }
+        if (audioBase64.length > 3 * 1024 * 1024) {
+          return res.status(413).json({ error: 'Compressed voice note exceeds size limit.' });
+        }
 
-      const usage = recordAiVoiceApiUsage(
-        result.translationSource !== 'error',
-        result.ttsSource !== 'unavailable'
-      );
+        const result = await translateAndSynthesizeVoice({
+          audioBase64,
+          audioMimeType,
+          text: rawText,
+          targetLocale: targetLocaleRaw || undefined,
+          targetDialect: targetDialectRaw || undefined,
+        });
 
-      if (result.translationSource === 'error') {
-        return res.status(503).json({
+        const usage = recordAiVoiceApiUsage(
+          result.translationSource !== 'error',
+          result.ttsSource !== 'unavailable'
+        );
+
+        if (result.translationSource === 'error') {
+          return res.status(503).json({
+            ...result,
+            error: result.translationError || 'Voice translation failed.',
+            usage,
+          });
+        }
+
+        return res.json({
           ...result,
-          error: result.translationError || 'Voice translation failed.',
           usage,
         });
+      } catch (err) {
+        console.error('Voice translation & TTS route error:', err);
+        return res.status(500).json({ error: 'Voice translation failed.' });
       }
-
-      return res.json({
-        ...result,
-        usage,
-      });
-    } catch (err) {
-      console.error('Voice translation & TTS route error:', err);
-      return res.status(500).json({ error: 'Voice translation failed.' });
     }
-  });
+  );
 
   // Zero-quota natural human voice neural TTS endpoint for Salon Owner Dashboard hands-free alerts
   app.post('/api/voice/tts', requireAuth, async (req, res) => {
@@ -2885,6 +2907,27 @@ export function createApiApp(port = 3000): express.Express {
       res: express.Response,
       _next: express.NextFunction
     ) => {
+      const bodyErr = err as { status?: number; statusCode?: number; type?: string };
+      if (
+        bodyErr?.type === 'entity.too.large' ||
+        bodyErr?.status === 413 ||
+        bodyErr?.statusCode === 413
+      ) {
+        if (!res.headersSent) {
+          return res.status(413).json({ error: 'Request payload exceeds size limit.' });
+        }
+        return;
+      }
+      if (
+        bodyErr?.type === 'entity.parse.failed' ||
+        bodyErr?.status === 400 ||
+        bodyErr?.statusCode === 400
+      ) {
+        if (!res.headersSent) {
+          return res.status(400).json({ error: 'Invalid JSON request body.' });
+        }
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err || 'Unhandled API exception');
       const incident = recordIncidentReport({
         role: 'SYSTEM',
