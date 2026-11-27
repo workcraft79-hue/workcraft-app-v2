@@ -15,9 +15,54 @@
 import crypto from 'crypto';
 import { Pool, type PoolClient } from 'pg';
 import type { AuthUser } from '../src/types/auth.js';
+import type { ClientPreferredLang } from '../src/types/concierge.js';
 import { PgContextError, type PgContextErrorCode } from './pgContextError.js';
 
 export { PgContextError, type PgContextErrorCode };
+
+const SUPPORTED_CLIENT_LANGS = new Set<ClientPreferredLang>([
+  'en',
+  'roman_ur',
+  'ur',
+  'ar',
+  'it',
+  'ru',
+  'fr',
+  'de',
+  'es',
+]);
+
+export function normalizeClientPreferredLang(
+  value: unknown,
+  fallback: ClientPreferredLang = 'en'
+): ClientPreferredLang {
+  if (typeof value === 'string' && SUPPORTED_CLIENT_LANGS.has(value as ClientPreferredLang)) {
+    return value as ClientPreferredLang;
+  }
+  return fallback;
+}
+
+export function normalizeEnabledClientLangs(
+  values: unknown,
+  fallback: ClientPreferredLang[] = ['en', 'roman_ur', 'ur']
+): ClientPreferredLang[] {
+  if (!Array.isArray(values)) {
+    return [...fallback];
+  }
+  const filtered: ClientPreferredLang[] = [];
+  const seen = new Set<ClientPreferredLang>();
+  for (const item of values) {
+    if (
+      typeof item === 'string' &&
+      SUPPORTED_CLIENT_LANGS.has(item as ClientPreferredLang) &&
+      !seen.has(item as ClientPreferredLang)
+    ) {
+      seen.add(item as ClientPreferredLang);
+      filtered.push(item as ClientPreferredLang);
+    }
+  }
+  return filtered;
+}
 
 declare global {
   var _workcraftPgPool: Pool | undefined;
@@ -496,8 +541,8 @@ export interface PostgresSalonLookupRow {
   timezoneOffsetHours: number;
   currencyCode: string;
   currencySymbol: string;
-  defaultLang: 'en' | 'roman_ur' | 'ur' | 'ar';
-  enabledLangs: Array<'en' | 'roman_ur' | 'ur' | 'ar'>;
+  defaultLang: ClientPreferredLang;
+  enabledLangs: ClientPreferredLang[];
   planTier: string;
   monthlyLimit: number;
   billingStatus: string;
@@ -567,10 +612,10 @@ export async function persistPostgresSnapshotMirror(
         : 'PENDING_ACTIVATION'
       : 'PENDING_ACTIVATION';
 
-  const enabledLangs =
-    Array.isArray(params.enabledLangs) && params.enabledLangs.length > 0
-      ? params.enabledLangs
-      : ['en', 'roman_ur', 'ur'];
+  const defaultLang = normalizeClientPreferredLang(params.defaultLang, 'en');
+  const normalizedEnabledLangs = normalizeEnabledClientLangs(params.enabledLangs);
+  const enabledLangs: ClientPreferredLang[] =
+    normalizedEnabledLangs.length > 0 ? normalizedEnabledLangs : ['en', 'roman_ur', 'ur'];
 
   try {
     await withPgTransaction(actor, async (client) => {
@@ -625,7 +670,7 @@ export async function persistPostgresSnapshotMirror(
             Number.isFinite(params.timezoneOffsetHours) ? params.timezoneOffsetHours : 5,
             params.currencyCode,
             params.currencySymbol,
-            params.defaultLang || 'en',
+            defaultLang,
             enabledLangs,
             packageTier,
             params.monthlyLimit,
@@ -671,7 +716,7 @@ export async function persistPostgresSnapshotMirror(
             Number.isFinite(params.timezoneOffsetHours) ? params.timezoneOffsetHours : 5,
             params.currencyCode,
             params.currencySymbol,
-            params.defaultLang || 'en',
+            defaultLang,
             enabledLangs,
             'STARTER',
             750,
@@ -731,7 +776,7 @@ export async function persistPostgresSnapshotMirror(
           Number.isFinite(params.timezoneOffsetHours) ? params.timezoneOffsetHours : 5,
           params.currencyCode,
           params.currencySymbol,
-          params.defaultLang || 'en',
+          defaultLang,
           enabledLangs,
           'STARTER',
           750,
@@ -827,16 +872,10 @@ export async function findSalonByPublicCodeInPostgres(
       );
       if (res.rows.length === 0) return null;
       const row = res.rows[0];
-      const defaultLang =
-        row.default_lang === 'roman_ur' || row.default_lang === 'ur' || row.default_lang === 'ar'
-          ? row.default_lang
-          : 'en';
+      const defaultLang = normalizeClientPreferredLang(row.default_lang, 'en');
       const enabledLangs = Array.isArray(row.enabled_langs)
-        ? row.enabled_langs.filter(
-            (l): l is 'en' | 'roman_ur' | 'ur' | 'ar' =>
-              l === 'en' || l === 'roman_ur' || l === 'ur' || l === 'ar'
-          )
-        : (['en', 'roman_ur', 'ur'] as Array<'en' | 'roman_ur' | 'ur' | 'ar'>);
+        ? normalizeEnabledClientLangs(row.enabled_langs)
+        : (['en', 'roman_ur', 'ur'] as ClientPreferredLang[]);
       return {
         id: row.id,
         publicCode: row.public_code,
@@ -1294,14 +1333,16 @@ function mapRawBookingRow(row: RawJoinedBookingRow): PgBookingRecord {
     whatsappPhone: row.whatsapp_phone || '',
     timezoneOffsetHours: Number(row.timezone_offset_hours ?? 5),
     currencySymbol: row.currency_symbol || 'PKR ',
-    defaultLang: row.default_lang || 'en',
+    defaultLang: normalizeClientPreferredLang(row.default_lang, 'en'),
     address: row.address || '',
     googleMapsUrl: row.google_maps_url || '',
     googleReviewUrl: row.google_review_url || '',
     clientId: row.client_id,
     clientName: row.client_name,
     clientPhone: row.client_phone,
-    preferredLanguage: row.preferred_language,
+    preferredLanguage: row.preferred_language
+      ? normalizeClientPreferredLang(row.preferred_language, 'en')
+      : null,
     stylistId: row.stylist_id,
     stylistName: row.stylist_name,
     bookingRef: row.booking_ref,
