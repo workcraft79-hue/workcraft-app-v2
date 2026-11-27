@@ -177,3 +177,25 @@ RETURNS text LANGUAGE sql VOLATILE
 AS $function$
   SELECT COALESCE(public.current_workcraft_actor_claims()->>'challengeId', '');
 $function$;
+
+-- The two public booking SECURITY DEFINER RPCs rely on their trusted owner bypassing
+-- table RLS after validating the signed caller identity and tenant scope themselves.
+DO $assert$
+DECLARE
+  v_untrusted_owners text;
+BEGIN
+  SELECT pg_catalog.string_agg(p.proname, ', ')
+    INTO v_untrusted_owners
+  FROM pg_catalog.pg_proc p
+  JOIN pg_catalog.pg_roles r ON r.oid = p.proowner
+  WHERE p.oid IN (
+    pg_catalog.to_regprocedure('public.increment_salon_monthly_booking_usage(text, uuid, text)'),
+    pg_catalog.to_regprocedure('public.upsert_public_booking_client(text, text, text, text, text)')
+  )
+    AND (r.rolsuper IS NOT TRUE AND r.rolbypassrls IS NOT TRUE);
+
+  IF v_untrusted_owners IS NOT NULL THEN
+    RAISE EXCEPTION 'RLS hardening requires trusted BYPASSRLS ownership for SECURITY DEFINER RPCs: %', v_untrusted_owners;
+  END IF;
+END;
+$assert$;
