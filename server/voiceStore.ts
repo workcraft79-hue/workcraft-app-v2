@@ -5,7 +5,7 @@ import type {
   VoiceDialect,
   VoiceReplyRecord,
   VoiceThreadItem,
-} from '../src/types/voice';
+} from '../src/types/voice.js';
 
 const DATA_DIR = path.resolve(process.cwd(), '.data');
 const VOICE_STORE_FILE = path.join(DATA_DIR, 'voice-store.json');
@@ -272,9 +272,11 @@ export function purgeExpiredVoiceClips(): {
     persistStore();
   }
 
-  const activeClipsCount = store.threads.reduce((acc, t) => {
+  const activeClipsCount = store.threads.reduce((acc: number, t: VoiceThreadItem) => {
     const hasIncoming = t.audioBytes > 0 || Boolean(t.incomingAudioDataUrl) ? 1 : 0;
-    const replyClips = t.replies.filter((r) => Boolean(r.audioDataUrl) || (r.audioBytes || 0) > 0).length;
+    const replyClips = t.replies.filter(
+      (r: VoiceReplyRecord) => Boolean(r.audioDataUrl) || (r.audioBytes || 0) > 0
+    ).length;
     return acc + hasIncoming + replyClips;
   }, 0);
 
@@ -299,8 +301,11 @@ function getDataDirectoryBytes(): number {
 export function getSystemUsageCostSnapshot(): SystemUsageCostSnapshot {
   const store = ensureStoreLoaded();
   const { activeClipsCount } = purgeExpiredVoiceClips();
-  const voiceBytes = store.threads.reduce((sum, t) => {
-    const repBytes = t.replies.reduce((rSum, r) => rSum + (r.audioBytes || 0), 0);
+  const voiceBytes = store.threads.reduce((sum: number, t: VoiceThreadItem) => {
+    const repBytes = t.replies.reduce(
+      (rSum: number, r: VoiceReplyRecord) => rSum + (r.audioBytes || 0),
+      0
+    );
     return sum + (t.audioBytes || 0) + repBytes;
   }, 0);
   const diskBytes = getDataDirectoryBytes();
