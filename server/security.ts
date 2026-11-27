@@ -742,7 +742,7 @@ export function verifySessionToken(token: string): AuthUser | null {
     if (!claims.sub || !claims.user_role || !claims.exp || claims.exp < nowSec) {
       return null;
     }
-    if (typeof claims.sv === 'number' && claims.sv !== currentSessionVersion) {
+    if (!Number.isInteger(claims.sv) || claims.sv !== currentSessionVersion) {
       return null;
     }
 
