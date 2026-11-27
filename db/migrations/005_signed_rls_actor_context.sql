@@ -45,7 +45,7 @@ BEGIN
   END IF;
 
   v_claims := v_payload::jsonb;
-  IF jsonb_typeof(v_claims) <> 'object' OR v_claims->>'v' <> '1'
+  IF jsonb_typeof(v_claims) <> 'object' OR v_claims->>'v' IS DISTINCT FROM '1'
      OR NULLIF(v_claims->>'kid', '') IS NULL
      OR (v_claims->>'iat') !~ '^[0-9]{1,12}$'
      OR (v_claims->>'exp') !~ '^[0-9]{1,12}$'
@@ -55,7 +55,7 @@ BEGIN
 
   v_iat := (v_claims->>'iat')::bigint;
   v_exp := (v_claims->>'exp')::bigint;
-  v_now := pg_catalog.floor(pg_catalog.extract(epoch FROM pg_catalog.clock_timestamp()))::bigint;
+  v_now := pg_catalog.floor(extract(epoch FROM pg_catalog.clock_timestamp()))::bigint;
 
   IF v_iat > v_now + 30 OR v_exp <= v_now OR v_exp <= v_iat OR v_exp - v_iat > 900 THEN
     RETURN NULL;
