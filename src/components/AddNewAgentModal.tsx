@@ -62,9 +62,9 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
   onOpenRemoteEnrollment,
 }) => {
   const [agentName, setAgentName] = useState('');
-  const [agentPhone, setAgentPhone] = useState('+92 302 7819203');
+  const [agentPhone, setAgentPhone] = useState('');
   const [agentCountry, setAgentCountry] = useState('Pakistan');
-  const [agentCity, setAgentCity] = useState('Karachi South');
+  const [agentCity, setAgentCity] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dispatchedSuccess, setDispatchedSuccess] = useState(false);
   const [mintedEnrollUrl, setMintedEnrollUrl] = useState<string | null>(null);
