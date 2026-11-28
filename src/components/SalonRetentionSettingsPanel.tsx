@@ -676,14 +676,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
               <ExternalLink className="size-3.5" />
               <span>Open Booking Page</span>
             </a>
-            <button
-              type="button"
-              onClick={() => setIsLiveDemoOpen(true)}
-              className="min-h-[46px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-4 py-2 text-xs font-mono font-black uppercase tracking-wide inline-flex items-center gap-2 shadow-lg transition active:scale-95"
-            >
-              <MessageSquare className="size-4" />
-              <span>Meta Add-On Preview</span>
-            </button>
+            
           </div>
         </div>
 
@@ -2047,12 +2040,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
         )}
       </section>
 
-      <CustomerWhatsAppDemoModal
-        salonId={salonId}
-        salonPublicCode={conciergeState.publicCode}
-        isOpen={isLiveDemoOpen}
-        onClose={() => setIsLiveDemoOpen(false)}
-      />
+
     </div>
   );
 };
