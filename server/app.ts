@@ -9,13 +9,11 @@ import {
   addStylistLeave,
   addWalkInQueueItem,
   cancelBookingByAccessToken,
-  canSendMetaMessage,
   completeAppointmentAndRecordVisit,
   consumeServicePackageSession,
   createCustomerFlowBooking,
   createSalonDeal,
   deleteSalonDeal,
-  findSalonIdByMetaPhoneNumberId,
   getAvailableSlotsAndBarbers,
   getBookingByAccessToken,
   getCustomerExperienceConfig,
@@ -23,12 +21,9 @@ import {
   getMonthlyUsageSnapshot,
   getPublicDealPayload,
   getSalonConciergeState,
-  handleCustomerWhatsAppAction,
   hydrateConciergeStoreFromKv,
   listSalonDeals,
   listSalonsForAgent,
-  processWhatsAppWebhook,
-  recordMetaMessageSent,
   removeChairLock,
   removeStylistLeave,
   rescheduleAppointmentByOwner,
@@ -1638,36 +1633,12 @@ export function createApiApp(port = 3000): express.Express {
   });
 
   // Authenticated In-App Concierge Simulator & Manual Cron Proxy (zero webhook secret in browser JS)
-  app.post(
-    '/api/salons/:salonId/concierge/simulate',
-    requireAuth,
-    requireSalonTenantAccess(false),
-    (req, res) => {
-      try {
-        const { salonId } = req.params;
-        const { fromPhone, messageText, clientName, appointmentIdForReview, forceLanguagePrompt } =
-          req.body || {};
-        if (!fromPhone || typeof messageText !== 'string') {
-          return res.status(400).json({ error: 'fromPhone and messageText are required.' });
-        }
-        const outcome = processWhatsAppWebhook({
-          salonId,
-          fromPhone: sanitizePlainText(String(fromPhone), 24),
-          messageText: sanitizePlainText(messageText, 500),
-          clientName: typeof clientName === 'string' ? sanitizePlainText(clientName, 80) : undefined,
-          appointmentIdForReview:
-            typeof appointmentIdForReview === 'string'
-              ? sanitizePlainText(appointmentIdForReview, 60)
-              : undefined,
-          forceLanguagePrompt: Boolean(forceLanguagePrompt),
-        });
-        return res.json(outcome);
-      } catch (err) {
-        console.error('Authenticated concierge simulation error:', err);
-        return res.status(500).json({ error: 'Simulation failed.' });
-      }
-    }
-  );
+  // Retired WhatsApp webhook simulator. Booking events are now surfaced from the PostgreSQL booking ledger.
+  app.post('/api/salons/:salonId/concierge/simulate', requireAuth, requireSalonTenantAccess(false), (_req, res) => {
+    return res.status(410).json({
+      error: 'WhatsApp simulation is retired. Use the browser booking and in-dashboard booking queue.',
+    });
+  });
 
   // ===========================================================================
   // WEB-FIRST PUBLIC CUSTOMER BOOKING, RETURNING TOKEN/COOKIE, DEALS & /b/:token
@@ -1752,48 +1723,11 @@ export function createApiApp(port = 3000): express.Express {
     }
   });
 
-  app.post('/api/public/salons/:salonCode/customer-message', async (req, res) => {
-    try {
-      const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
-      const rl = await enforceRateLimit(`pub:msg:${ipKey}`, 60, 60);
-      if (!rl.allowed) {
-        return res.status(429).json({ error: 'Too many requests. Please wait a moment.' });
-      }
-
-      const salonCode = sanitizePlainText(req.params.salonCode, 60);
-      const salonId = await resolveSalonIdByPublicCodeAsync(salonCode);
-      if (!salonId) {
-        return res.status(404).json({ error: 'Salon booking link not found.' });
-      }
-
-      const body = req.body || {};
-      const preferredLang: ClientPreferredLang | undefined =
-        typeof body.preferredLang === 'string'
-          ? sanitizeClientLang(body.preferredLang)
-          : undefined;
-      const actionId =
-        body.actionId === 'WELCOME' ||
-        body.actionId === 'BOOK_APPOINTMENT' ||
-        body.actionId === 'SERVICES_PRICES' ||
-        body.actionId === 'HOURS_LOCATION' ||
-        body.actionId === 'CURRENT_DEALS'
-          ? body.actionId
-          : undefined;
-
-      const outcome = handleCustomerWhatsAppAction({
-        salonId,
-        fromPhone: typeof body.fromPhone === 'string' ? body.fromPhone : undefined,
-        messageText: typeof body.messageText === 'string' ? body.messageText : 'Hi',
-        actionId,
-        preferredLang,
-        clientName: typeof body.clientName === 'string' ? body.clientName : undefined,
-        isDemo: body.isDemo !== false,
-      });
-      return res.json(outcome);
-    } catch (err) {
-      console.error('Customer message handler error:', err);
-      return res.status(500).json({ error: 'Failed to handle customer message.' });
-    }
+  // Retired legacy WhatsApp concierge action endpoint. Customer interaction now stays in the browser.
+  app.post('/api/public/salons/:salonCode/customer-message', (_req, res) => {
+    return res.status(410).json({
+      error: 'This messaging endpoint has been retired. Use the salon browser booking and booking-management pages.',
+    });
   });
 
   app.get('/api/public/salons/:salonCode/availability', async (req, res) => {
@@ -2066,108 +2000,12 @@ export function createApiApp(port = 3000): express.Express {
     }
   );
 
-  // Optional Paid Add-On: Official Meta WhatsApp Cloud API Webhook (strictly disabled unless salon enables add-on + matches phone_number_id)
-  app.get('/api/whatsapp/meta-webhook', (req, res) => {
-    const mode = req.query['hub.mode'];
-    const token = req.query['hub.verify_token'];
-    const challenge = req.query['hub.challenge'];
-    const expectedToken = (process.env.WHATSAPP_VERIFY_TOKEN || '').trim();
-    if (mode === 'subscribe' && expectedToken && token === expectedToken) {
-      return res.status(200).send(String(challenge || ''));
-    }
-    return res.status(403).json({
-      error: 'Meta WhatsApp webhook verification token mismatch or WHATSAPP_VERIFY_TOKEN not configured.',
-    });
+  // Retired Meta WhatsApp webhook. Customer bookings and owner updates are browser-first.
+  app.get('/api/whatsapp/meta-webhook', (_req, res) => {
+    return res.status(410).json({ error: 'WhatsApp webhook integration has been retired.' });
   });
-
-  app.post('/api/whatsapp/meta-webhook', async (req, res) => {
-    const appSecret = (process.env.WHATSAPP_APP_SECRET || '').trim();
-    if (appSecret) {
-      const sigHeader = req.header('x-hub-signature-256') || '';
-      const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody;
-      if (!rawBody || !sigHeader.startsWith('sha256=')) {
-        return res.status(401).json({ error: 'Missing Meta webhook signature.' });
-      }
-      const expectedSig =
-        'sha256=' + crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
-      if (sigHeader !== expectedSig) {
-        return res.status(401).json({ error: 'Invalid Meta webhook signature.' });
-      }
-    }
-
-    try {
-      const entry = req.body?.entry?.[0]?.changes?.[0]?.value;
-      const msg = entry?.messages?.[0];
-      const contact = entry?.contacts?.[0];
-      if (!msg) {
-        return res.status(200).json({ ok: true, ignored: true });
-      }
-      const inboundPhoneNumberId = String(entry?.metadata?.phone_number_id || '').trim();
-      const matchedSalonId = findSalonIdByMetaPhoneNumberId(inboundPhoneNumberId);
-      if (!matchedSalonId) {
-        return res.status(200).json({
-          ok: true,
-          ignored: true,
-          reason: 'whatsapp_addon_disabled_or_unmapped_phone_number_id',
-        });
-      }
-
-      const fromPhone = String(msg.from || '');
-      const textBody =
-        msg.text?.body ||
-        msg.interactive?.button_reply?.id ||
-        msg.interactive?.list_reply?.id ||
-        'Hi';
-      const outcome = processWhatsAppWebhook({
-        salonId: matchedSalonId,
-        fromPhone,
-        messageText: String(textBody),
-        clientName: contact?.profile?.name,
-      });
-
-      const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || '').trim();
-      const phoneNumberId =
-        inboundPhoneNumberId || (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
-      let sentViaMeta = false;
-      let metaCapBlocked = false;
-      if (accessToken && phoneNumberId && fromPhone) {
-        const capCheck = canSendMetaMessage(matchedSalonId);
-        if (!capCheck.allowed) {
-          metaCapBlocked = true;
-        } else {
-          const metaRes = await fetch(
-            `https://graph.facebook.com/v20.0/${encodeURIComponent(phoneNumberId)}/messages`,
-            {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                messaging_product: 'whatsapp',
-                to: fromPhone,
-                type: 'text',
-                text: { body: outcome.replyText },
-              }),
-            }
-          );
-          sentViaMeta = metaRes.ok;
-          if (sentViaMeta) {
-            recordMetaMessageSent(matchedSalonId);
-          }
-        }
-      }
-
-      return res.status(200).json({
-        ok: true,
-        sentViaMeta,
-        ...(metaCapBlocked ? { reason: 'meta_monthly_cap_1000_reached' } : {}),
-        routedAction: outcome.routedAction,
-      });
-    } catch (err) {
-      console.error('Meta WhatsApp webhook processing error:', err);
-      return res.status(200).json({ ok: false });
-    }
+  app.post('/api/whatsapp/meta-webhook', (_req, res) => {
+    return res.status(410).json({ error: 'WhatsApp webhook integration has been retired.' });
   });
 
   // Salon Owner Monthly Usage Meter, Stylist Leaves & Booking Status Mutations
