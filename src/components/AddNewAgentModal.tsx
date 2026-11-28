@@ -105,8 +105,8 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
 
   const resolvedCountryName = agentCountry.trim() || detectedCountry.name;
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://workcraft-app.vercel.app';
-  const previewEnrollUrl =
-    mintedEnrollUrl || `${origin}/enroll/agent?token=single-use-${generatedId.toLowerCase()}`;
+  // Never display or copy a fabricated invite. A link exists only after the server mints it.
+  const previewEnrollUrl = mintedEnrollUrl || '';
 
   const isWesternGreeting =
     detectedCountry.region === 'EUROPE' ||
@@ -139,7 +139,7 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
     setIsSubmitting(true);
 
     let resolvedId = generatedId;
-    let resolvedEnrollUrl = `${origin}/enroll/agent?token=single-use-${generatedId.toLowerCase()}`;
+    let resolvedEnrollUrl = '';
 
     try {
       const res = await fetch('/api/founder/agent-invites', {
@@ -154,19 +154,19 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
           countryName: resolvedCountryName,
         }),
       });
-      if (res.ok) {
-        const data = (await res.json()) as {
-          agentId?: string;
-          enrollPath?: string;
-          token?: string;
-        };
-        if (data.agentId) resolvedId = data.agentId;
-        if (data.enrollPath) {
-          resolvedEnrollUrl = `${origin}${data.enrollPath}`;
-        }
+      const data = (await res.json().catch(() => ({}))) as {
+        agentId?: string; enrollPath?: string; token?: string; error?: string;
+      };
+      if (!res.ok) throw new Error(data.error || `Invitation request failed (HTTP ${res.status}).`);
+      if (!data.token || !data.enrollPath || !data.enrollPath.startsWith('/enroll/agent?token=')) {
+        throw new Error('The server did not return a valid single-use invitation.');
       }
-    } catch {
-      // Fallback preview link if offline
+      if (data.agentId) resolvedId = data.agentId;
+      resolvedEnrollUrl = `${origin}${data.enrollPath}`;
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Could not create the invitation. Please try again.');
+      setIsSubmitting(false);
+      return;
     }
 
     setGeneratedId(resolvedId);
@@ -237,7 +237,7 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
               </div>
               <div className="space-y-1">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-[#3FB950] font-bold">
-                  SINGLE-USE INVITE LINK DISPATCHED
+                  SINGLE-USE INVITATION CREATED
                 </span>
                 <h4 className="text-lg font-bold text-[#F0F6FC]">
                   Field Agent Invitation Ready!
@@ -285,6 +285,15 @@ export const AddNewAgentModal: React.FC<AddNewAgentModalProps> = ({
             </div>
 
             <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              <a
+                href={`https://wa.me/${agentPhone.replace(/\D/g, '')}?text=${encodeURIComponent(whatsappMessage)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 min-h-[48px] rounded-xl bg-[#0D3822] border border-[#116329] hover:border-[#3FB950] text-[#3FB950] px-4 py-3 text-xs font-mono font-bold uppercase transition active:scale-95 flex items-center justify-center gap-1.5"
+              >
+                <Send className="size-4" />
+                <span>Open WhatsApp Chat</span>
+              </a>
               {onOpenRemoteEnrollment && (
                 <button
                   type="button"
