@@ -3501,94 +3501,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     setTimeout(() => setMaintToast(null), 8000);
   };
 
-  // Live Queue State (scheduledEndMs set in near future so initial slots stay active until 15m post-end)
-  const [bookings, setBookings] = useState<BookingRecord[]>(() => {
-    const now = Date.now();
-    return [
-      {
-        id: 'BK-101',
-        clientName: 'Bilal Ahmed',
-        barberName: 'Master Aslam',
-        phone: '+92 300 1234567',
-        service: 'Master Haircut & Skin Fade',
-        price: 1200,
-        timeSlot: '03:30 PM',
-        durationMins: 40,
-        scheduledEndMs: now + 45 * 60 * 1000,
-        sourceType: 'WHATSAPP_BOT',
-        status: 'CONFIRMED',
-      },
-      {
-        id: 'BK-102',
-        clientName: 'Hamza Malik',
-        barberName: 'Tariq Mehmood',
-        phone: '+92 321 9876543',
-        service: 'Royal Beard Sculpt & Ozone Steam',
-        price: 800,
-        timeSlot: '04:15 PM',
-        durationMins: 30,
-        scheduledEndMs: now + 20 * 60 * 1000,
-        sourceType: 'WHATSAPP_BOT',
-        status: 'IN_CHAIR',
-      },
-      {
-        id: 'BK-103',
-        clientName: 'Dr. Usman Qureshi',
-        barberName: 'Master Aslam',
-        phone: '+92 333 4567890',
-        service: 'Charcoal Deep Detox Facial',
-        price: 2500,
-        timeSlot: '05:00 PM',
-        durationMins: 45,
-        scheduledEndMs: now + 90 * 60 * 1000,
-        sourceType: 'WHATSAPP_BOT',
-        status: 'CONFIRMED',
-      },
-      {
-        id: 'BK-104',
-        clientName: 'Saad Farooq',
-        barberName: 'Bilal Tariq',
-        phone: '+92 345 6789012',
-        service: 'Haircut + Beard Styling Combo',
-        price: 1800,
-        timeSlot: '05:45 PM',
-        durationMins: 50,
-        scheduledEndMs: now - 30 * 60 * 1000,
-        sourceType: 'WHATSAPP_BOT',
-        status: 'COMPLETED',
-      },
-      {
-        id: 'BK-105',
-        clientName: 'فہد منصور · Fahad Mansoor',
-        barberName: 'Master Aslam',
-        phone: '+92 301 5544332',
-        service: 'ماسٹر ہیئر کٹ اور اسکن فیڈ · Master Haircut & Skin Fade',
-        price: 1200,
-        timeSlot: '06:30 PM',
-        durationMins: 40,
-        scheduledEndMs: now + 135 * 60 * 1000,
-        sourceType: 'WHATSAPP_BOT',
-        reminderReplyLang: 'ur',
-        reminderReplyText: 'جی ہاں، میں شام ساڑھے چھ بجے ماسٹر اسلم کے پاس آ رہا ہوں۔',
-        status: 'CONFIRMED',
-      },
-      {
-        id: 'BK-106',
-        clientName: 'خالد المهيري · Khalid Al-Muhairi',
-        barberName: 'Tariq Mehmood',
-        phone: '+971 50 4411223',
-        service: 'قص شعر وتحديد اللحية · Haircut & Beard Sculpt',
-        price: 1500,
-        timeSlot: '07:15 PM',
-        durationMins: 45,
-        scheduledEndMs: now + 180 * 60 * 1000,
-        sourceType: 'WHATSAPP_BOT',
-        reminderReplyLang: 'ar',
-        reminderReplyText: 'نعم سأحضر الساعة 7:15 مساءً مع الحلاق طارق، شكراً لكم.',
-        status: 'CONFIRMED',
-      },
-    ];
-  });
+  // Authoritative salon bookings are loaded from PostgreSQL; no fabricated sample appointments.
+  const [bookings, setBookings] = useState<BookingRecord[]>([]);
 
   const resolvedCategory: 'MENS' | 'LADIES' =
     conciergeState?.settings?.salonCategory ||
@@ -4176,89 +4090,97 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
       return;
     }
 
-    const newAppts = nextState.appointments.filter((a) => !seenApptIdsRef.current.has(a.id));
-    if (newAppts.length > 0) {
-      newAppts.forEach((a) => seenApptIdsRef.current.add(a.id));
-    }
+    // Booking rows are intentionally not taken from the legacy in-memory concierge store.
+    // The dedicated /bookings endpoint below hydrates the queue from PostgreSQL.
 
-    const serverApptById = new Map(nextState.appointments.map((a) => [a.id, a]));
-    setBookings((prev) => {
-      const updatedExisting = prev
-        .map((b) => {
-          const srv = serverApptById.get(b.id);
-          if (!srv) return b;
-          const nextSlot = srv.appointmentDate ? `${srv.appointmentDate} · ${srv.timeSlot}` : srv.timeSlot;
-          return {
-            ...b,
-            barberName: srv.barberName,
-            chairLabel: barberChairs[srv.barberName] || b.chairLabel,
-            timeSlot: nextSlot,
-            status: srv.status,
-            canceled: srv.canceled || srv.status === 'CANCELED',
-            scheduledEndMs: srv.scheduledEndMs || b.scheduledEndMs,
-          };
-        })
-        .filter((b) => !b.canceled && b.status !== 'CANCELED');
-
-      const existingIds = new Set(updatedExisting.map((b) => b.id));
-      const additions: BookingRecord[] = newAppts
-        .filter((a) => !existingIds.has(a.id) && a.status !== 'CANCELED' && !a.canceled)
-        .map((a) => ({
-          id: a.id,
-          clientName: a.clientName,
-          barberName: a.barberName,
-          phone: a.clientPhone,
-          service: a.bookedDealTitle ? `${a.service} · ${a.bookedDealTitle}` : a.service,
-          price: a.price,
-          timeSlot: a.appointmentDate ? `${a.appointmentDate} · ${a.timeSlot}` : a.timeSlot,
-          durationMins: a.durationMins || 35,
-          scheduledEndMs: a.scheduledEndMs || Date.now() + (a.durationMins || 35) * 60000,
-          sourceType: a.sourceType || 'WHATSAPP_BOT',
-          chairLabel: barberChairs[a.barberName],
-          status: a.status,
-        }));
-      return [...additions, ...updatedExisting];
-    });
-
-    const newInboundLogs = nextState.logs.filter((l) => {
-      if (seenLogIdsRef.current.has(l.id)) return false;
-      seenLogIdsRef.current.add(l.id);
-      return l.direction === 'INBOUND' && (l.eventMetadata || l.module === 'WINBACK_30D');
-    });
-
-    if (newInboundLogs.length > 0) {
-      const latest = newInboundLogs[0];
-      const meta = latest.eventMetadata;
-      const mappedClientLang: ClientChatLang =
-        latest.language === 'ar' ? 'ar' : latest.language === 'ur' || latest.language === 'roman_ur' ? 'ur' : 'en';
-      announceInboundEventLoudly({
-        eventType: meta?.eventType || 'APPOINTMENT_CONFIRMED',
-        clientName: latest.clientName,
-        clientPhone: latest.clientPhone,
-        clientLang: mappedClientLang,
-        barberName: meta?.barberName || barbersList[0] || 'Master Aslam',
-        servicesText: meta?.services || 'Haircut & Beard',
-        timeSlot: meta?.timeSlot || '04:30 PM',
-        rawBody: latest.body,
-      });
-    }
   };
 
-  // Live 6s background poll for incoming WhatsApp confirmations & reminder replies while working hands-free
+  // Keep non-booking salon settings in sync; bookings are loaded separately from PostgreSQL below.
   useEffect(() => {
     if (isFounderInspector) return;
-    const interval = setInterval(() => {
+    const interval = window.setInterval(() => {
       fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/concierge-state`, {
         credentials: 'include',
       })
         .then((res) => (res.ok ? res.json() : null))
         .then((data: SalonConciergeStateResponse | null) => {
-          if (data) processIncomingConciergeState(data);
+          if (data) setConciergeState(data);
         })
         .catch(() => {});
     }, 6000);
-    return () => clearInterval(interval);
-  });
+    return () => window.clearInterval(interval);
+  }, [currentSalon.id, isFounderInspector]);
+
+  // PostgreSQL is the source of truth for customer QR/web bookings shown in the salon queue.
+  useEffect(() => {
+    if (isFounderInspector) return;
+    let cancelled = false;
+    const loadBookings = async () => {
+      try {
+        const res = await fetch(`/api/salons/${encodeURIComponent(currentSalon.id)}/bookings`, {
+          credentials: 'include',
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          ok?: boolean;
+          bookings?: Array<{
+            id: string;
+            bookingRef: string;
+            clientName: string;
+            clientPhone: string;
+            stylistName: string;
+            servicesSnapshot: Array<{ name: string }>;
+            totalPrice: number;
+            totalDurationMins: number;
+            startsAtIso: string;
+            endsAtIso: string;
+            timezoneOffsetHours: number;
+            source: string;
+            status: 'CONFIRMED' | 'IN_CHAIR' | 'COMPLETED' | 'CANCELED' | 'NO_SHOW';
+          }>;
+        };
+        if (cancelled || !data.ok || !Array.isArray(data.bookings)) return;
+        const nextBookings: BookingRecord[] = data.bookings.map((booking) => {
+          const startsAtMs = Date.parse(booking.startsAtIso);
+          const salonLocal = new Date(startsAtMs + Number(booking.timezoneOffsetHours || 0) * 3600000);
+          const hour24 = salonLocal.getUTCHours();
+          const hour12 = hour24 % 12 || 12;
+          const meridiem = hour24 >= 12 ? 'PM' : 'AM';
+          const dateLabel = salonLocal.toISOString().slice(0, 10);
+          const timeLabel = `${String(hour12).padStart(2, '0')}:${String(salonLocal.getUTCMinutes()).padStart(2, '0')} ${meridiem}`;
+          const sourceType: BookingRecord['sourceType'] =
+            booking.source === 'WEB_QR' ? 'WEB_QR' : booking.source === 'WEB_LINK' ? 'WEB_LINK' : 'OWNER_WALKIN';
+          const status: BookingRecord['status'] =
+            booking.status === 'NO_SHOW' ? 'CANCELED' : booking.status;
+          return {
+            id: booking.bookingRef || booking.id,
+            clientName: booking.clientName,
+            barberName: booking.stylistName,
+            phone: booking.clientPhone,
+            service: Array.isArray(booking.servicesSnapshot)
+              ? booking.servicesSnapshot.map((service) => service.name).join(' + ')
+              : 'Salon service',
+            price: Number(booking.totalPrice || 0),
+            timeSlot: `${dateLabel} · ${timeLabel}`,
+            durationMins: Number(booking.totalDurationMins || 35),
+            scheduledEndMs: Date.parse(booking.endsAtIso),
+            sourceType,
+            chairLabel: barberChairs[booking.stylistName],
+            status,
+          };
+        });
+        setBookings(nextBookings);
+      } catch {
+        // Keep the last verified database snapshot; do not replace it with demo data.
+      }
+    };
+    void loadBookings();
+    const interval = window.setInterval(() => void loadBookings(), 6000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [currentSalon.id, isFounderInspector, barberChairs]);
 
   // Auto-Completion Rule: Automatically mark active bookings COMPLETED 15 mins after scheduled end time (unless Flagged or Canceled)
   useEffect(() => {
