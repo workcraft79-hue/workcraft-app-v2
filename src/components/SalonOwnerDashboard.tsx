@@ -5804,10 +5804,10 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                   WEB-FIRST QR STOREFRONT · /s/{resolvedSalonPublicCode}
                 </span>
                 <h2 className="text-sm font-black text-[#F0F6FC]">
-                  Live Customer Web Booking Link &amp; Optional Meta Preview
+                  Live Customer Web Booking Link
                 </h2>
                 <p className="text-xs text-[#8B949E] font-sans">
-                  Clients scan your QR code or open your web link with zero app install and save their returning link directly to their WhatsApp chat.
+                  Clients scan your QR code or open your web link with no app install. They can copy a personal booking link and manage appointments in the browser.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
