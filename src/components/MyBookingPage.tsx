@@ -106,9 +106,11 @@ export const MyBookingPage: React.FC<MyBookingPageProps> = ({ token, onNavigate 
 
   useEffect(() => {
     void loadBooking();
+    // Pause background refresh while the customer is editing a reschedule form.
+    if (isRescheduling) return;
     const refresh = window.setInterval(() => void loadBooking(true), 10000);
     return () => window.clearInterval(refresh);
-  }, [token]);
+  }, [token, isRescheduling]);
 
   useEffect(() => {
     if (!isRescheduling || !booking || !reschedDate) return;
