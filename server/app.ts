@@ -1587,7 +1587,7 @@ export function createApiApp(port = 3000): express.Express {
     }
   );
 
-  // Unofficial third-party WhatsApp gateway webhook removed. Only official Meta Cloud API (/api/whatsapp/meta-webhook) is supported when enabled as an optional paid add-on.
+  // Legacy WhatsApp gateway integrations are retired; public customer booking is browser-first.
 
   // External Cron Trigger: Protected by x-workcraft-webhook-secret
   app.post('/api/salons/:salonId/cron/run', requireWebhookSecret, (req, res) => {
@@ -1683,7 +1683,7 @@ export function createApiApp(port = 3000): express.Express {
     }
   });
 
-  // First-time QR onboarding: saves Name + Phone, sets HttpOnly cookie & returns signed WhatsApp share link
+  // First-time QR onboarding: saves Name + Phone, sets HttpOnly cookie & returns a signed browser share link
   app.post('/api/public/salons/:salonCode/client-profile', async (req, res) => {
     try {
       const ipKey = extractClientIpKey(req.header('x-forwarded-for'), req.ip);
