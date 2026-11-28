@@ -386,19 +386,6 @@ export const MyBookingPage: React.FC<MyBookingPageProps> = ({ token, onNavigate 
                   <span>Call Salon</span>
                 </a>
               )}
-              {cleanWaDigits && (
-                <a
-                  href={`https://wa.me/${cleanWaDigits}?text=${encodeURIComponent(
-                    `Hello ${booking.salonName}, regarding my booking ${booking.bookingRef} on ${booking.appointmentDate} at ${booking.timeSlot}.`
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329] px-4 text-xs font-semibold text-[#3FB950] inline-flex items-center gap-1.5"
-                >
-                  <MessageSquare className="size-3.5" />
-                  <span>Message Salon on WhatsApp</span>
-                </a>
-              )}
             </div>
           </div>
         </section>
