@@ -58,7 +58,6 @@ import { PortalCard } from './PortalCard';
 import { BroadcastTab } from './Tabs/BroadcastTab';
 import { SalonWindowPosterPdf } from './SalonWindowPosterPdf';
 import { SalonRetentionSettingsPanel } from './SalonRetentionSettingsPanel';
-import { CustomerWhatsAppDemoModal } from './CustomerWhatsAppDemoModal';
 import { VoiceRecorder, type RecordedOpusClip, type VoiceRecorderHandle } from './VoiceRecorder';
 import {
   INITIAL_VOICE_THREADS,
@@ -1972,7 +1971,6 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     };
   });
   const [conciergeState, setConciergeState] = useState<SalonConciergeStateResponse | null>(null);
-  const [isLiveWhatsAppDemoOpen, setIsLiveWhatsAppDemoOpen] = useState(false);
   const [leaveStylistName, setLeaveStylistName] = useState('');
   const [leaveDate, setLeaveDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [leaveFullDay, setLeaveFullDay] = useState(true);
@@ -5819,14 +5817,6 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     <span>Loading Booking Link...</span>
                   </span>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setIsLiveWhatsAppDemoOpen(true)}
-                  className="min-h-[46px] rounded-xl bg-[#25D366] hover:bg-[#20BD5A] text-[#0B141A] px-4 py-2 text-xs font-mono font-black uppercase tracking-wide inline-flex items-center gap-2 shadow-lg transition active:scale-95"
-                >
-                  <MessageSquare className="size-4 shrink-0" />
-                  <span>Meta Add-On Preview</span>
-                </button>
               </div>
             </div>
 
@@ -9037,12 +9027,6 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         </div>
       )}
 
-      <CustomerWhatsAppDemoModal
-        salonId={currentSalon.id}
-        salonPublicCode={resolvedSalonPublicCode}
-        isOpen={isLiveWhatsAppDemoOpen}
-        onClose={() => setIsLiveWhatsAppDemoOpen(false)}
-      />
     </div>
   );
 };
