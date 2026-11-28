@@ -2504,9 +2504,17 @@ function assertOwnerOrFounderConciergeActor(
   return normalized;
 }
 
-function generateBookingManagementToken(publicCode: string): string {
+function generateBookingManagementToken(publicCode: string, idempotencyKey?: string): string {
   const encodedCode = Buffer.from(publicCode, 'utf8').toString('base64url');
-  return `wcbt_${encodedCode}.${crypto.randomBytes(24).toString('base64url')}`;
+  const signingSecret = (process.env.JWT_SECRET || '').trim();
+  const secretPart =
+    idempotencyKey && signingSecret
+      ? crypto
+          .createHmac('sha256', signingSecret)
+          .update(`booking-management:${publicCode}:${idempotencyKey}`)
+          .digest('base64url')
+      : crypto.randomBytes(24).toString('base64url');
+  return `wcbt_${encodedCode}.${secretPart}`;
 }
 
 function getWideUtcDayWindow(dateStr: string): { windowStartIso: string; windowEndIso: string } {
@@ -5858,7 +5866,7 @@ function buildIcsCalendarContent(params: {
 function findRawAccessTokenForBooking(bookingId: string, salonId: string, expiresAtMs: number): string {
   const store = ensureStoreLoaded();
   const settings = ensureSalonExists(salonId);
-  const rawAccessToken = generateBookingManagementToken(settings.publicCode);
+  const rawAccessToken = generateBookingManagementToken(settings.publicCode, cleanIdempotencyKey);
   const tokenHash = crypto.createHash('sha256').update(rawAccessToken).digest('hex');
   store.bookingAccessTokens[tokenHash] = {
     bookingId,
@@ -6110,6 +6118,13 @@ export async function createCustomerFlowBooking(
   const serviceNamesSummary = selectedServices.map((s) => s.name).join(' + ');
   const apptId = isDemo
     ? `DEMO-${Date.now().toString().slice(-4)}`
+    : cleanIdempotencyKey
+    ? `BK-WEB-${crypto
+        .createHash('sha256')
+        .update(`${salonId}:${cleanIdempotencyKey}`)
+        .digest('hex')
+        .slice(0, 20)
+        .toUpperCase()}`
     : `BK-WEB-${Date.now().toString().slice(-4)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
 
   let clientId = existingClient?.id || `demo-cli-${Date.now().toString(36)}`;
@@ -6218,6 +6233,46 @@ export async function createCustomerFlowBooking(
           ok: false,
           code: 'DB_UNAVAILABLE',
           error: pgCheck.error,
+        },
+      };
+    }
+
+    if (pgCheck.duplicate) {
+      const existingBooking = await getBookingByAccessTokenFromPostgres(rawAccessToken);
+      if (!existingBooking) {
+        return {
+          statusCode: 503,
+          payload: {
+            ok: false,
+            code: 'DB_UNAVAILABLE',
+            error: 'The existing booking was found, but its secure management link could not be recovered.',
+          },
+        };
+      }
+      const existingAppointment = mapPgBookingToConciergeAppointment(
+        existingBooking,
+        existingBooking.timezoneOffsetHours
+      );
+      const recognizeToken = signCustomerRecognizeToken({
+        salonId,
+        publicCode: existingBooking.salonPublicCode,
+        clientId: existingBooking.clientId,
+      });
+      return {
+        statusCode: 200,
+        recognizeCookieToken: recognizeToken,
+        payload: {
+          ok: true,
+          isDemo: false,
+          appointment: existingAppointment,
+          appliedDeal: null,
+          currencySymbol: existingBooking.currencySymbol,
+          address: existingBooking.address,
+          googleMapsUrl: existingBooking.googleMapsUrl,
+          bookingManagementToken: rawAccessToken,
+          bookingManagementPath: `/b/${rawAccessToken}`,
+          personalReturningShareUrl: `/s/${encodeURIComponent(existingBooking.salonPublicCode)}?c=${encodeURIComponent(recognizeToken)}`,
+          maskedPhone: maskPhoneNumber(existingBooking.clientPhone),
         },
       };
     }
