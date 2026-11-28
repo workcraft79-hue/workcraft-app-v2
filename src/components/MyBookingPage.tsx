@@ -7,7 +7,6 @@ import {
   Clock,
   ExternalLink,
   MapPin,
-  MessageSquare,
   Phone,
   RefreshCw,
   Scissors,
@@ -80,6 +79,8 @@ export const MyBookingPage: React.FC<MyBookingPageProps> = ({ token, onNavigate 
 
   useEffect(() => {
     void loadBooking();
+    const refresh = window.setInterval(() => void loadBooking(), 10000);
+    return () => window.clearInterval(refresh);
   }, [token]);
 
   useEffect(() => {
