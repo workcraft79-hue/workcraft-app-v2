@@ -1919,6 +1919,16 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                     <span>{copy.addToCalendarBtn}</span>
                   </a>
 
+                  {!confirmedResult.isDemo && confirmedResult.bookingManagementPath && (
+                    <a
+                      href={confirmedResult.bookingManagementPath}
+                      className="w-full min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#0891B2] text-[#0D1117] text-xs font-bold flex items-center justify-center gap-2 transition"
+                    >
+                      <Calendar className="size-4" />
+                      <span>Manage Booking &amp; Get Salon Updates</span>
+                    </a>
+                  )}
+
                 </div>
               )}
 
