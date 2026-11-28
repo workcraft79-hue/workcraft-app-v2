@@ -930,7 +930,10 @@ export async function recordBookingInPostgres(params: {
   monthlyLimit: number;
   accessTokenHash: string;
   accessTokenExpiresAtIso: string;
-}): Promise<{ ok: true } | { ok: false; code: 'OVERLAP' | 'DB_UNAVAILABLE'; error: string }> {
+}): Promise<
+  | { ok: true; duplicate?: boolean }
+  | { ok: false; code: 'OVERLAP' | 'DB_UNAVAILABLE'; error: string }
+> {
   const cleanCode = typeof params.salonPublicCode === 'string' ? params.salonPublicCode.trim() : '';
   if (!cleanCode || !cleanCode.startsWith('wc_')) {
     return {
@@ -979,11 +982,27 @@ export async function recordBookingInPostgres(params: {
       });
 
       if (params.idempotencyKey) {
-        const dup = await client.query(
+        const dup = await client.query<{ id: string }>(
           `SELECT id FROM bookings WHERE salon_id = $1 AND idempotency_key = $2 LIMIT 1`,
           [salonId, params.idempotencyKey]
         );
-        if (dup.rows.length > 0) return { ok: true as const };
+        if (dup.rows.length > 0) {
+          const existingBookingId = dup.rows[0].id;
+          // A retried browser request gets the same deterministic token. Ensure that token
+          // remains attached to the already-committed booking without incrementing quota.
+          await setPublicFlowScopedGucs(client, {
+            tokenHash: params.accessTokenHash,
+            bookingId: existingBookingId,
+            idempotencyKey: params.idempotencyKey,
+          });
+          await client.query(
+            `INSERT INTO booking_access_tokens (token_hash, booking_id, salon_id, expires_at)
+             VALUES ($1, $2, $3, $4::timestamptz)
+             ON CONFLICT (token_hash) DO NOTHING`,
+            [params.accessTokenHash, existingBookingId, salonId, params.accessTokenExpiresAtIso]
+          );
+          return { ok: true as const, duplicate: true as const };
+        }
       }
 
       const generatedClientId = `cli-${Date.now().toString(36)}-${Math.random()
