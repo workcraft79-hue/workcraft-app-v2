@@ -11,7 +11,6 @@ import {
   Edit2,
   ExternalLink,
   MapPin,
-  MessageCircle,
   Phone,
   RefreshCw,
   RotateCcw,
@@ -1918,7 +1917,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                 </div>
               )}
 
-              {/* Calendar .ics + Save Link to My WhatsApp */}
+              {/* Calendar download and booking management link */}
               {!isCanceledInFlow && (
                 <div className="space-y-2">
                   <a
