@@ -2051,7 +2051,6 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [isLoudspeakerBoostActive, setIsLoudspeakerBoostActive] = useState(true);
   const [showVoiceLogsDrawer, setShowVoiceLogsDrawer] = useState(false);
   const [showProofLedgerDrawer, setShowProofLedgerDrawer] = useState(false);
-  const [isTestingLoudAlert, setIsTestingLoudAlert] = useState(false);
 
   // Stylist / Barber Top Services Breakdown Selection & Separated Voice Sub-Tab
   const [selectedBarberForServices, setSelectedBarberForServices] = useState<string>('ALL');
@@ -4245,91 +4244,6 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     return () => window.clearInterval(timer);
   });
 
-  const handleTriggerSimulatedVoiceWebhook = async (
-    kind: 'CONFIRMATION' | 'REMINDER_LATE' | 'REMINDER_COMING' | 'BRIDAL_URGENT' | 'DUBAI_AR_CLIENT'
-  ) => {
-    setIsTestingLoudAlert(true);
-    try {
-      if (kind === 'DUBAI_AR_CLIENT') {
-        const arabicRaw =
-          'مرحباً، أؤكد حجز قص شعر وتحديد لحية الساعة 8:00 مساءً مع الحلاق طارق وسأدفع عند الوصول';
-        const targetLangForAsianOwner: VoiceLang = ownerLang === 'en' ? 'en' : 'ur';
-        announceInboundEventLoudly({
-          eventType: 'APPOINTMENT_CONFIRMED',
-          clientName: 'طارق المنصور (Tariq Al-Mansoor · Dubai)',
-          clientPhone: '+971 50 8923411',
-          clientLang: 'ar',
-          barberName: barbersList[1] || barbersList[0] || 'Tariq Mehmood',
-          servicesText: 'Master Haircut & Skin Fade',
-          timeSlot: '08:00 PM',
-          rawBody: arabicRaw,
-          overrideOwnerLang: targetLangForAsianOwner,
-        });
-        setMaintToast(
-          targetLangForAsianOwner === 'ur'
-            ? '🇦🇪 ➔ 🇵🇰 دبئی عربی بکنگ کو اردو میں ترجمہ کر کے اونچی آواز میں چلا دیا گیا۔'
-            : '🇦🇪 ➔ 🇬🇧 Dubai Arabic booking translated cleanly and announced aloud in English.'
-        );
-        setTimeout(() => setMaintToast(null), 5000);
-        return;
-      }
-
-      const payload =
-        kind === 'BRIDAL_URGENT'
-          ? {
-              salonId: currentSalon.id,
-              fromPhone: '+92 333 9911220',
-              clientName: 'Sana Bridal VIP',
-              messageText: 'Urgent Bridal Package & Groom booking with barber Hamza at 6:00 PM',
-            }
-          : kind === 'CONFIRMATION'
-          ? {
-              salonId: currentSalon.id,
-              fromPhone: '+92 300 9988776',
-              clientName: 'Mr. Ali',
-              messageText:
-                'Confirmed! Mr. Ali wants barber Hamza for Haircut and Beard at 4:30 PM',
-            }
-          : kind === 'REMINDER_LATE'
-          ? {
-              salonId: currentSalon.id,
-              fromPhone: '+92 321 7766554',
-              clientName: 'Bilal Ahmed',
-              messageText: 'I am 15 minutes late for my 3:30 PM slot with barber Aslam',
-            }
-          : {
-              salonId: currentSalon.id,
-              fromPhone: '+92 333 4567890',
-              clientName: 'Dr. Usman',
-              messageText: 'Yes I am coming at 5:00 PM with barber Tariq, confirm',
-            };
-
-      const res = await fetch(
-        `/api/salons/${encodeURIComponent(currentSalon.id)}/concierge/simulate`,
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }
-      );
-      if (!res.ok) throw new Error('Webhook failed');
-      const data = (await res.json()) as { state?: SalonConciergeStateResponse };
-      if (data.state) {
-        processIncomingConciergeState(data.state);
-      }
-      setMaintToast(
-        isCounterSleeping
-          ? '🌙 Overnight message queued silently while Counter Sleep is active!'
-          : '🔊 Incoming WhatsApp message received & announced loudly!'
-      );
-      setTimeout(() => setMaintToast(null), 4500);
-    } catch {
-      setMaintToast('Could not trigger announcement test.');
-    } finally {
-      setIsTestingLoudAlert(false);
-    }
-  };
 
   const handleToggleService = (id: string) => {
     setServices((prev) => prev.map((s) => (s.id === id ? { ...s, active: !s.active } : s)));
@@ -7165,40 +7079,9 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
                     </button>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={isTestingLoudAlert}
-                      onClick={() => handleTriggerSimulatedVoiceWebhook('DUBAI_AR_CLIENT')}
-                      className="min-h-[44px] rounded-xl border border-[#06B6D4] bg-[#0D2138] hover:bg-[#132e4d] px-3 py-1.5 text-xs font-mono font-bold text-[#06B6D4] transition disabled:opacity-50"
-                    >
-                      {ui.testDubaiArBtn}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isTestingLoudAlert}
-                      onClick={() => handleTriggerSimulatedVoiceWebhook('CONFIRMATION')}
-                      className="min-h-[44px] rounded-xl border border-[#116329] bg-[#0D3822] hover:bg-[#116329]/50 px-3 py-1.5 text-xs font-mono font-bold text-[#3FB950] transition disabled:opacity-50"
-                    >
-                      🔊 Test: Ali Confirmed Hamza 4:30 PM
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isTestingLoudAlert}
-                      onClick={() => handleTriggerSimulatedVoiceWebhook('REMINDER_LATE')}
-                      className="min-h-[44px] rounded-xl border border-[#9E6A03] bg-[#3B2E0B] hover:bg-[#3B2E0B]/80 px-3 py-1.5 text-xs font-mono font-bold text-[#D29922] transition disabled:opacity-50"
-                    >
-                      🔊 Test: Reminder Reply (15m Late)
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isTestingLoudAlert}
-                      onClick={() => handleTriggerSimulatedVoiceWebhook('BRIDAL_URGENT')}
-                      className="min-h-[44px] rounded-xl border border-[#da3633] bg-[#4C1C1D] hover:bg-[#5e2223] px-3 py-1.5 text-xs font-mono font-bold text-[#F85149] transition disabled:opacity-50"
-                    >
-                      🔊 Test: Urgent Bridal/Groom Alert
-                    </button>
-                  </div>
+                  <p className="text-[11px] text-[#8B949E] font-mono">
+                    Browser booking events are loaded from the salon booking ledger. Live test messages are disabled.
+                  </p>
                 </div>
 
                 <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
