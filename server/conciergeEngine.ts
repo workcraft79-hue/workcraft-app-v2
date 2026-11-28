@@ -5935,7 +5935,11 @@ export async function createCustomerFlowBooking(
 
   // Monthly booking quota guard (750 / 1,500 / 3,000 / >3,000 Custom + grace)
   const usage = getMonthlyUsageSnapshot(salonId);
-  if (!isDemo && usage.billableBookings >= usage.monthlyLimit + usage.graceLimit) {
+  if (
+    !isDemo &&
+    usage.billableBookings >= usage.monthlyLimit + usage.graceLimit &&
+    !(cleanIdempotencyKey && isPostgresConfigured())
+  ) {
     return {
       statusCode: 402,
       payload: {
