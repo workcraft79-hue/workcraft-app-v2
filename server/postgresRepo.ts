@@ -397,10 +397,52 @@ export function createPublicFlowSalonActor(salonId: string): PgActorContext {
   });
 }
 
+type SignedActorClaims = Record<string, string | number>;
+
+const SIGNED_ACTOR_CONTEXTS = new WeakMap<PoolClient, SignedActorClaims>();
+
+function writeSignedActorContext(client: PoolClient, claims: SignedActorClaims): Promise<unknown> {
+  const secretHex = (process.env.PG_ACTOR_CONTEXT_SECRET || '').trim();
+  if (!/^[0-9a-f]{64,}$/.test(secretHex) || secretHex.length % 2 !== 0) {
+    throw new PgContextError(
+      'INVALID_CONTEXT',
+      'PostgreSQL actor signing is not configured for this environment.'
+    );
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const payload = JSON.stringify({
+    v: '1',
+    kid: 'v1',
+    iat: now,
+    exp: now + 300,
+    nonce: crypto.randomBytes(16).toString('hex'),
+    ...claims,
+  });
+  const signature = crypto
+    .createHmac('sha256', Buffer.from(secretHex, 'hex'))
+    .update(payload, 'utf8')
+    .digest('hex');
+
+  return client.query(
+    `SELECT
+       set_config('app.actor_context_payload', $1, true),
+       set_config('app.actor_context_signature', $2, true)`,
+    [payload, signature]
+  );
+}
+
 async function writePgLocalGucs(
   client: PoolClient,
   normalized: NormalizedPgActorContext
 ): Promise<void> {
+  const claims: SignedActorClaims = {
+    role: normalized.role,
+    salonId: normalized.salonId,
+    agentId: normalized.agentId,
+    userId: normalized.userId,
+  };
+  SIGNED_ACTOR_CONTEXTS.set(client, claims);
   await client.query(
     `SELECT
        set_config('app.current_user_role', $1, true),
@@ -409,6 +451,7 @@ async function writePgLocalGucs(
        set_config('app.current_user_id', $4, true)`,
     [normalized.role, normalized.salonId, normalized.agentId, normalized.userId]
   );
+  await writeSignedActorContext(client, claims);
 }
 
 async function setPublicFlowScopedGucs(
@@ -428,6 +471,19 @@ async function setPublicFlowScopedGucs(
       `setPublicFlowScopedGucs cannot be called inside a ${activeRole} transaction.`
     );
   }
+  const claims = SIGNED_ACTOR_CONTEXTS.get(client);
+  if (!claims || claims.role !== 'PUBLIC_FLOW') {
+    throw new PgContextError('INVALID_CONTEXT', 'Signed PUBLIC_FLOW actor context is missing.');
+  }
+  const mergedClaims: SignedActorClaims = { ...claims };
+  if (scope.publicCode !== undefined) mergedClaims.publicCode = cleanActorId(scope.publicCode, 'publicCode');
+  if (scope.tokenHash !== undefined) mergedClaims.tokenHash = cleanActorId(scope.tokenHash, 'tokenHash');
+  if (scope.bookingId !== undefined) mergedClaims.bookingId = cleanActorId(scope.bookingId, 'bookingId');
+  if (scope.clientId !== undefined) mergedClaims.clientId = cleanActorId(scope.clientId, 'clientId');
+  if (scope.idempotencyKey !== undefined) mergedClaims.idempotencyKey = cleanActorId(scope.idempotencyKey, 'idempotencyKey');
+  SIGNED_ACTOR_CONTEXTS.set(client, mergedClaims);
+  await writeSignedActorContext(client, mergedClaims);
+
   const clauses: string[] = [];
   const params: string[] = [];
   if (scope.publicCode !== undefined) {
