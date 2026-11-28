@@ -4177,7 +4177,17 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           const dateLabel = salonLocal.toISOString().slice(0, 10);
           const timeLabel = `${String(hour12).padStart(2, '0')}:${String(salonLocal.getUTCMinutes()).padStart(2, '0')} ${meridiem}`;
           const sourceType: BookingRecord['sourceType'] =
-            booking.source === 'WEB_QR' ? 'WEB_QR' : booking.source === 'WEB_LINK' ? 'WEB_LINK' : 'OWNER_WALKIN';
+            booking.source === 'WEB_QR'
+              ? 'WEB_QR'
+              : booking.source === 'WEB_LINK'
+              ? 'WEB_LINK'
+              : booking.source === 'FB_AD'
+              ? 'FB_AD'
+              : booking.source === 'IG_AD'
+              ? 'IG_AD'
+              : booking.source === 'TIKTOK_AD'
+              ? 'TIKTOK_AD'
+              : 'OWNER_WALKIN';
           const status: BookingRecord['status'] =
             booking.status === 'NO_SHOW' ? 'CANCELED' : booking.status;
           return {
