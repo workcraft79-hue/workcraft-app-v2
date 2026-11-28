@@ -79,7 +79,6 @@ interface FlowCopy {
   firstTimeSubtitle: string;
   saveDetailsBtn: string;
   savingDetailsBtn: string;
-  saveWhatsappLinkBtn: string;
   installAppBtn: string;
   appInstalledMsg: string;
   installManualHint: string;
@@ -161,7 +160,6 @@ const EN_FLOW_COPY: FlowCopy = {
     'Enter your full name and mobile number once to recognize you on your next visit.',
   saveDetailsBtn: 'Save My Details',
   savingDetailsBtn: 'Saving...',
-  saveWhatsappLinkBtn: 'Save Link to My WhatsApp',
   installAppBtn: 'Install Salon App',
   appInstalledMsg: 'Salon app prompt triggered. Add to your home screen for 1-tap booking.',
   installManualHint:
@@ -236,7 +234,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     selectBarber: '4. Dastyab Barber Chunein',
     yourDetails: '5. Aap Ki Maloomat',
     yourNamePlaceholder: 'Apna mukammal naam likhein',
-    yourPhoneLabel: 'WhatsApp Number',
+    yourPhoneLabel: 'Mobile Number',
     returningWelcome: 'Khush amdeed',
     howCanIHelp: 'Aaj hum aap ki kya madad kar sakte hain?',
     menuBookBtn: '1. Book Appointment',
@@ -251,7 +249,6 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
       'Apna mukammal naam aur mobile number ek dafa save karein taake agli baar aap ko pehchana ja sake.',
     saveDetailsBtn: 'Maloomat Mehfooz Karein',
     savingDetailsBtn: 'Mehfooz ho raha hai...',
-    saveWhatsappLinkBtn: 'Apna Link WhatsApp Par Save Karein',
     installAppBtn: 'Salon App Install Karein',
     appInstalledMsg: 'Home screen par 1-tap booking ke liye salon app shamil karein.',
     installManualHint:
@@ -330,7 +327,6 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
       'اپنا نام اور واٹس ایپ نمبر ایک بار محفوظ کریں تاکہ اگلی بار خودکار شناخت ہو سکے۔',
     saveDetailsBtn: 'تفصیلات محفوظ کریں',
     savingDetailsBtn: 'محفوظ ہو رہا ہے...',
-    saveWhatsappLinkBtn: 'میرا لنک واٹس ایپ میں محفوظ کریں',
     installAppBtn: 'سیلون ایپ انسٹال کریں',
     appInstalledMsg: 'فوری بکنگ کے لیے اپنی ہوم اسکرین پر سیلون ایپ شامل کریں۔',
     installManualHint:
@@ -417,7 +413,6 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     firstTimeSubtitle: 'أدخل اسمك ورقم هاتفك المحمول مرة واحدة ليتم التعرف عليك في زيارتك القادمة.',
     saveDetailsBtn: 'حفظ بياناتي',
     savingDetailsBtn: 'جاري الحفظ...',
-    saveWhatsappLinkBtn: 'احفظ الرابط في الواتساب الخاص بي',
     installAppBtn: 'تثبيت تطبيق الصالون',
     appInstalledMsg: 'أضف الصالون إلى شاشتك الرئيسية للحجز بضغطة واحدة.',
     installManualHint:
@@ -500,7 +495,6 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
       'Inserisci nome e numero di cellulare per essere riconosciuto alla prossima visita.',
     saveDetailsBtn: 'Salva i Miei Dati',
     savingDetailsBtn: 'Salvataggio...',
-    saveWhatsappLinkBtn: 'Salva Link su WhatsApp',
     installAppBtn: 'Installa App Salone',
     summaryTitle: 'Riepilogo Prenotazione',
     confirmBtn: 'Conferma Appuntamento',
@@ -559,7 +553,6 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
       'Укажите имя и номер мобильного телефона, чтобы мы узнавали вас при следующем посещении.',
     saveDetailsBtn: 'Сохранить данные',
     savingDetailsBtn: 'Сохранение...',
-    saveWhatsappLinkBtn: 'Сохранить ссылку в WhatsApp',
     installAppBtn: 'Установить приложение салона',
     summaryTitle: 'Детали записи',
     confirmBtn: 'Подтвердить запись',
@@ -615,7 +608,6 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     rebookLastBtn: 'Reprendre le dernier rendez-vous',
     firstTimeTitle: 'Première visite ? Enregistrez votre profil',
     saveDetailsBtn: 'Enregistrer mes infos',
-    saveWhatsappLinkBtn: 'Enregistrer le lien sur WhatsApp',
     installAppBtn: 'Installer l’App du Salon',
     confirmBtn: 'Confirmer le Rendez-vous',
     changeBtn: 'Modifier',
@@ -655,7 +647,6 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     rebookLastBtn: 'Letzten Besuch erneut buchen',
     firstTimeTitle: 'Erster Besuch? Profil speichern',
     saveDetailsBtn: 'Meine Daten speichern',
-    saveWhatsappLinkBtn: 'Link in WhatsApp speichern',
     installAppBtn: 'Salon-App installieren',
     confirmBtn: 'Termin bestätigen',
     changeBtn: 'Ändern',
@@ -696,7 +687,6 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     rebookLastBtn: 'Repetir última visita',
     firstTimeTitle: '¿Primera visita? Guarda tu perfil',
     saveDetailsBtn: 'Guardar mis datos',
-    saveWhatsappLinkBtn: 'Guardar enlace en WhatsApp',
     installAppBtn: 'Instalar App del Salón',
     confirmBtn: 'Confirmar Cita',
     changeBtn: 'Cambiar',
@@ -2186,7 +2176,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                 </div>
               )}
 
-              {/* First-Time QR Onboarding Card — Strictly Full Name + WhatsApp Number (No Birthday) */}
+              {/* First-Time QR Onboarding Card — Full Name + Mobile Number */}
               {!isDemo && !config.returningClient && (
                 <div className="rounded-xl border border-[#30363D] bg-[#1F242D] p-3.5 space-y-2.5">
                   <div>
@@ -2224,7 +2214,7 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                 </div>
               )}
 
-              {/* After saving first-time details: Save Link to My WhatsApp + Install Salon App */}
+              {/* After saving first-time details: Copy Booking Link + Install Salon App */}
               {!isDemo && personalShareUrl && typeof window !== 'undefined' && !confirmedResult && (
                 <div className="rounded-xl border border-[#06B6D4]/50 bg-[#0D2138]/70 p-3 space-y-2">
                   <p className="text-[11px] text-[#7DD3FC]">{copy.detailsSavedMsg}</p>
