@@ -243,10 +243,6 @@ export const MyBookingPage: React.FC<MyBookingPageProps> = ({ token, onNavigate 
   const canReschedule = booking.status === 'CONFIRMED';
   const canCancel = booking.status === 'CONFIRMED' || booking.status === 'IN_CHAIR';
 
-  const cleanWaDigits = (booking.publicWhatsappPhone || booking.publicContactPhone || '').replace(
-    /[^\d]/g,
-    ''
-  );
 
   return (
     <main className="min-h-screen bg-[#0D1117] text-[#F0F6FC] flex flex-col items-center py-6 px-4">
