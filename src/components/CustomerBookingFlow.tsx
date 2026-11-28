@@ -146,7 +146,7 @@ const EN_FLOW_COPY: FlowCopy = {
   selectBarber: '4. Available Barber',
   yourDetails: '5. Your Details',
   yourNamePlaceholder: 'Enter your full name',
-  yourPhoneLabel: 'WhatsApp Number',
+  yourPhoneLabel: 'Mobile Number',
   returningWelcome: 'Welcome back',
   howCanIHelp: 'How can I help you today?',
   menuBookBtn: '1. Book Appointment',
@@ -159,7 +159,7 @@ const EN_FLOW_COPY: FlowCopy = {
   rebookLastBtn: 'Rebook Last Visit',
   firstTimeTitle: 'First-Time Visit? Save Your Profile',
   firstTimeSubtitle:
-    'Enter your full name and WhatsApp number once to recognize you automatically next time.',
+    'Enter your full name and mobile number once to recognize you on your next visit.',
   saveDetailsBtn: 'Save My Details',
   savingDetailsBtn: 'Saving...',
   saveWhatsappLinkBtn: 'Save Link to My WhatsApp',
@@ -168,7 +168,7 @@ const EN_FLOW_COPY: FlowCopy = {
   installManualHint:
     'In your browser menu, tap "Add to Home Screen" or "Install App" for instant 1-tap access.',
   detailsSavedMsg:
-    'Profile saved. Keep your personal booking link in WhatsApp or install this salon app:',
+    'Profile saved. Copy your personal booking link or install this salon app:',
   summaryTitle: 'Booking Summary',
   clientNameRow: 'Client Name',
   phoneRow: 'Phone Number',
@@ -249,7 +249,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     rebookLastBtn: 'Pichli Service Dobara Book Karein',
     firstTimeTitle: 'Pehli Martaba Tashreef Laye Hain?',
     firstTimeSubtitle:
-      'Apna mukammal naam aur WhatsApp number ek dafa save karein taake agli baar khud-ba-khud pehchan ho sake.',
+      'Apna mukammal naam aur mobile number ek dafa save karein taake agli baar aap ko pehchana ja sake.',
     saveDetailsBtn: 'Maloomat Mehfooz Karein',
     savingDetailsBtn: 'Mehfooz ho raha hai...',
     saveWhatsappLinkBtn: 'Apna Link WhatsApp Par Save Karein',
@@ -258,7 +258,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     installManualHint:
       'Browser menu mein "Add to Home Screen" ya "Install App" par click karein.',
     detailsSavedMsg:
-      'Profile mehfooz ho gayi. Apna zaati link WhatsApp par save karein ya app install karein:',
+      'Profile mehfooz ho gayi. Apna zaati booking link copy karein ya salon app install karein:',
     summaryTitle: 'Booking Summary',
     clientNameRow: 'Client Naam',
     phoneRow: 'Phone Number',
@@ -315,7 +315,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     selectBarber: '4. دستیاب باربر منتخب کریں',
     yourDetails: '5. آپ کی تفصیلات',
     yourNamePlaceholder: 'اپنا مکمل نام لکھیں',
-    yourPhoneLabel: 'واٹس ایپ نمبر',
+    yourPhoneLabel: 'موبائل نمبر',
     returningWelcome: 'خوش آمدید',
     howCanIHelp: 'آج ہم آپ کی کیا مدد کر سکتے ہیں؟',
     menuBookBtn: '1. اپائنٹمنٹ بک کریں',
@@ -403,7 +403,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     selectBarber: '4. الحلاق المتاح',
     yourDetails: '5. بياناتك',
     yourNamePlaceholder: 'أدخل اسمك الكامل',
-    yourPhoneLabel: 'رقم الواتساب',
+    yourPhoneLabel: 'رقم الهاتف',
     returningWelcome: 'أهلاً بعودتك',
     howCanIHelp: 'كيف يمكننا خدمتك اليوم؟',
     menuBookBtn: '1. حجز موعد',
@@ -415,7 +415,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     visitsLabel: 'زيارات',
     rebookLastBtn: 'إعادة حجز الزيارة السابقة',
     firstTimeTitle: 'زيارتك الأولى؟ احفظ بياناتك الآن',
-    firstTimeSubtitle: 'أدخل اسمك ورقم الواتساب مرة واحدة ليتم التعرف عليك تلقائياً في المرة القادمة.',
+    firstTimeSubtitle: 'أدخل اسمك ورقم هاتفك المحمول مرة واحدة ليتم التعرف عليك في زيارتك القادمة.',
     saveDetailsBtn: 'حفظ بياناتي',
     savingDetailsBtn: 'جاري الحفظ...',
     saveWhatsappLinkBtn: 'احفظ الرابط في الواتساب الخاص بي',
@@ -423,7 +423,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     appInstalledMsg: 'أضف الصالون إلى شاشتك الرئيسية للحجز بضغطة واحدة.',
     installManualHint:
       'من قائمة المتصفح، اختر "إضافة إلى الشاشة الرئيسية" أو "تثبيت التطبيق".',
-    detailsSavedMsg: 'تم حفظ ملفك. احفظ رابط الحجز في الواتساب أو ثبّت تطبيق الصالون:',
+    detailsSavedMsg: 'تم حفظ ملفك. انسخ رابط الحجز الشخصي أو ثبّت تطبيق الصالون:',
     summaryTitle: 'ملخص الحجز',
     clientNameRow: 'اسم العميل',
     phoneRow: 'رقم الهاتف',
@@ -486,7 +486,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     selectBarber: '4. Barbiere Disponibile',
     yourDetails: '5. I Tuoi Dati',
     yourNamePlaceholder: 'Inserisci il tuo nome completo',
-    yourPhoneLabel: 'Numero WhatsApp',
+    yourPhoneLabel: 'Numero di cellulare',
     returningWelcome: 'Bentornato',
     howCanIHelp: 'Come posso aiutarti oggi?',
     menuBookBtn: '1. Prenota Appuntamento',
@@ -498,7 +498,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     rebookLastBtn: 'Riprenota Ultima Visita',
     firstTimeTitle: 'Prima Visita? Salva il Profilo',
     firstTimeSubtitle:
-      'Inserisci nome e numero WhatsApp una volta per essere riconosciuto automaticamente.',
+      'Inserisci nome e numero di cellulare per essere riconosciuto alla prossima visita.',
     saveDetailsBtn: 'Salva i Miei Dati',
     savingDetailsBtn: 'Salvataggio...',
     saveWhatsappLinkBtn: 'Salva Link su WhatsApp',
@@ -545,7 +545,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     selectBarber: '4. Свободный мастер',
     yourDetails: '5. Ваши данные',
     yourNamePlaceholder: 'Введите полное имя',
-    yourPhoneLabel: 'Номер WhatsApp',
+    yourPhoneLabel: 'Номер мобильного телефона',
     returningWelcome: 'С возвращением',
     howCanIHelp: 'Чем мы можем помочь вам сегодня?',
     menuBookBtn: '1. Записаться на приём',
@@ -557,7 +557,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     rebookLastBtn: 'Повторить прошлый визит',
     firstTimeTitle: 'Первый визит? Сохраните профиль',
     firstTimeSubtitle:
-      'Укажите имя и номер WhatsApp один раз, чтобы мы узнавали вас автоматически.',
+      'Укажите имя и номер мобильного телефона, чтобы мы узнавали вас при следующем посещении.',
     saveDetailsBtn: 'Сохранить данные',
     savingDetailsBtn: 'Сохранение...',
     saveWhatsappLinkBtn: 'Сохранить ссылку в WhatsApp',
@@ -605,7 +605,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     selectBarber: '4. Coiffeur Disponible',
     yourDetails: '5. Vos Coordonnées',
     yourNamePlaceholder: 'Entrez votre nom complet',
-    yourPhoneLabel: 'Numéro WhatsApp',
+    yourPhoneLabel: 'Numéro de téléphone mobile',
     returningWelcome: 'Bon retour',
     howCanIHelp: 'Comment puis-je vous aider aujourd’hui ?',
     menuBookBtn: '1. Prendre Rendez-vous',
@@ -645,7 +645,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     selectBarber: '4. Verfügbarer Barber',
     yourDetails: '5. Ihre Daten',
     yourNamePlaceholder: 'Vollständigen Namen eingeben',
-    yourPhoneLabel: 'WhatsApp-Nummer',
+    yourPhoneLabel: 'Mobilnummer',
     returningWelcome: 'Willkommen zurück',
     howCanIHelp: 'Wie kann ich Ihnen heute helfen?',
     menuBookBtn: '1. Termin buchen',
@@ -686,7 +686,7 @@ const FLOW_COPY: Record<ClientPreferredLang, FlowCopy> = {
     selectBarber: '4. Barbero Disponible',
     yourDetails: '5. Tus Datos',
     yourNamePlaceholder: 'Ingresa tu nombre completo',
-    yourPhoneLabel: 'Número de WhatsApp',
+    yourPhoneLabel: 'Número de móvil',
     returningWelcome: 'Bienvenido de nuevo',
     howCanIHelp: '¿Cómo puedo ayudarte hoy?',
     menuBookBtn: '1. Reservar Cita',
@@ -1637,11 +1637,6 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
           const sharePath = confirmedResult.personalReturningShareUrl || personalShareUrl;
           const fullShareUrl =
             sharePath && typeof window !== 'undefined' ? `${window.location.origin}${sharePath}` : sharePath || '';
-          const waPersonalHref = fullShareUrl
-            ? `https://wa.me/?text=${encodeURIComponent(
-                `${config.salonName} — My Personal 2-Tap Booking Link: ${fullShareUrl}`
-              )}`
-            : '';
           const icsHref = buildBookingIcsDataUrl({
             bookingId: confirmedResult.appointment.id,
             salonName: config.salonName,
@@ -1935,17 +1930,6 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                     <span>{copy.addToCalendarBtn}</span>
                   </a>
 
-                  {waPersonalHref && (
-                    <a
-                      href={waPersonalHref}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full min-h-[44px] rounded-xl bg-[#06B6D4] hover:bg-[#0891B2] text-[#0D1117] text-xs font-bold flex items-center justify-center gap-2 transition"
-                    >
-                      <MessageCircle className="size-4" />
-                      <span>{copy.saveWhatsappLinkBtn}</span>
-                    </a>
-                  )}
                 </div>
               )}
 
@@ -2246,17 +2230,6 @@ export const CustomerBookingFlow: React.FC<CustomerBookingFlowProps> = ({
                 <div className="rounded-xl border border-[#06B6D4]/50 bg-[#0D2138]/70 p-3 space-y-2">
                   <p className="text-[11px] text-[#7DD3FC]">{copy.detailsSavedMsg}</p>
                   <div className="flex items-center gap-2">
-                    <a
-                      href={`https://wa.me/?text=${encodeURIComponent(
-                        `${config.salonName} — My Personal 2-Tap Booking Link: ${window.location.origin}${personalShareUrl}`
-                      )}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 min-h-[38px] rounded-lg bg-[#06B6D4] hover:bg-[#0891B2] px-3 text-xs font-bold text-[#0D1117] flex items-center justify-center gap-1.5 transition"
-                    >
-                      <MessageCircle className="size-3.5" />
-                      <span>{copy.saveWhatsappLinkBtn}</span>
-                    </a>
                     <button
                       type="button"
                       onClick={() =>
