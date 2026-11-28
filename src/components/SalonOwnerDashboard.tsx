@@ -1982,6 +1982,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
   const [savingLeave, setSavingLeave] = useState(false);
   const seenLogIdsRef = useRef<Set<string>>(new Set());
   const seenApptIdsRef = useRef<Set<string>>(new Set());
+  const seenBookingAuditIdsRef = useRef<Set<string>>(new Set());
+  const hasHydratedBookingAuditRef = useRef<boolean>(false);
   const hasHydratedConciergeRef = useRef<boolean>(false);
 
   // Query 1: Top-Right Upgrade Modal & Payment Details Input
@@ -2534,6 +2536,8 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
     hasHydratedConciergeRef.current = false;
     seenLogIdsRef.current = new Set();
     seenApptIdsRef.current = new Set();
+    seenBookingAuditIdsRef.current = new Set();
+    hasHydratedBookingAuditRef.current = false;
 
     let cancelled = false;
     const params = new URLSearchParams({
@@ -4123,6 +4127,13 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
         if (!res.ok) return;
         const data = (await res.json()) as {
           ok?: boolean;
+          auditLog?: Array<{
+            id: string;
+            actorType: 'CUSTOMER' | 'OWNER' | 'SYSTEM';
+            action: 'CREATED' | 'RESCHEDULED' | 'CANCELED' | 'IN_CHAIR' | 'COMPLETED';
+            note: string;
+            createdAt: string;
+          }>;
           bookings?: Array<{
             id: string;
             bookingRef: string;
@@ -4140,6 +4151,25 @@ export const SalonOwnerDashboard: React.FC<SalonOwnerDashboardProps> = ({
           }>;
         };
         if (cancelled || !data.ok || !Array.isArray(data.bookings)) return;
+
+        const auditRows = Array.isArray(data.auditLog) ? data.auditLog : [];
+        if (!hasHydratedBookingAuditRef.current) {
+          auditRows.forEach((entry) => seenBookingAuditIdsRef.current.add(entry.id));
+          hasHydratedBookingAuditRef.current = true;
+        } else {
+          const newCustomerEvents = auditRows.filter(
+            (entry) =>
+              entry.actorType === 'CUSTOMER' &&
+              ['CREATED', 'RESCHEDULED', 'CANCELED'].includes(entry.action) &&
+              !seenBookingAuditIdsRef.current.has(entry.id)
+          );
+          auditRows.forEach((entry) => seenBookingAuditIdsRef.current.add(entry.id));
+          if (newCustomerEvents.length > 0) {
+            const latest = newCustomerEvents[0];
+            setMaintToast(`Customer booking update · ${latest.note}`);
+          }
+        }
+
         const nextBookings: BookingRecord[] = data.bookings.map((booking) => {
           const startsAtMs = Date.parse(booking.startsAtIso);
           const salonLocal = new Date(startsAtMs + Number(booking.timezoneOffsetHours || 0) * 3600000);
