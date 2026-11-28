@@ -94,6 +94,7 @@ import {
   assertProductionDatabaseReady,
   createPublicFlowSalonActor,
   derivePgActorFromAuthUser,
+  listSalonBookingsFromPostgres,
   syncSalonStylistsInPostgres,
 } from './postgresRepo.js';
 import {
@@ -1445,6 +1446,32 @@ export function createApiApp(port = 3000): express.Express {
   // ===========================================================================
   // WHATSAPP CONCIERGE & RETENTION AUTOMATION ENDPOINTS (TENANT-ISOLATED)
   // ===========================================================================
+  app.get(
+    '/api/salons/:salonId/bookings',
+    requireAuth,
+    requireSalonTenantAccess(true),
+    async (req: AuthenticatedRequest, res) => {
+      try {
+        const { salonId } = req.params;
+        const actor = derivePgActorFromAuthUser(req.authUser!, { targetSalonId: salonId });
+        const result = await listSalonBookingsFromPostgres(salonId, actor);
+        if (!result) {
+          return res.status(503).json({
+            ok: false,
+            error: 'Persistent booking storage is unavailable. Salon bookings cannot be loaded.',
+          });
+        }
+        return res.json({ ok: true, ...result });
+      } catch (err) {
+        if (err instanceof PgContextError) {
+          return res.status(403).json({ ok: false, error: err.message });
+        }
+        console.error('Failed to load authoritative salon bookings:', err);
+        return res.status(503).json({ ok: false, error: 'Could not load salon bookings from persistent storage.' });
+      }
+    }
+  );
+
   app.get(
     '/api/salons/:salonId/concierge-state',
     requireAuth,
