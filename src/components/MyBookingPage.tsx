@@ -55,8 +55,8 @@ export const MyBookingPage: React.FC<MyBookingPageProps> = ({ token, onNavigate 
   const [cancelReason, setCancelReason] = useState('');
   const [submittingCancel, setSubmittingCancel] = useState(false);
 
-  const loadBooking = async () => {
-    setLoading(true);
+  const loadBooking = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/public/bookings/${encodeURIComponent(token)}`);
@@ -73,13 +73,13 @@ export const MyBookingPage: React.FC<MyBookingPageProps> = ({ token, onNavigate 
     } catch {
       setError('Could not load your booking details. Please try again.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     void loadBooking();
-    const refresh = window.setInterval(() => void loadBooking(), 10000);
+    const refresh = window.setInterval(() => void loadBooking(true), 10000);
     return () => window.clearInterval(refresh);
   }, [token]);
 
