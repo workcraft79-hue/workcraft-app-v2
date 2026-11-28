@@ -30,7 +30,6 @@ import type {
   SalonConciergeStateResponse,
   SalonPackageTier,
 } from '../types/concierge';
-import { CustomerWhatsAppDemoModal } from './CustomerWhatsAppDemoModal';
 
 interface SalonRetentionSettingsPanelProps {
   salonId: string;
@@ -273,11 +272,7 @@ export const SalonRetentionSettingsPanel: React.FC<SalonRetentionSettingsPanelPr
     routedAction: string;
     replyText: string;
     replyDir: 'ltr' | 'rtl';
-  } | null>(null);
-
-  // Phase 1: Customer WhatsApp Experience Live Demo & Deals Manager State
-  const [isLiveDemoOpen, setIsLiveDemoOpen] = useState(false);
-  const [dealTitle, setDealTitle] = useState('');
+  } | null>(null);  const [dealTitle, setDealTitle] = useState('');
   const [dealDesc, setDealDesc] = useState('');
   const [dealDiscountType, setDealDiscountType] = useState<DealDiscountType>('PCT');
   const [dealDiscountValue, setDealDiscountValue] = useState(20);
