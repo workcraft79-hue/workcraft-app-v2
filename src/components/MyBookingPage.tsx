@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Calendar,
@@ -40,6 +40,11 @@ export const MyBookingPage: React.FC<MyBookingPageProps> = ({ token, onNavigate 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionBanner, setActionBanner] = useState<string | null>(null);
+  const lastBookingSnapshotRef = useRef<{
+    status: BookingManagementPayload['status'];
+    appointmentDate: string;
+    timeSlot: string;
+  } | null>(null);
 
   // Reschedule panel state
   const [isRescheduling, setIsRescheduling] = useState(false);
@@ -66,6 +71,28 @@ export const MyBookingPage: React.FC<MyBookingPageProps> = ({ token, onNavigate 
         setBooking(null);
         return;
       }
+      const previous = lastBookingSnapshotRef.current;
+      if (
+        previous &&
+        (previous.status !== data.status ||
+          previous.appointmentDate !== data.appointmentDate ||
+          previous.timeSlot !== data.timeSlot)
+      ) {
+        const updates: string[] = [];
+        if (previous.status !== data.status) updates.push(`status is now ${STATUS_LABELS[data.status].label}`);
+        if (
+          previous.appointmentDate !== data.appointmentDate ||
+          previous.timeSlot !== data.timeSlot
+        ) {
+          updates.push(`new time: ${data.appointmentDate} at ${data.timeSlot}`);
+        }
+        setActionBanner(`Salon update: your booking has been updated — ${updates.join('; ')}.`);
+      }
+      lastBookingSnapshotRef.current = {
+        status: data.status,
+        appointmentDate: data.appointmentDate,
+        timeSlot: data.timeSlot,
+      };
       setBooking(data);
       setReschedDate(data.appointmentDate);
       setSelectedTimeSlot(data.timeSlot);
