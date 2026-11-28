@@ -995,12 +995,23 @@ export async function recordBookingInPostgres(params: {
             bookingId: existingBookingId,
             idempotencyKey: params.idempotencyKey,
           });
-          await client.query(
-            `INSERT INTO booking_access_tokens (token_hash, booking_id, salon_id, expires_at)
-             VALUES ($1, $2, $3, $4::timestamptz)
-             ON CONFLICT (token_hash) DO NOTHING`,
-            [params.accessTokenHash, existingBookingId, salonId, params.accessTokenExpiresAtIso]
+          const existingToken = await client.query<{ booking_id: string }>(
+            `SELECT booking_id
+             FROM booking_access_tokens
+             WHERE token_hash = $1 AND salon_id = $2
+             LIMIT 1`,
+            [params.accessTokenHash, salonId]
           );
+          if (
+            existingToken.rows.length === 0 ||
+            existingToken.rows[0].booking_id !== existingBookingId
+          ) {
+            return {
+              ok: false as const,
+              code: 'DB_UNAVAILABLE' as const,
+              error: 'The original booking exists but its secure management token could not be verified.',
+            };
+          }
           return { ok: true as const, duplicate: true as const };
         }
       }
