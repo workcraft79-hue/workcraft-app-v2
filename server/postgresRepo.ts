@@ -1066,6 +1066,19 @@ export async function recordBookingInPostgres(params: {
         ]
       );
 
+      // Persist an in-app salon counter event in the same transaction as the booking.
+      // The PUBLIC_FLOW RLS policy only permits this event for the scoped booking ID.
+      await client.query(
+        `INSERT INTO counter_notifications (salon_id, booking_id, event_type, title, speech_text)
+         VALUES ($1, $2, 'NEW_BOOKING', $3, $4)`,
+        [
+          salonId,
+          committedBookingUuid,
+          `New online booking: ${params.clientName}`,
+          `${params.clientName} booked ${params.stylistName} for ${params.startsAtIso}.`,
+        ]
+      );
+
       return { ok: true as const };
     });
   } catch (err: unknown) {
